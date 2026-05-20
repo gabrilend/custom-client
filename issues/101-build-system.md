@@ -1,0 +1,76 @@
+# 101 — Build System
+
+## Current behavior
+
+There is no build system. The project is a directory with documentation and
+a vision note. `make`, `cmake`, `./build.sh` all fail because nothing is
+configured.
+
+## Intended behavior
+
+From a clean checkout, a new collaborator can run
+
+```
+scripts/build.sh
+```
+
+and end up with a `build/debug/custom-client` binary that prints its
+version and exits 0. They can run `scripts/test.sh` and watch the (empty
+for now) test suite pass. They can run `scripts/clean.sh` and the tree
+returns to checkout state.
+
+The build:
+
+- Uses CMake ≥ 3.20.
+- Targets C11 with `-Wall -Wextra -Wpedantic -Werror`.
+- Defaults to Debug + AddressSanitizer + UBSan; `--release` switches modes.
+- Discovers SDL3, OpenSSL, LuaJIT via `find_package`. Failure to find any
+  one of them prints an actionable apt/dnf/pacman install hint and exits
+  non-zero.
+- Builds vendored deps (`libs/stormlib`, `libs/miniz`, `libs/glad`) as
+  CMake subdirectories.
+- Produces one executable: `custom-client`. Plus one test executable per
+  subsystem under `build/<cfg>/tests/`.
+
+See [docs/008-build-system.md](../docs/008-build-system.md) for the
+overall plan; this issue implements it.
+
+## Suggested implementation steps
+
+1. Write `CMakeLists.txt` at the project root: project declaration,
+   options (`USE_ASAN`, `USE_UBSAN`, `BUILD_TESTS`), global compile flags.
+2. Add `cmake/FindLuaJIT.cmake` (LuaJIT does not ship a CMake config).
+3. Vendor StormLib + miniz + glad2 under `libs/`. Add `add_subdirectory()`
+   calls.
+4. Create `src/CMakeLists.txt`. For Phase 1 the executable is a stub
+   `main()` that prints `custom-client v0.0.0` and exits.
+5. Create `tests/CMakeLists.txt`. Empty for now — gets populated as
+   subsystems land.
+6. Write `scripts/build.sh`, `scripts/clean.sh`, `scripts/test.sh`,
+   `scripts/run.sh`, `scripts/format.sh`. Each script: hard-coded `${DIR}`
+   at the top, `--dir <path>` override, `--help`, everything relative to
+   `${DIR}`. One bash command per line per CLAUDE.md.
+7. Write `.gitignore` (build/, tmp/, assets/, `*.o`, IDE detritus).
+8. Write `.clang-format` and `.editorconfig`.
+
+## Acceptance
+
+- `scripts/build.sh` succeeds on a clean checkout (assuming SDL3 / OpenSSL
+  / LuaJIT are installed).
+- `build/debug/custom-client --version` prints `custom-client 0.0.0` and
+  exits 0.
+- `scripts/test.sh` prints `0 tests / 0 failures` and exits 0.
+- The build emits zero warnings.
+
+## Stress markers
+
+This is the kind of issue where it's tempting to over-engineer the
+configuration system before any code exists to configure. Keep it small:
+a working build that future issues can extend is worth more than a
+"complete" build system that nothing uses yet.
+
+## Related
+
+- [docs/002-technology-stack.md](../docs/002-technology-stack.md)
+- [docs/008-build-system.md](../docs/008-build-system.md)
+- Blocks: 102, 103, 104, 105, 106, 107.

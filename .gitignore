@@ -1,0 +1,13 @@
+build/
+tmp
+assets/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+.cache/
+compile_commands.json
+.vscode/
+.idea/
+*.swp
