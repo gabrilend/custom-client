@@ -19,7 +19,7 @@ The streamer never touches GL state directly — it stages bytes into
 mapped buffers and the main thread issues the upload. This keeps GL on a single
 context and avoids the shared-context dance.
 
-Audio runs on whatever thread SDL3's audio callback chooses; mixing happens
+Audio runs on whatever thread raylib's audio module chooses; mixing happens
 in a pre-allocated ring buffer fed by the main thread.
 
 ## Layering (low → high)
@@ -36,7 +36,7 @@ in a pre-allocated ring buffer fed by the main thread.
 +----------------------------------------------------------+
 |  MPQ | DBC | BLP | M2 | WMO | ADT | crypto | sockets     |
 +----------------------------------------------------------+
-|     SDL3   |   OpenGL 3.3   |   OpenSSL   |   StormLib   |
+|    raylib (+rlgl) | OpenSSL  |  StormLib  |  LuaJIT     |
 +----------------------------------------------------------+
 ```
 

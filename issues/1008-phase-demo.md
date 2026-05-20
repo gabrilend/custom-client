@@ -24,7 +24,7 @@ This is the project's terminal capstone — the marker that v1 is done.
 To be expanded into per-issue tickets (1001–1007) when Phase 10 begins.
 Sketch:
 
-- 1001 — Audio mixer + SDL3 callback wiring.
+- 1001 — Audio categorization layer on top of raylib's audio module.
 - 1002 — Music + ambience streaming.
 - 1003 — 3D SFX with SoundEntries.dbc.
 - 1004 — Weather effects (particles + post-process).

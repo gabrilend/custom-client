@@ -1,7 +1,10 @@
 # 005 — Rendering Pipeline
 
-OpenGL 3.3 core profile. One GL context, one main thread, no GL calls from
-anywhere else. Frame structure below.
+raylib (OpenGL 3.3 core under the hood). One window, one main thread, no
+raylib or `rlgl` calls from anywhere else. The high-level raylib API
+handles the per-frame `BeginDrawing` / `EndDrawing` cycle for us; we drop
+down to `rlgl` for terrain splatting, M2 skinning, and other custom
+shader work. Frame structure below.
 
 ## Frame outline (main thread)
 
@@ -37,20 +40,23 @@ ticks based on accumulated wall-clock time.
 1. Asset request enqueued by gameplay or the renderer.
 2. Streamer reads from MPQ (StormLib), decompresses, parses to an
    intermediate CPU-side struct.
-3. For GPU resources: streamer maps a persistent PBO range, copies the
-   bytes in, places a fence, enqueues the request on the upload ring.
+3. For GPU resources: streamer stages bytes into a thread-owned scratch
+   buffer and enqueues the upload request.
 4. Main thread, at the top of the next frame: walks the upload ring,
-   checks the fence, issues the actual `glTexSubImage2D` /
-   `glBufferSubData`, returns the handle to the requesting subsystem.
+   issues the actual `rlLoadTexture` / `rlUpdateTexture` /
+   `rlLoadVertexBuffer` calls, and returns the handle to the requesting
+   subsystem.
 
 This means assets never block the main thread on I/O or decompression, and
-GL is still single-threaded.
+all raylib/rlgl calls stay single-threaded.
 
 ## Shaders
 
 Hand-written GLSL 330. We do **not** use a shader cross-compiler. One shader
-per material kind (terrain, M2-opaque, M2-skinned-transparent, water, UI,
-particle). Permutations via `#define` and a small cache.
+per material kind (terrain, M2-opaque, M2-skinned-transparent, water,
+particle). UI uses raylib's default shaders. Permutations via `#define` and
+a small cache. Loaded via `LoadShader` for raylib-managed materials,
+`rlLoadShaderCode` for the lower-level cases.
 
 ## Camera
 

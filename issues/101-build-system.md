@@ -24,11 +24,11 @@ The build:
 - Uses CMake ≥ 3.20.
 - Targets C11 with `-Wall -Wextra -Wpedantic -Werror`.
 - Defaults to Debug + AddressSanitizer + UBSan; `--release` switches modes.
-- Discovers SDL3, OpenSSL, LuaJIT via `find_package`. Failure to find any
-  one of them prints an actionable apt/dnf/pacman install hint and exits
-  non-zero.
-- Builds vendored deps (`libs/stormlib`, `libs/miniz`, `libs/glad`) as
-  CMake subdirectories.
+- Discovers OpenSSL and LuaJIT via `find_package`. Failure to find either
+  prints an actionable apt/dnf/pacman install hint and exits non-zero.
+- Builds vendored deps (`libs/raylib`, `libs/stormlib`, `libs/miniz`) as
+  CMake subdirectories. raylib is vendored rather than system-discovered
+  because distro packages lag the upstream release we want.
 - Produces one executable: `custom-client`. Plus one test executable per
   subsystem under `build/<cfg>/tests/`.
 
@@ -40,8 +40,9 @@ overall plan; this issue implements it.
 1. Write `CMakeLists.txt` at the project root: project declaration,
    options (`USE_ASAN`, `USE_UBSAN`, `BUILD_TESTS`), global compile flags.
 2. Add `cmake/FindLuaJIT.cmake` (LuaJIT does not ship a CMake config).
-3. Vendor StormLib + miniz + glad2 under `libs/`. Add `add_subdirectory()`
-   calls.
+3. Vendor raylib + StormLib + miniz under `libs/`. Add `add_subdirectory()`
+   calls. raylib is pinned to a specific tagged release in
+   `libs/raylib/VERSION`; the vendor script is `scripts/vendor.sh`.
 4. Create `src/CMakeLists.txt`. For Phase 1 the executable is a stub
    `main()` that prints `custom-client v0.0.0` and exits.
 5. Create `tests/CMakeLists.txt`. Empty for now — gets populated as
@@ -55,8 +56,8 @@ overall plan; this issue implements it.
 
 ## Acceptance
 
-- `scripts/build.sh` succeeds on a clean checkout (assuming SDL3 / OpenSSL
-  / LuaJIT are installed).
+- `scripts/build.sh` succeeds on a clean checkout (assuming OpenSSL and
+  LuaJIT are installed; raylib is vendored).
 - `build/debug/custom-client --version` prints `custom-client 0.0.0` and
   exits 0.
 - `scripts/test.sh` prints `0 tests / 0 failures` and exits 0.

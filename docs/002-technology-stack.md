@@ -18,8 +18,7 @@ compile times, and one fewer language to reason about at module boundaries.
 
 | Concern                | Library         | Notes |
 |------------------------|-----------------|-------|
-| Window + GL context    | SDL3            | Stable as of 2024. One library covers window, input, audio, threading, timers. |
-| OpenGL function loader | glad2           | Generated against 3.3 core profile. |
+| Window + input + audio | raylib 5.x      | Bundles window, input, audio, GL loading, font + texture + mesh helpers in one zero-dep library. We use raylib for primitives and drop down to its low-level `rlgl` module when we need direct GL. |
 | Crypto                 | OpenSSL libcrypto | SRP6 (BigNum), RC4 (legacy cipher; explicitly enabled), HMAC-SHA1. |
 | MPQ archives           | StormLib        | The de-facto MPQ implementation. No reason to rewrite. |
 | Zlib compression       | miniz           | Header-only, lighter than zlib for our use. |
@@ -29,20 +28,30 @@ compile times, and one fewer language to reason about at module boundaries.
 
 ## Graphics API
 
-OpenGL 3.3 core profile.
+OpenGL 3.3 core profile, accessed through raylib.
 
-- Available everywhere the original client runs and then some.
-- Plenty for terrain + M2 + UI; we are not pushing modern-AAA techniques.
+- raylib's default backend is GL 3.3 core; that's our target.
+- For high-level work (textures, sprites, fonts, 2D camera, default shaders)
+  we use the `Raylib.h` API directly.
+- For the hard cases (terrain texture splatting, M2 skinning UBOs, particle
+  vertex pulling, custom render passes) we use `rlgl.h` — raylib's
+  thin-wrapper-over-GL layer that lets us issue raw `rlEnableShader`,
+  `rlSetVertexAttribute`, `rlDrawVertexArrayElements` and friends.
 - Vulkan was considered and rejected for v1: the cost of a 3.3.5a-era visual
   fidelity floor does not justify the bring-up cost. Re-open the question if
   we ever do an HD asset replacement pass.
 
 ## Audio
 
-SDL3's audio callback driving a hand-rolled mixer.
+raylib's audio module (`raudio`), with a thin categorization + 3D layer of
+our own on top.
 
-- 3D positional math lives in the scene layer; the mixer just consumes
-  pre-attenuated PCM.
+- raylib gives us decoded sound loading, music streaming (MP3 / OGG /
+  XM / WAV), per-source pan / pitch / volume, and the mixing callback.
+- It does **not** give us channel categories (music vs. ambience vs. SFX 3D
+  vs. SFX 2D vs. dialogue, each with independent master volume) or real 3D
+  positional attenuation. We add a small layer above raylib that does the
+  3D math + category mixing math, then drives raylib's per-source controls.
 - Music is stream-decoded from MPQ; SFX are decoded once and cached.
 
 ## Platform targets
@@ -64,6 +73,8 @@ SDL3's audio callback driving a hand-rolled mixer.
 - **C++**, **Rust**, **Zig** — see language table above.
 - **A game engine** (Godot, Unity, Unreal). The whole point of this project
   is the design problem of the original client's responsibilities — handing
-  half of it to an engine deletes the interesting parts.
+  half of it to an engine deletes the interesting parts. raylib is a
+  **library**, not an engine: it owns no scene graph, no asset pipeline,
+  no main loop, no allocator. We keep all of those.
 - **Python** — explicitly dispreferred per CLAUDE.md. Build glue stays in
   shell + Lua.

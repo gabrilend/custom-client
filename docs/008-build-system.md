@@ -44,9 +44,10 @@ We never write logs or intermediate artifacts to `${DIR}/` outside
 
 ## Dependency strategy
 
-- **Vendored** (in `libs/`, built from source as subdirectories): StormLib,
-  miniz, glad2, our math, our XML parser.
-- **System-provided** (found via `find_package`): SDL3, OpenSSL, LuaJIT.
+- **Vendored** (in `libs/`, built from source as subdirectories): raylib,
+  StormLib, miniz, our math, our XML parser. raylib gets vendored because
+  distro packages lag the upstream release we want and the build is fast.
+- **System-provided** (found via `find_package`): OpenSSL, LuaJIT.
   Distros ship them; bundling is more pain than gain.
 
 ## Compile flags (all targets)

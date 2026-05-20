@@ -1,9 +1,10 @@
 # 007 — Audio System
 
-A small hand-rolled mixer driven by SDL3's audio callback. The mixer is
-intentionally simple: enough channels, enough attenuation modes, and enough
-streaming bandwidth to replicate the original client's audio behavior, with
-no DSP graph or middleware.
+A thin categorization + 3D-positional layer built on top of raylib's audio
+module (`raudio`). raylib gives us per-source play/pan/pitch/volume and
+streamed music decoding; we layer on the things it does not provide:
+channel categories with independent master volumes, 3D attenuation, and
+the SoundEntries.dbc lookup.
 
 ## Channels
 
@@ -18,11 +19,11 @@ no DSP graph or middleware.
 
 ## Sources
 
-- **Streams** (music + ambience): MP3 / OGG decoded a frame at a time into
-  a small ring buffer. Decoder runs in the SDL audio callback's frame, so
-  it has to be fast — minimp3 / stb_vorbis fit.
-- **One-shots** (SFX): decoded once at load, kept as int16 PCM in the SFX
-  cache. The cache evicts LRU when over its memory budget.
+- **Streams** (music + ambience): raylib `Music` handles, fed from
+  in-memory buffers we sourced out of the MPQ chain (raylib's loaders
+  normally read from disk; we use `LoadMusicStreamFromMemory`).
+- **One-shots** (SFX): raylib `Sound` handles, also loaded from memory.
+  We keep an LRU cache around them since raylib does not.
 
 ## 3D model
 
@@ -44,10 +45,13 @@ against.
 
 ## Threading
 
-- The SDL callback is the only audio-producing thread.
-- The main thread submits "play sound" messages onto a lock-free SPSC ring
-  consumed by the callback.
-- The callback never allocates.
+- raylib's `UpdateMusicStream` is called once per frame from the main
+  thread; raylib's internal audio thread does the actual playback.
+- Per-source state (position, attenuation result, target volume) is
+  computed on the main thread once per frame and pushed into raylib via
+  `SetSoundVolume` / `SetSoundPan` / `SetSoundPitch`.
+- We do not run our own audio thread, and we do not allocate during
+  per-frame audio updates.
 
 ## Phase plan
 
