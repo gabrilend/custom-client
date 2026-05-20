@@ -1,0 +1,21 @@
+this is intended to be a custom client that replaces the World of Warcraft 3.3.5a client.
+
+It should load the proprietary assets and interface with azerothcore.
+
+it should have feature parity with the default client.
+
+this client will just handle things like UI, sound, display of 3d models and
+effects, loading the terrain, applying full-screen overlay effects, accepting
+input, rebinding keys, running addons, handling the networking between the
+client and azerothcore, the login and loading screen process, opening UI windows
+and interacting with various character sheets and buttons and such, and sending
+chat messages correctly. Users should be able to join parties, raids, and guilds
+and other such things. It should in all respects be exactly the same as the
+official client, just written from scratch with my paradigms in the design.
+
+It is not the same program. It loads the same assets, it accomplishes the same
+tasks, but it's architecture behind the scenes will be vastly different.
+
+It is not a product. It won't be sold. When the assets are replaced, then the
+server, client, and assets will be fully open-source, and the game can blossom,
+free from the intellectual property rights that restrict it's growth.
