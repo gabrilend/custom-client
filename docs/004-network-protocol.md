@@ -41,6 +41,22 @@ SRP6 is implemented with OpenSSL `BIGNUM`. Constants (N, g, k) are the
   - `MSG_MOVE_*` movement opcodes
   - `SMSG_MESSAGECHAT` / `CMSG_MESSAGECHAT`
 
+## Frames: when timed things take effect (added 2026-09-23)
+
+With our own server (world-edit-to-execute W08), every timing-dependent
+message carries the **frame** (uint32 simulation tick, 62.5 per second) at
+which it takes effect: moves, path steps, hits, cast starts and landings, buff
+expiries, deaths. The client keeps its own frame counter and:
+
+- **future frame** → schedules the message and applies it when that frame arrives;
+- **past frame** → fast-forwards it: applies it now, in the state it would have
+  reached if it had arrived on time.
+
+The owner's rule: hand-written, "we prioritize sane design over correctness".
+The stock AzerothCore protocol has no frames; while talking to AzerothCore, the
+client converts its millisecond times to frames with the same hand-written
+per-packet rules the differential checker uses.
+
 ## Threading
 
 The network thread owns the socket and the cipher state. It hands fully
