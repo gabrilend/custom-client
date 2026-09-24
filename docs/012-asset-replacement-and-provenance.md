@@ -111,6 +111,18 @@ both returns only measurements. Assets made that way record lineage
 original, restyles, borrowed skeletons) stay available but are no longer the
 default.
 
+## Userspace tools and the shared criteria set (decided 2026-09-23)
+
+The replacement tools run on each user's side; they are not part of the
+client. Anyone can make their own art. Players stay in one game because
+gameplay depends only on a shared **criteria set** per unit type (body plan,
+height and footprint ranges, attachment heights, animation key timings) and on
+the map file, never on the art a given player has installed. So this client
+must take selection circles, collision, missile heights and hit timing from
+the criteria and the map, never from mesh bounds or animation lengths.
+Details: world-edit-to-execute `issues/W05d-clean-room-describe-build-check-loop.md`
+and `W05e-body-structure-fit-and-body-plan-standards.md`.
+
 ## What gets replaced, in order
 
 1. Models and their textures (world-edit-to-execute W05, W06)
