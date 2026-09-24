@@ -43,6 +43,14 @@ A small **texture cache** sits in front of all of this, keyed by
 logical asset name. Asking for the same BLP twice returns the same
 `gfx_texture_t`.
 
+Textures are fetched through the asset resolver
+([105a](./105a-loose-overlays-and-asset-resolver.md)), never from the MPQ
+chain directly. `gfx_texture_t` records the source (pack / overlay /
+blizzard / placeholder), and pack textures may be PNG as well as BLP (a
+replacement doesn't have to be in Blizzard's format unless it wants the
+"default client compatible" seal). A placeholder texture is the magenta
+checker: loud and visible.
+
 ## Suggested implementation steps
 
 1. Create `src/gfx/` subsystem (the umbrella for cross-cutting raylib

@@ -25,6 +25,21 @@ int              blp_height(const blp_t *);
 The decoder does *not* upload anything to a GPU — there is no GPU in
 Phase 1. Phase 2 wires the BLP into a texture-upload helper.
 
+**Writing (W client merge, 2026-09-23).** A matching encoder turns an RGBA8
+image into a BLP2 file (DXT1 when there's no alpha, DXT5 with alpha, full
+mip chain, power-of-two sizes enforced):
+
+```c
+err_t blp_encode(const uint8_t *rgba8, int w, int h, blp_format_t fmt, buf_t *out);
+```
+
+It is how a replacement texture becomes readable by the stock client, one of
+the conditions for the "default client compatible" seal
+([docs/012](../docs/012-asset-replacement-and-provenance.md)).
+world-edit-to-execute also uses it through the shared library when its
+converter writes terrain textures. Both the decoder and the encoder live in
+`libwreaders.so`.
+
 Phase 1 demonstrates the format works by:
 
 1. Reading `Interface/Glues/Models/UI_MainMenu/UI_MainMenu.blp` (or any
@@ -45,6 +60,9 @@ Phase 1 demonstrates the format works by:
    that decompresses any format to RGBA8 on the CPU — for tests, dumps,
    and platforms without S3TC.
 5. Write a tiny TGA writer (only used by tools/tests).
+5b. Write `blp_encode` (DXT compression through a small vendored block
+   compressor; mip generation by box filter). Round-trip test: encode →
+   decode → compare within DXT's known error.
 6. Tests: round-trip a synthetic BLP, decode a real Blizzard BLP and
    compare its RGBA8 form against a reference image bytewise.
 

@@ -67,6 +67,39 @@ no debug library writes. See [006-ui-and-addons.md](./006-ui-and-addons.md).
 - **Allocation at the boundary.** A subsystem allocates what it owns and
   returns pointers; callers never reach in to free private members.
 
+## The asset resolver (added 2026-09-23, W client merge)
+
+One layer sits between every renderer/audio/UI consumer and the readers:
+**resolve(logical path) → (bytes, source)**, where source is `pack` (our
+replacement packs, loose folders), `blizzard` (the MPQ chain) or `placeholder`.
+Nothing above the resolver opens an MPQ directly. Counting, the similarity
+scores and the "default client compatible" seal all hang off this one place.
+See [012](./012-asset-replacement-and-provenance.md).
+
+```
+|  renderer | audio | UI  ──▶  asset resolver  ──▶  pack folders
+|                                   │           ──▶  MPQ chain (+ loose map overlays)
+|                                   └──────────▶  placeholder (counted warning)
+```
+
+## Two modes (added 2026-09-23)
+
+| | WoW world mode | WC3 map mode |
+|---|---|---|
+| Content | AzerothCore's world | a WC3 map converted by world-edit-to-execute (loose overlay folder) |
+| Camera | third person, as the stock client | top-down RTS camera, zoom, edge pan |
+| Input | character movement, action bars | box select, right-click orders, command card, control groups |
+| Who runs the rules | AzerothCore | open question: AzerothCore with converted trigger scripts, or world-edit-to-execute's own Lua simulation running inside this client (see [009](./009-roadmap.md), Phase 11) |
+
+Both modes share every layer below the UI.
+
+## The shared reader library
+
+The bottom row (MPQ chain, DBC, BLP; later M2) is built as a separate shared
+library as well as linked into the client. world-edit-to-execute loads it from
+Lua through LuaJIT's FFI to convert maps and to score replacements, so there is
+one implementation of each format, used by two programs.
+
 ## Failure model
 
 Per CLAUDE.md: fallbacks are warnings, warnings are errors. The client

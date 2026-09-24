@@ -25,6 +25,15 @@ The demo:
    `tmp/phase-1-demo/`. Prints the BLP's format, dimensions, mip count.
 7. Prints a summary line: archives opened, DBC rows read, BLPs decoded,
    bytes streamed.
+8. W client additions (2026-09-23):
+   - For a handful of well-known files, `which` archive supplied each.
+   - The asset resolver's counts table (pack / overlay / blizzard /
+     placeholder, per asset kind), with a small test pack installed so the
+     pack column is non-zero.
+   - Encodes the decoded BLP back to BLP2 and reports the round-trip error.
+   - Runs a short LuaJIT script that opens the same chain through
+     `libwreaders.so` and prints the same `Map.dbc` row count, proving
+     world-edit-to-execute can use the library.
 
 A short bash script under `issues/completed/demos/phase-1.sh` runs the
 demo against the configured asset root. The top-level script

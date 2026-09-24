@@ -15,9 +15,10 @@ custom-client/
 │   ├── 006-ui-and-addons.md              # FrameXML, sandboxing, addon API
 │   ├── 007-audio-system.md               # mixer, 3D model, SoundEntries
 │   ├── 008-build-system.md               # CMake + scripts/ entry points
-│   ├── 009-roadmap.md                    # 10 phases, with capstones
+│   ├── 009-roadmap.md                    # 11 phases, with capstones
 │   ├── 010-table-of-contents.md          # this file
 │   ├── 011-balance-updates.md            # append-only tweak log
+│   ├── 012-asset-replacement-and-provenance.md  # resolver, similarity scores, seal, lineage
 │   └── HTML/                             # browsable doc bundle (TBD)
 │
 ├── issues/                               # tracked work, see naming below

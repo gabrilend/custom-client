@@ -7,21 +7,33 @@ in `src/`.
 
 ## Container: MPQ
 
-- Hash + block tables, optional HET/BET for larger patch archives.
+- Hash + block tables. 3.3.5a archives use the 44-byte header (format
+  version field = 1), which adds a high block table for offsets past 4 GB.
+  (HET/BET tables belong to later formats, Cataclysm onward; not needed here.)
 - Patch chain semantics matter: later archives override files in earlier
   ones by hash. Load order (3.3.5a): `common.MPQ`, `common-2.MPQ`,
   `expansion.MPQ`, `lichking.MPQ`, locale `*.MPQ`, then `patch.MPQ`,
-  `patch-2.MPQ`, `patch-3.MPQ`, locale patches.
-- Implementation: StormLib.
-- Asset resolution goes through the patch chain — never reads a single MPQ
-  in isolation.
+  `patch-2.MPQ`, `patch-3.MPQ`, locale patches, then any custom patch archives
+  named in config.
+- **Loose overlays** sit above the whole chain: folders of plain files
+  (converted WC3 maps, replacement packs) that win over any archive. This is
+  how the W client loads world-edit-to-execute's converted maps; no patch
+  archive is needed for them.
+- The chain can answer **which** archive or overlay supplied a file.
+- Implementation: StormLib (reading and writing; writing is used by
+  world-edit-to-execute to build patch archives for the stock client, and for
+  the "default client compatible" seal).
+- Consumers never read the chain directly: they go through the asset
+  resolver ([012](./012-asset-replacement-and-provenance.md)).
 
 ## DBC — client-side data tables
 
 - Row-based binary table. Header: `WDBC`, record count, field count,
   record size, string-block size. Then rows, then a string block.
-- The schema lives in our code, not the file. Each DBC has a hand-written
-  C struct + reader.
+- The schema lives in a **layout file** (data, not code): table name, then
+  each field's name, offset and type. A generator turns layout files into the
+  C structs used here *and* the Lua layouts used by world-edit-to-execute, so
+  the two projects cannot drift apart.
 - DBCs the client needs early: `ChrRaces`, `ChrClasses`, `CharacterFacial*`,
   `SpellIcon`, `Spell`, `Item`, `ItemDisplayInfo`, `Map`, `Light`,
   `LoadingScreens`, `LiquidType`, `Talent`, `TalentTab`, `CreatureDisplayInfo`,

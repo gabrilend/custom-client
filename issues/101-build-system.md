@@ -31,6 +31,12 @@ The build:
   because distro packages lag the upstream release we want.
 - Produces one executable: `custom-client`. Plus one test executable per
   subsystem under `build/<cfg>/tests/`.
+- Also produces **`libwreaders.so`**, a shared library holding the reading
+  layer (file access, MPQ chain, DBC, BLP; later M2) with a plain C interface
+  and no raylib dependency. world-edit-to-execute loads it from Lua through
+  LuaJIT's FFI (W client merge, 2026-09-23; see
+  [docs/000](../docs/000-vision-summary.md)). The same object files link into
+  the executable, so there is one implementation.
 
 See [docs/008-build-system.md](../docs/008-build-system.md) for the
 overall plan; this issue implements it.

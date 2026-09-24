@@ -41,6 +41,16 @@ Camera2D camera2d_to_raylib(const camera2d_t *);
 Camera3D camera3d_to_raylib(const camera3d_t *);   /* with axis-swap to +Y */
 ```
 
+**Two 3D controllers will drive `camera3d_t`** (W client merge,
+2026-09-23): the free-fly/third-person camera of WoW world mode
+([307](./307-freefly-and-culling.md)), and the **top-down RTS camera** of WC3
+map mode (Phase 11): a fixed steep pitch (WC3's default is roughly 56° from
+horizontal, looking down), zoom by changing distance, and pan by screen edge
+or arrow keys. Nothing in `camera3d_t` assumes which one is in use; the
+math in this issue covers both. The owner's reason for this: the stock
+client can't look straight down, and "the purpose of creating a custom
+client is so that we can heavily modify it."
+
 The `camera3d_to_raylib` bridge does the +Z-up → +Y-up axis swap
 explicitly. There is exactly one place where that swap happens, named
 in code, with a comment explaining why.

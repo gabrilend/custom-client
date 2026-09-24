@@ -16,7 +16,12 @@ Two file kinds are loaded:
 
 - **`input/client.ini`** — key/value pairs grouped by `[section]`. Things
   like `[paths] asset_root = /path/to/MPQs`, `[render] vsync = true`,
-  `[net] auth_host = 127.0.0.1`.
+  `[net] auth_host = 127.0.0.1`. W client additions (2026-09-23):
+  `[paths] packs = …` (replacement pack folders, highest priority first),
+  `[paths] overlays = …` (loose folders such as converted WC3 maps),
+  `[paths] extra_archives = …` (custom patch archives appended to the chain),
+  `[assets] strict = true|false` (placeholder use is an error when true),
+  `[mode] start = wow|wc3`.
 - **`input/realms.ini`** — saved realm endpoints (the original client
   caches the last-used realm).
 

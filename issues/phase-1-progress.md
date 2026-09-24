@@ -13,16 +13,19 @@ The phase ends with a runnable demo that touches every Phase 1 piece.
 | 102 | [Logging and errors](./102-logging-and-errors.md) | pending  | 101        |
 | 103 | [Config loader](./103-config-loader.md)         | pending  | 101, 102   |
 | 104 | [Filesystem abstraction](./104-fs-abstraction.md) | pending  | 103        |
-| 105 | [MPQ reader](./105-mpq-reader.md)               | pending  | 104        |
-| 106 | [DBC parser](./106-dbc-parser.md)               | pending  | 105        |
-| 107 | [BLP parser](./107-blp-parser.md)               | pending  | 105        |
+| 105 | [MPQ chain (read and write)](./105-mpq-reader.md) | pending  | 104        |
+| 105a | [Loose overlays and asset resolver](./105a-loose-overlays-and-asset-resolver.md) | pending | 104, 105 |
+| 106 | [DBC parser with data-described layouts](./106-dbc-parser.md) | pending  | 105        |
+| 107 | [BLP read and write](./107-blp-parser.md)       | pending  | 105        |
 | 108 | [Phase 1 demo](./108-phase-demo.md)             | pending  | 102–107    |
 
 ## Suggested order
 
-101 → 102 → 103 → 104 → 105 → 106 ∥ 107 → 108
+101 → 102 → 103 → 104 → 105 → (105a ∥ 106 ∥ 107) → 108
 
-(106 and 107 can land in parallel once 105 is in.)
+Rewritten 2026-09-23 for the W client merge ([docs/000](../docs/000-vision-summary.md)):
+the reading layer is also a shared library for world-edit-to-execute, and
+every asset goes through the resolver.
 
 ## Phase-end deliverable
 

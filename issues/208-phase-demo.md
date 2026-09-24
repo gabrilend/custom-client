@@ -29,6 +29,9 @@ A windowed application that exercises every Phase 2 subsystem:
   - Shader cache size.
   - BLP load count, total bytes streamed from MPQs this session.
   - Driver: vendor, renderer, GL version, S3TC support yes/no.
+  - Texture sources this session: pack / overlay / blizzard / placeholder
+    (a test replacement pack is installed for the demo, so borrowed and
+    replaced textures sit side by side, each labelled with its source).
 - Hot reload demonstration: editing `shaders/textured.frag` and saving
   recolors all sprites on the next frame.
 

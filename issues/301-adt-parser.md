@@ -7,24 +7,29 @@ terrain-tile format. Without it, there's no terrain to render.
 
 ## Intended behavior
 
-A parser that turns an ADT tile's raw bytes (and its 3.x companion
-files) into a typed `adt_t` containing heightmap, normals, per-chunk
-texture layers + alpha maps, liquid layers, and reference lists for
-doodads (M2) and WMOs placed in the tile.
+A parser that turns an ADT tile's raw bytes into a typed `adt_t`
+containing heightmap, normals, per-chunk texture layers + alpha maps,
+liquid layers, and reference lists for doodads (M2) and WMOs placed in
+the tile.
+
+Tiles are read through the asset resolver
+([105a](./105a-loose-overlays-and-asset-resolver.md)), so the same parser
+reads Blizzard's tiles from the MPQ chain and world-edit-to-execute's
+converted WC3 maps from a loose overlay folder. It is also the check on
+that converter: every tile the converter writes must parse here without
+errors.
 
 ### What lives where
 
-The 3.3.5a era splits a single tile across three files:
+In 3.3.5a a tile is **one file**, `<Map>_<x>_<y>.adt`, holding terrain,
+textures and object placements together. (Correction, 2026-09-23: the
+earlier version of this issue described a three-file split into `_tex0`
+and `_obj0` companions. That split was introduced in Cataclysm, 4.x, and
+does not exist in 3.3.5a.)
 
-| File              | Holds                                                  |
-|-------------------|--------------------------------------------------------|
-| `WorldXX_YY.adt`  | base terrain: heightmap, normals, per-chunk shadow + liquid |
-| `WorldXX_YY_tex0.adt` | per-chunk texture layer table + alpha maps         |
-| `WorldXX_YY_obj0.adt` | doodad + WMO reference lists                       |
-
-The parser opens all three by name siblings and merges them into one
-`adt_t`. A missing companion is an error, not a fallback — per
-CLAUDE.md.
+Liquids in 3.3.5a are normally stored in the tile-level **MH2O** chunk;
+the older per-chunk **MCLQ** form can still appear. The parser reads both
+and errors if one chunk has both.
 
 ### Chunk shape
 
@@ -103,9 +108,9 @@ typedef struct {
    a flag in MHDR: **uncompressed 4096-byte** (64×64 nibbles, two
    pixels per byte) or **run-length-compressed**. The renderer wants
    the decompressed 64×64 byte form either way, expanded.
-6. Open and merge the `_tex0` and `_obj0` companion files. They reuse
-   the same chunk names but only carry the texture-related and
-   object-related chunks respectively.
+6. Parse MH2O (tile-level liquid: per-chunk instances with liquid type,
+   height range and an optional mask of which cells are wet) and the
+   older MCLQ, into one `adt_liquid_t` form.
 7. Compute each chunk's world-space origin from the tile's grid
    coordinates and `MAP_CHUNK_SIZE`. The ADT coordinate convention is
    the source of nearly every coord-bug in this codebase — write a
@@ -120,6 +125,9 @@ typedef struct {
 
 - A real Northshire ADT parses cleanly, with all 256 chunks populated,
   no error log lines emitted.
+- A tile written by world-edit-to-execute's converter (W02a) parses
+  cleanly from an overlay folder, and its heights match the WC3 map's
+  at sampled points.
 - The decompressed alpha maps round-trip a known reference (we can
   re-encode and get bit-identical bytes back, for the uncompressed
   format at least).
