@@ -45,6 +45,7 @@ world-edit-to-execute (issue W05a); this client reads and displays the scores.
 | Particle effect | rendered frame sequences compared like W04's recordings (structure + embedding) |
 | Sound | spectral and audio-embedding distance |
 | Font / interface art | glyph or image outline overlap plus embedding distance |
+| Data table rows (spells, factions, display info …) | not scored by similarity; counted as borrowed or ours, row by row. The goal is that no Blizzard row is needed ([106](../issues/106-dbc-parser.md)) |
 
 Models come first; the other kinds follow the same pattern.
 

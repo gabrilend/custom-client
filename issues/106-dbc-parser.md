@@ -9,6 +9,25 @@ own reader with its own layouts.
 
 ## Intended behavior
 
+**Data tables are assets too (decided 2026-09-23).** The client must not need
+Blizzard's tables to run, because we can't use them forever. It does need
+*a* table for every id the server sends: the protocol talks in numbers
+("cast spell 133 with display 4527 on map 571"), and the client must know what
+each number means (name, icon, cast time, model). So:
+
+- Tables are looked up through the asset resolver
+  ([105a](./105a-loose-overlays-and-asset-resolver.md)) like models: a pack's
+  table rows first, then Blizzard's DBC as a borrowed fallback, **per row**,
+  counted like any other borrowed asset.
+- A pack table uses the same layout file as the Blizzard table, so ids and
+  fields line up; it may be a DBC file or a plain Lua table file.
+- For WC3 map mode, world-edit-to-execute generates the tables from the map's
+  own object data (its units, abilities, items), so a converted map can run
+  with no Blizzard rows at all.
+- Nothing in the client may refuse to start because a Blizzard table is
+  missing. A missing row is resolved like a missing asset: a placeholder
+  (a visible "unknown spell 133") and a warning; an error in strict mode.
+
 A generic DBC reader in the shared library, plus **layout files**: one
 description per table, kept as data, from which a generator produces both the
 C structs used here and the Lua layout tables used by world-edit-to-execute.
