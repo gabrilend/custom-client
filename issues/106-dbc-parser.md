@@ -21,9 +21,18 @@ each number means (name, icon, cast time, model). So:
   counted like any other borrowed asset.
 - A pack table uses the same layout file as the Blizzard table, so ids and
   fields line up; it may be a DBC file or a plain Lua table file.
-- For WC3 map mode, world-edit-to-execute generates the tables from the map's
-  own object data (its units, abilities, items), so a converted map can run
-  with no Blizzard rows at all.
+- **For WC3 map mode the rows are generated from the map files, dynamically,
+  and nothing else** (owner, 2026-09-23): "Custom maps almost always use
+  custom abilities - they very rarely use the stock wc3 abilities and such.
+  Usually it's a copy and modify, so the changes are recorded in the map file.
+  That is what we will dynamically create these tables to be." When a map
+  loads, world-edit-to-execute reads its object data (units, abilities,
+  items, buffs, upgrades) and writes the rows this client and the server need,
+  keyed by the ids the server will send. No WoW Blizzard rows are consulted in
+  WC3 map mode; a missing row is a placeholder and a warning.
+  One gap, recorded in world-edit-to-execute W02h: a copied-and-modified object
+  stores only its *changed* fields plus the id of the stock object it was
+  copied from. Its unchanged fields come from WC3's own stock tables.
 - Nothing in the client may refuse to start because a Blizzard table is
   missing. A missing row is resolved like a missing asset: a placeholder
   (a visible "unknown spell 133") and a warning; an error in strict mode.
