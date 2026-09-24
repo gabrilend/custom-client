@@ -105,12 +105,9 @@ card and resource bar, minimap. The owner's reason for building this client:
 
 Capstone: [1108-phase-demo](../issues/1108-phase-demo.md).
 
-Open question for this phase: who runs a WC3 map's rules? (a) AzerothCore,
-with the map's triggers converted into server scripts (world-edit-to-execute
-W02e); multiplayer comes free, but every WC3 rule must be re-expressed as
-server logic. (b) world-edit-to-execute's own simulation (its phases 3-4: the
-JASS → Lua triggers, game loop, pathfinding) running inside this client; the
-rules run as written, but multiplayer needs its own lockstep networking.
+Decided 2026-09-23: AzerothCore runs a WC3 map's rules, with the map's
+triggers converted into server scripts (world-edit-to-execute W02e). The client
+sends orders and shows results; multiplayer comes with the server.
 
 ## How phases relate
 

@@ -89,7 +89,7 @@ See [012](./012-asset-replacement-and-provenance.md).
 | Content | AzerothCore's world | a WC3 map converted by world-edit-to-execute (loose overlay folder) |
 | Camera | third person, as the stock client | top-down RTS camera, zoom, edge pan |
 | Input | character movement, action bars | box select, right-click orders, command card, control groups |
-| Who runs the rules | AzerothCore | open question: AzerothCore with converted trigger scripts, or world-edit-to-execute's own Lua simulation running inside this client (see [009](./009-roadmap.md), Phase 11) |
+| Who runs the rules | AzerothCore | AzerothCore, running the map's triggers as converted server scripts (decided 2026-09-23; see [1108](../issues/1108-phase-demo.md)) |
 
 Both modes share every layer below the UI.
 

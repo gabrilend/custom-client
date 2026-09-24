@@ -33,20 +33,23 @@ Sketch:
 - 1107 — Loading a converted map from its overlay folder; start locations.
 - 1108 — This capstone demo.
 
-## Open question (blocks 1104)
+## Who runs the rules (decided 2026-09-23)
 
-Who runs a WC3 map's rules?
+**AzerothCore**, with the map's triggers converted to server scripts
+(world-edit-to-execute W02e). The client stays a viewer and an order-sender:
+1104 sends orders to the server and shows what the server answers.
+Multiplayer comes with the server. The cost: every WC3 rule must be
+re-expressed as server logic, and WC3 details (attack damage point, order
+queueing, collision sizes) must survive the translation.
 
-- (a) **AzerothCore**, with triggers converted to server scripts
-  (world-edit-to-execute W02e). Multiplayer comes free, and the client stays a
-  pure viewer. But every WC3 rule must be re-expressed as server logic, and
-  WC3 details (attack damage point, order queueing, collision sizes) must
-  survive the translation.
-- (b) **world-edit-to-execute's own simulation** (JASS → Lua triggers, the
-  62.5 ticks/s game loop, pathfinding; its phases 3-4) running inside this
-  client through its LuaJIT. The rules run as written. But multiplayer needs
-  lockstep networking of its own, and the client gains a second Lua world
-  beside the sandboxed addon one.
+The option not taken was running world-edit-to-execute's own simulation inside
+this client. It would run the rules exactly as written, but it needs its own
+lockstep networking for multiplayer and puts a second Lua world beside the
+sandboxed addon one.
+
+Licences: the client talks to AzerothCore only over the network protocol, so
+it may have its own licence, provided it copies no AzerothCore code. See
+world-edit-to-execute `docs/licensing-and-boundaries.md`.
 
 ## Acceptance
 

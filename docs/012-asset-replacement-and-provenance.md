@@ -93,6 +93,24 @@ it has moved. Recording lineage beside the score lets the project see which
 assets rest on which kind of claim, and prefer independent routes where it
 matters. This is an engineering record, not legal advice.
 
+## Clean-room by default (decided 2026-09-23)
+
+The owner, answering whether some asset kinds should be made clean-room:
+"that may be worth it in all cases. I worry about things like scaling, so it
+might need to be an iterative process before a viable model is produced. So
+we'll need tests like 'is approximately as large' and if not, then it scales it
+up, takes pictures, presents those to the creation system and says 'fix the
+imbalances with the new scale' or similar."
+
+So the default route for every asset kind is the **clean-room loop**
+(world-edit-to-execute W05d): a *describer* who sees the original writes a
+specification in words and measurements; a *builder* who never sees the
+original makes the replacement from that specification; a *checker* who sees
+both returns only measurements. Assets made that way record lineage
+`independent`. The `derived` routes (image-to-3D from a render of the
+original, restyles, borrowed skeletons) stay available but are no longer the
+default.
+
 ## What gets replaced, in order
 
 1. Models and their textures (world-edit-to-execute W05, W06)
@@ -107,6 +125,5 @@ matters. This is an engineering record, not legal advice.
 1. Server-side data (quests, NPC text, spell tables in the AzerothCore
    database) is also Blizzard-derived. Is it in scope for "legally distinct",
    or is the goal the client-side game only?
-2. Does the project want an explicit clean-room split for some asset kinds
-   (one session describes the original in words, a separate session that has
-   never seen it makes the replacement), so those assets can be `independent`?
+2. ~~Clean-room split for some asset kinds?~~ Answered 2026-09-23: for all
+   kinds, by default (section above).
