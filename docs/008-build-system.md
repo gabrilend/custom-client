@@ -25,8 +25,19 @@ ${DIR}/
     debug/        # cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_ASAN=ON
     release/      # cmake -DCMAKE_BUILD_TYPE=Release
     test/         # built test binaries
-  tmp/            # symlink → /tmp/azc-custom-client/ (RAM-backed logs, dumps)
+  tmp/            # symlink → /tmp/azc-custom-client/ (RAM; the exec tier)
+    tmp/          #   things that get executed (scratch scripts)
+    shared-memory/  # symlink → /dev/shm/custom-client/ (RAM; logs, dumps, builds)
 ```
+
+`tmp/` follows the house two-tier layout, kept by
+`/home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers`: executable
+scratch in `/tmp/<name>/tmp/`, everything that is only read or written (logs,
+dumps) in `/dev/shm/<name>` reached as `tmp/shared-memory/` (here `<name>` is
+`azc-custom-client` for the exec tier, set when the link was made, and
+`custom-client` for the artifact tier, named by the tool after the folder). Both live in RAM,
+so a reboot empties them; the link survives, and the session-start hook or a
+script calling `ensure_ram_tiers` rebuilds the folders behind it.
 
 We never write logs or intermediate artifacts to `${DIR}/` outside
 `build/` and `tmp/`. Git ignores both.

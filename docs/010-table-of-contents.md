@@ -35,7 +35,8 @@ custom-client/
 ├── input/   output/   desire/   faith/   strategems/
 │                                         # see CLAUDE.md — long-lived notes
 │
-├── tmp/                                  # symlink → /tmp/azc-custom-client/
+├── tmp/                                  # symlink → /tmp/azc-custom-client/ (exec tier);
+│   └── shared-memory/                    #   → /dev/shm/custom-client/ (logs, dumps)
 └── .file-index-counter                   # global indexed-filename counter
 ```
 
