@@ -86,9 +86,12 @@ LAN games or something...?"
 
 ## Frames: when timed things take effect (added 2026-09-23)
 
-Open since 2026-10-07: this section was written for world-edit-to-execute's
-own server (its W08). With WC3 maps now on AzerothCore, whether that
-server is still built is to be decided in the merged planning.
+This section is for world-edit-to-execute's own server (its W08), its
+stage 2: a server of the project's own design speaking the same
+protocol, needed because the projects' RGPL can't combine with
+AzerothCore's AGPL. Until then (stage 1, and the 2026-10-07 decision
+above) AzerothCore is installed beside the projects, never bundled, and
+runs both games.
 
 With our own server (world-edit-to-execute W08), every timing-dependent
 message carries the **frame** (uint32 simulation tick, 62.5 per second) at

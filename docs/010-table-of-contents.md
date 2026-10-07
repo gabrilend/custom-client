@@ -3,7 +3,8 @@
 ```
 custom-client/
 ├── notes/
-│   └── vision                            # the original vision text
+│   ├── vision                            # the original vision text
+│   └── wow-chat-2026-conversations/      # copies of the conversations that built the client (README: where the live ones are)
 │
 ├── docs/
 │   ├── 000-vision-summary.md             # vision as actionable summary
