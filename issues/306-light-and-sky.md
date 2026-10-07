@@ -1,12 +1,15 @@
 # 306 — Light.dbc, Sky, and Directional Light
 
+*Filled in part by the code from wow-chat-2026 (its 173n), 2026-10-07.*
+
 ## Current behavior
 
-The terrain and WMO renderers are taking placeholder constants for sun
-direction, ambient color, and fog. There is no skybox; the cleared
-window background shows through above the horizon. The actual
-zone-by-zone, time-of-day lighting that gives WoW its look is unused
-even though `Light.dbc` is sitting in the MPQ chain.
+Built (`src/026-light.c`, `src/037-sky.c`): Light.dbc's spheres by
+place, blended, the default per map; the colours and fog by time of day;
+the sun's direction; the underwater set under water; the sky dome's five
+colours as shader values; skybox models (Northrend's auroras). Not
+built: weather and the ghost world's light (the sets are read the same
+way), the original's clouds, sun and moon discs.
 
 ## Intended behavior
 

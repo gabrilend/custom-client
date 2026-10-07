@@ -1,10 +1,23 @@
 # 101 — Build System
 
+*Filled in part by the code from wow-chat-2026 (its 173k (the client in C)), 2026-10-07.*
+
 ## Current behavior
 
-There is no build system. The project is a directory with documentation and
-a vision note. `make`, `cmake`, `./build.sh` all fail because nothing is
-configured.
+Built (2026-10-07, the move from wow-chat-2026): `scripts/build`, one
+bash script calling the compiler directly (the owner's choice: no
+CMake). It makes the client (`w-client`), the test program
+(`w-client-test`, from `tests/044-test-client.c`) and the reader library
+(`libwreaders.so` with a flattened header, `wreaders.h`, that LuaJIT's
+FFI loads: checked by `scripts/libs/wreaders.lua`), into the RAM tier
+(`tmp/tmp/build/`), in about 15 seconds. `--test` runs the tests;
+`--asan` and `--tsan` build the address-checked and race-checked
+clients. Each build's length goes to `tmp/shared-memory/build-times.log`,
+with a warning past five minutes. Flags: C11, `-Wall -Wextra -Werror`.
+
+Not as planned below: no CMake, no `--release` switch, no UBSan build,
+raylib from `/usr/local` rather than `libs/` (fetching it into `libs/`
+when absent is still to do), no `clean`/`format` scripts.
 
 ## Intended behavior
 
@@ -21,7 +34,7 @@ returns to checkout state.
 
 The build:
 
-- Uses CMake ≥ 3.20.
+- Changed 2026-10-07: one bash script calling the compiler (the owner: "bash is easier for me. We can always call cmake inside of bash"), not CMake.
 - Targets C11 with `-Wall -Wextra -Wpedantic -Werror`.
 - Defaults to Debug + AddressSanitizer + UBSan; `--release` switches modes.
 - Discovers OpenSSL and LuaJIT via `find_package`. Failure to find either

@@ -1,10 +1,12 @@
 # 304 — WMO Parser
 
+*Filled in part by the code from wow-chat-2026 (its 173g), 2026-10-07.*
+
 ## Current behavior
 
-There's no WMO support. World Map Objects — buildings, bridges,
-interiors, dungeon shells, the global-WMO maps from the
-[WDT parser](./303-wdt-and-streaming.md) — none of them load.
+Built (`src/021-wmo.c`, in the reader library): a building's root
+(materials, groups, furnishing sets, liquid kind) and groups (points,
+triangles, batches, solid flags, vertex colours, pools).
 
 ## Intended behavior
 

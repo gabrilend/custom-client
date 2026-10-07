@@ -1,11 +1,17 @@
 # 106 — DBC Parser with Data-Described Layouts
 
+*Filled in part by the code from wow-chat-2026 (its 173d), 2026-10-07.*
+
 ## Current behavior
 
-The client cannot read DBC tables. Without them, "what races exist" or "what
-is map id 0 called" are unanswerable. world-edit-to-execute also needs DBC
-tables (to add map rows and to look up models) and would otherwise write its
-own reader with its own layouts.
+Built, simpler than planned: `src/016-dbc.c` opens a WDBC table and
+reads fields by number (`dbc_u32`, `dbc_text`); each reader names the
+fields it uses in its own comments (Map, Light*, LiquidType,
+CharSections, ItemDisplayInfo, CreatureDisplayInfo ...). In the reader
+library.
+
+Not built: layouts as data files and the generator of C and Lua
+layouts from them; WC3 map mode's tables built from map files.
 
 ## Intended behavior
 

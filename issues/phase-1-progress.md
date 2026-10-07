@@ -9,15 +9,16 @@ The phase ends with a runnable demo that touches every Phase 1 piece.
 
 | ID  | Title                                           | Status   | Blocked by |
 |-----|-------------------------------------------------|----------|------------|
-| 101 | [Build system](./101-build-system.md)           | pending  | —          |
-| 102 | [Logging and errors](./102-logging-and-errors.md) | pending  | 101        |
-| 103 | [Config loader](./103-config-loader.md)         | pending  | 101, 102   |
+| 101 | [Build system](./101-build-system.md)           | partly built | —          |
+| 102 | [Logging and errors](./102-logging-and-errors.md) | partly built | 101        |
+| 103 | [Config loader](./103-config-loader.md)         | partly built | 101, 102   |
 | 104 | [Filesystem abstraction](./104-fs-abstraction.md) | pending  | 103        |
-| 105 | [MPQ chain (read and write)](./105-mpq-reader.md) | pending  | 104        |
+| 105 | [MPQ chain (read and write)](./105-mpq-reader.md) | partly built | 104        |
 | 105a | [Loose overlays and asset resolver](./105a-loose-overlays-and-asset-resolver.md) | pending | 104, 105 |
-| 106 | [DBC parser with data-described layouts](./106-dbc-parser.md) | pending  | 105        |
-| 107 | [BLP read and write](./107-blp-parser.md)       | pending  | 105        |
+| 106 | [DBC parser with data-described layouts](./106-dbc-parser.md) | partly built | 105        |
+| 107 | [BLP read and write](./107-blp-parser.md)       | partly built | 105        |
 | 108 | [Phase 1 demo](./108-phase-demo.md)             | pending  | 102–107    |
+| 109 | [Test scenes: the client's half](./109-test-scenes-client-half.md) | pending | 101; wow-chat-2026 176a |
 
 ## Suggested order
 
@@ -37,3 +38,7 @@ override count, Map.dbc + ChrRaces.dbc contents, a decoded BLP dumped to
 ## Updates
 
 _(append entries here as issues complete, newest at the bottom)_
+
+2026-10-07: the code from wow-chat-2026's custom client arrived (its issue
+173v). "Partly built" marks an issue whose Current behavior now describes
+built code; each says what is left. Counts: `lua /home/ritz/programming/ai-stuff/scripts/progress-dashboard.lua /mnt/mtwo/games/azeroth-core/custom-client -m`.

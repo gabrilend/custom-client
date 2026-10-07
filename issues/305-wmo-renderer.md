@@ -1,11 +1,15 @@
 # 305 — WMO Renderer with Portal-Aware Culling
 
+*Filled in part by the code from wow-chat-2026 (its 173g, 173u), 2026-10-07.*
+
 ## Current behavior
 
-[304](./304-wmo-parser.md) gets WMO geometry into CPU memory. Nothing
-renders it. The buildings and interiors that should be visible from the
-[Phase 3 demo's](./308-phase-demo.md) Northshire spawn point — chapel,
-abbey, bridge — are absent.
+Built (`src/042-doodads.c`, a handle): buildings' groups drawn as
+pieces of one model each, with their materials and indoor colours,
+their furnishing sets placed, their pools to the water drawer; small
+models (M2) the same way; copies outside the camera's sight not drawn.
+Not built: portal culling inside buildings; pieces sharing a picture
+merged (docs/047, item 2b).
 
 ## Intended behavior
 

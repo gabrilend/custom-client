@@ -1,10 +1,15 @@
 # 303 — WDT Parser and Tile Streaming Policy
 
+*Filled in part by the code from wow-chat-2026 (its 173s, 173u), 2026-10-07.*
+
 ## Current behavior
 
-We can load one ADT tile by name. We have no notion of *which* tiles
-exist for a given map, no policy for which tiles to keep resident, and
-no thread to do the loading off the main thread.
+Built: tiles loaded round her by the view distance, dropped a tile
+beyond (`043-main.c`); a second thread (`src/034-prefetch.c`, a handle)
+reads the next ring's files ahead and prepares their ground; creatures
+built as they come into sight; the far horizon from the low-detail map
+(`src/039-horizon.c`). A walking tile load stalls about 14 ms (docs/047).
+Checked: a far jump leaves exactly what starting there gives.
 
 ## Intended behavior
 

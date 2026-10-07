@@ -1,9 +1,15 @@
 # 301 — ADT Parser
 
+*Filled in part by the code from wow-chat-2026 (its 173f, 173g, 173r, 173s), 2026-10-07.*
+
 ## Current behavior
 
-The client can read DBC and BLP, but it has no parser for ADT — the
-terrain-tile format. Without it, there's no terrain to render.
+Built (`src/020-adt.c`, in the reader library): ground files (each
+chunk's heights, layers, 4-bit and 8-bit blend maps, baked shadows,
+tints, holes), water layers (MH2O), doodad and building placements with
+their names; the map's WDT blend form; the low-detail WDL heights.
+Checked: the heights match the server's own map files; the placements
+match the server's own collision tiles.
 
 ## Intended behavior
 

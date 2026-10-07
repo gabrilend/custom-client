@@ -1,13 +1,15 @@
 # 203 — Shader Pipeline
 
+*Filled in part by the code from wow-chat-2026 (its 173f, 173u), 2026-10-07.*
+
 ## Current behavior
 
-raylib ships default shaders that handle most of its built-in drawing
-(sprites, fonts, basic 3D models). They are fine for the very first
-textured quad but won't carry us into terrain splatting, M2 skinning, or
-the custom material kinds the renderer needs. There is no
-project-managed way to load, compile, link, hot-reload, or hash custom
-shaders.
+Built: hand-written GLSL 330 shaders, one per kind of thing, inline in
+their files (ground: `038-ground.c`; doodads and buildings with two
+layers, animated pictures and tints, bending on the card: `042-doodads.c`;
+figures: `043-main.c`; water: `040-water.c`; sky dome: `037-sky.c`;
+far horizon: `039-horizon.c`). Each takes the zone's light through one
+helper (`sky_light_shader`). Not built: a shader cache with permutations.
 
 ## Intended behavior
 

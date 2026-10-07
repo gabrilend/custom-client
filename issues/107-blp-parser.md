@@ -1,9 +1,12 @@
 # 107 — BLP Parser
 
+*Filled in part by the code from wow-chat-2026 (its 173d), 2026-10-07.*
+
 ## Current behavior
 
-The client cannot decode BLP textures. Every texture in the game uses
-this format.
+Built: reading (`src/017-blp.c`): BLP2 with DXT1, DXT3, DXT5,
+palette and plain pictures, every smaller copy. In the reader library.
+Not built: writing BLP.
 
 ## Intended behavior
 

@@ -1,12 +1,16 @@
 # 207 — Camera
 
+*Filled in part by the code from wow-chat-2026 (its 173m, 173b4), 2026-10-07.*
+
 ## Current behavior
 
-raylib ships `Camera2D` and `Camera3D` types with `BeginMode2D` /
-`BeginMode3D` helpers that drive its default shaders. They're handy for
-prototyping but don't expose the view/projection matrices we need to
-hand to our own shaders, and `Camera3D` assumes +Y up (we use +Z up).
-There is no project camera concept yet.
+Built (`src/031-camera.c`, window-free, tested): left drag orbits,
+right drag steers her; the original's four following styles as a table
+of behaviours; Auto Follow Speed, Mouse Look Speed, Invert Mouse, Max
+Camera Distance, Follow Terrain, Water Collision, Smart Pivot, Head Bob;
+zoom to first person; the camera comes in before walls. Not built: the
+saved views and camera key bindings (with key bindings), the WC3
+top-down camera (Phase 11).
 
 ## Intended behavior
 

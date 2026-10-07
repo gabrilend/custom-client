@@ -1,11 +1,12 @@
 # 307 — Free-Fly Camera and Frustum Culling
 
+*Filled in part by the code from wow-chat-2026 (its 173u), 2026-10-07.*
+
 ## Current behavior
 
-The Phase 2 [3D camera stub](./207-camera.md) builds a view+projection
-matrix but is not user-driven. There is no frustum-plane extraction, so
-the terrain renderer and WMO renderer are still drawing every chunk
-and every group regardless of where the camera looks.
+Built: the view's six walls from the camera's matrix and a ball test
+(`src/032-sight.c`), used by the ground's quarters, doodad copies, water
+layers and horizon tiles. Not built: the free-fly camera.
 
 ## Intended behavior
 

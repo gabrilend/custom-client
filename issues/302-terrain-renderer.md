@@ -1,11 +1,17 @@
 # 302 — Terrain Renderer (Mesh Builder + Splat Shader)
 
+*Filled in part by the code from wow-chat-2026 (its 173f, 173u), 2026-10-07.*
+
 ## Current behavior
 
-Phase 1 + Phase 2 + [301](./301-adt-parser.md) get us as far as a parsed
-`adt_t` sitting in CPU memory. There is no path from that to vertices on
-the GPU and certainly no terrain shader that knows how to splat up to
-four textures together using the chunk's alpha maps.
+Built: preparing a tile without the window (`src/033-ground-prep.c`:
+points, light from the server's slopes, the blend picture, new pictures
+unpacked with their smaller copies), then sending it
+(`src/038-ground.c`, a handle): each tile four meshes; every ground
+picture a layer of one shared texture array; each patch's four layer
+numbers on its points; the tile's blend maps one 1024 x 1024 picture;
+quarters out of sight not drawn; blob shadows under characters. 0.04 ms
+a frame at Astranaar.
 
 ## Intended behavior
 

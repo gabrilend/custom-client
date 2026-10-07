@@ -1,10 +1,19 @@
 # 102 — Logging and Errors
 
+*Filled in part by the code from wow-chat-2026 (its 173v (answer 13)), 2026-10-07.*
+
 ## Current behavior
 
-The stub `main()` from [101](./101-build-system.md) uses bare `printf`.
-There is no structured way to emit a log line, no severity, no
-subsystem tag, no error type.
+Built (2026-10-07): the error half. `src/013-errors.h`: a `WErr` code
+from one list (not found, corrupt, unsupported, refused, full,
+input/output, graphics card) and a `WWhy` carrying the code and a
+sentence naming exactly what failed; every part that can fail returns
+the code and fills the sentence; failures passed on keep their code.
+Tests check the codes.
+
+Not built: the logging half (levels, subsystems, a log file in the RAM
+tier). Messages go to the terminal with `fprintf` today, warnings marked
+by their wording.
 
 ## Intended behavior
 

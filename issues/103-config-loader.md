@@ -1,9 +1,17 @@
 # 103 — Config Loader
 
+*Filled in part by the code from wow-chat-2026 (its 173b1 (the settings store)), 2026-10-07.*
+
 ## Current behavior
 
-The client has no notion of configuration. All paths and parameters would
-be hardcoded.
+Built, differently from the plan below: `src/014-settings.c`, a store
+of every setting declared once (the original's names, kinds, ranges,
+defaults, sections, whether a restart is needed), with the player's
+`Config.wtf` in the original's `SET name "value"` form (bad lines named
+by number and skipped), read by name each time it is needed. A handle:
+several can live at once (a profile per server). Paths and the start
+come from the run script's arguments (`scripts/run`: `--maps`,
+`--client`, `--world`, `--settings`), not an `input/client.ini` yet.
 
 ## Intended behavior
 

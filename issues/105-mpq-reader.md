@@ -1,15 +1,28 @@
 # 105 — MPQ Chain (Read and Write)
 
+*Filled in part by the code from wow-chat-2026 (its 173k, 173d (archives), 173u (the shared memory)), 2026-10-07.*
+
 ## Current behavior
 
-The client cannot read MPQ archives, which means it cannot read any of the
-original game's assets. world-edit-to-execute has its own Lua MPQ reader for
-WC3 maps, but it lacks bzip2 decompression and the 44-byte header that WoW's
-archives use, and it has no idea of a chain of archives.
+Built: our own reader, not StormLib (the owner, 2026-10-07: "We use our
+own extracter"). `src/015-mpq.c`: MPQ versions 1 and 2, the hash and
+block tables and their scrambling, zlib and stored sectors, files keyed
+with or without the position fix; a chain of the client's archives with
+the locale and patch archives, newest first; a memory of files already
+unpacked (up to 256 MB, read longest ago forgotten first), shared by the
+main thread and the reading-ahead thread under a lock; which archive
+supplied a file. A file an archive doesn't hold is `W_ERR_NOT_FOUND`, so
+the next archive is tried. In the reader library.
+
+Not built: writing archives (`mpq_write`: the stock client's patch
+archives, the seal, packing a player's folder of files, docs/012),
+listing files by pattern, loose overlays (105a), bzip2 and PKWARE
+sectors (none met in the 3.3.5a client).
 
 ## Intended behavior
 
-A C wrapper around StormLib, part of the shared reader library
+Changed 2026-10-07: our own reader, not StormLib (the owner: "We use our
+own extracter"). Part of the shared reader library
 (`libwreaders.so`), that exposes:
 
 ```c

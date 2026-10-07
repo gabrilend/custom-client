@@ -33,6 +33,7 @@ Issues:
 - [106-dbc-parser](../issues/106-dbc-parser.md)
 - [107-blp-parser](../issues/107-blp-parser.md)
 - [108-phase-demo](../issues/108-phase-demo.md)
+- [109-test-scenes-client-half](../issues/109-test-scenes-client-half.md)
 
 ## Phase 2 — Rendering Core
 
@@ -49,6 +50,8 @@ ADT / WDT / WMO parsers + renderers, sky, lighting, streaming. Reads Blizzard
 maps and world-edit-to-execute's converted WC3 maps (loose overlays) the same
 way. By the end: stand in Elwynn Forest, and fly over a converted WC3 map.
 
+Issues added 2026-10-07: [309-water](../issues/309-water.md), [310-shadows-and-live-light](../issues/310-shadows-and-live-light.md).
+
 Capstone: [308-phase-demo](../issues/308-phase-demo.md).
 
 ## Phase 4 — Characters & Animation
@@ -58,6 +61,8 @@ behaviour layer for WC3 map mode (walk speed matching, damage point timing,
 decay), team colour. The M2 reader joins the shared library. By the end: the
 human male idle in Northshire; a WC3 footman-class unit walking and dying on
 WC3 timing.
+
+Issues (2026-10-07): [401](../issues/401-m2-reader.md), [402](../issues/402-skeletons-and-animation.md), [403](../issues/403-particles.md), [404](../issues/404-characters-and-equipment.md).
 
 Capstone: [408-phase-demo](../issues/408-phase-demo.md).
 
@@ -84,6 +89,8 @@ Capstone: [708-phase-demo](../issues/708-phase-demo.md).
 
 Movement, spellcasting, inventory, quests, NPC interaction, looting.
 
+Issues (2026-10-07): [801](../issues/801-movement-by-the-servers-rules.md), [802](../issues/802-collision.md).
+
 Capstone: [808-phase-demo](../issues/808-phase-demo.md).
 
 ## Phase 9 — Social
@@ -96,6 +103,8 @@ Capstone: [908-phase-demo](../issues/908-phase-demo.md).
 
 Audio mixer, overlays, key binding UI, settings, video options. Sounds go
 through the resolver like everything else, once it exists.
+
+Issues (2026-10-07): [1001](../issues/1001-the-options-menu.md).
 
 Capstone: [1008-phase-demo](../issues/1008-phase-demo.md).
 

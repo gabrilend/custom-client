@@ -1,10 +1,15 @@
 # 201 — Window and Render Context
 
+*Filled in part by the code from wow-chat-2026 (its 173a, 173k, 173b5), 2026-10-07.*
+
 ## Current behavior
 
-Phase 1 produced a headless binary. There is no window, no input, no
-graphics context, no main loop. Anything Phase 2 wants to put on a screen
-has nowhere to put it.
+Built (`src/043-main.c`): a raylib window at the settings' resolution,
+windowed or fullscreen, maximized or not, vsync and resizing live; the
+frame loop; Escape quits until the game menu exists; the window's size
+kept when resized. The program's whole state is one App structure;
+shutting down frees everything on the graphics card before the window
+closes.
 
 ## Intended behavior
 

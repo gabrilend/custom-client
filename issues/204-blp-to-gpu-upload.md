@@ -1,11 +1,15 @@
 # 204 — BLP → GPU Texture Upload
 
+*Filled in part by the code from wow-chat-2026 (its 173u (item 7), 173b6), 2026-10-07.*
+
 ## Current behavior
 
-Phase 1 issue [107](./107-blp-parser.md) gave us `blp_t` — parsed BLP
-images sitting in CPU memory, optionally decompressed to RGBA8 by a
-helper. There is no path from a `blp_t` to a GPU texture handle. The
-Phase 2 sprite + UI + scene work all need that path.
+Built (`src/036-texture.c`): compressed pictures (DXT) go to the card
+as stored, with their own smaller copies; others are unpacked and sent;
+every picture filtered as Texture Filtering says (bilinear, trilinear,
+anisotropic 2x to 16x, held to the card's most). Model pictures round
+Astranaar: about 11 MB on the card instead of 72 MB unpacked (the
+picture report prints it). Through the resolver once it exists.
 
 ## Intended behavior
 
