@@ -5,8 +5,9 @@
 ## Current behavior
 
 Built: reading (`src/017-blp.c`): BLP2 with DXT1, DXT3, DXT5,
-palette and plain pictures, every smaller copy. In the reader library.
-Not built: writing BLP.
+palette and plain pictures, any smaller copy by level; WC3's BLP1
+([107a](./completed/107a-wc3-pictures-blp1.md)). In the reader library.
+Not built: writing BLP (steps 5b, the demo of 108).
 
 ## Intended behavior
 
@@ -69,6 +70,10 @@ Phase 1 demonstrates the format works by:
 6. Tests: round-trip a synthetic BLP, decode a real Blizzard BLP and
    compare its RGBA8 form against a reference image bytewise.
 
+## Sub-issues
+
+- [107a — WC3's pictures (BLP1)](./completed/107a-wc3-pictures-blp1.md) (completed 2026-10-07)
+
 ## Acceptance
 
 - Phase 1 demo writes a recognizable login-screen background TGA to
@@ -80,4 +85,4 @@ Phase 1 demonstrates the format works by:
 
 - [docs/003-asset-formats.md](../docs/003-asset-formats.md#blp--textures)
 - Blocked by: [105](./105-mpq-reader.md).
-- Blocks: [108](./108-phase-demo.md), Phase 2 texture upload.
+- Blocks: [108](./108-phase-demo.md), Phase 2 texture upload, [401](./401-m2-reader.md)'s WC3 model reader (its pictures).

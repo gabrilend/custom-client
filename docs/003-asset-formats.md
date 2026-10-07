@@ -53,6 +53,14 @@ in `src/`.
 - Compression: DXT1 / DXT3 / DXT5, or uncompressed BGRA, or palettized.
 - Uploaded as `GL_COMPRESSED_RGBA_S3TC_DXT*_EXT` when the GPU supports
   S3TC, else decompressed CPU-side once at load.
+- BLP1 (Warcraft III's, read since 2026-10-07, issue 107). Magic `BLP1`,
+  a 156-byte header of 32-bit words, then either a JPEG header shared by
+  every mipmap followed by each mipmap's own JPEG remainder (four parts:
+  blue, green, red, alpha as stored, no colour conversion; read by
+  `src/049-jpeg.c`), or a 256-colour BGRA palette with one index byte a
+  pixel and alpha packed after at 0, 1, 4 or 8 bits. Decoded to RGBA on
+  the CPU; held byte for byte to world-edit-to-execute's Lua reader by
+  `tests/050-blp1-matches-lua.lua`.
 
 ## M2 — character / creature / item models
 

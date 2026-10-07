@@ -43,7 +43,7 @@ CFLAGS=(-std=c11 -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -O2 -g -Wall -
 
 # {{{ the parts, in reading order
 # READERS: the game's file formats, no window: the shared library is made of these
-READERS=(013-errors 015-mpq 016-dbc 017-blp 020-adt 021-wmo 022-m2 023-anim 024-particles)
+READERS=(013-errors 015-mpq 016-dbc 017-blp 049-jpeg 020-adt 021-wmo 022-m2 023-anim 024-particles)
 # CORE: every part that needs no window (the readers and the game's arithmetic):
 # the test program links these alone
 CORE=(014-settings "${READERS[@]}" 018-maps 019-navmesh-slope 025-character 026-light 027-liquid
@@ -62,7 +62,7 @@ cc "${CFLAGS[@]}" "${CORE_C[@]}" "${DIR}/tests/044-test-client.c" -lz -lm -lpthr
 echo "building the client"
 cc "${CFLAGS[@]}" "${CORE_C[@]}" "${DRAWING_C[@]}" "${SRC}/043-main.c" "${LINK[@]}" -o "${OUT}/w-client"
 echo "building the reader library"
-cc "${CFLAGS[@]}" -fPIC -shared "${READERS_C[@]}" -lz -lpthread -o "${OUT}/libwreaders.so"
+cc "${CFLAGS[@]}" -fPIC -shared "${READERS_C[@]}" -lz -lm -lpthread -o "${OUT}/libwreaders.so"
 # its header for LuaJIT's ffi.cdef: every reader's declarations, flattened
 # by the preprocessor (the system types they use come along; ffi.cdef
 # accepts them). Checked: LuaJIT loads the library with it.

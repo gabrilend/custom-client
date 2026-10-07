@@ -1,8 +1,11 @@
 /*
- * 017-blp.c (issue 173k) - see 017-blp.h. Ported from src/custom-client/lib/blp.lua.
+ * 017-blp.c (issue 173k; BLP1 issue 107) - see 017-blp.h. BLP2 ported from
+ * wow-chat-2026's src/custom-client/lib/blp.lua; BLP1 from
+ * world-edit-to-execute's src/parsers/blp.lua.
  */
 #include "017-blp.h"
 #include "013-errors.h"
+#include "049-jpeg.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,42 +81,148 @@ static void decode_dxt(const unsigned char *p, int w, int h, int kind, uint8_t *
 }
 /* }}} */
 
-/* {{{ blp_decode */
-WErr blp_decode(const unsigned char *s, size_t len, BlpImage *out, WWhy *why)
+/* {{{ static decode_palette
+ * One colour number a pixel into the BGRA palette at `pal`, then the
+ * alpha packed after at `abits` a pixel (8: a byte each; 4: two a byte,
+ * low half first; 1: eight a byte, low bit first; 0: opaque). The caller
+ * has checked that n + its alpha bytes lie inside the file. */
+static void decode_palette(const unsigned char *pal, const unsigned char *px, size_t n, int abits, uint8_t *o)
 {
-    memset(out, 0, sizeof *out);
-    if (len < 148 + 1024 || memcmp(s, "BLP2", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "not a BLP2 texture"); return why->code; }
+    for (size_t i = 0; i < n; ++i) {
+        int c = px[i];
+        o[i * 4 + 0] = pal[c * 4 + 2]; o[i * 4 + 1] = pal[c * 4 + 1]; o[i * 4 + 2] = pal[c * 4 + 0];
+        int a = 255;
+        if (abits == 8) a = px[n + i];
+        else if (abits == 4) { int byte = px[n + i / 2]; a = ((i % 2 == 0) ? (byte & 15) : (byte >> 4)) * 17; }
+        else if (abits == 1) { int byte = px[n + i / 8]; a = ((byte >> (i % 8)) & 1) ? 255 : 0; }
+        o[i * 4 + 3] = (uint8_t)a;
+    }
+}
+/* the bytes a palette picture of n pixels takes, its alpha included */
+static size_t palette_bytes(size_t n, int abits)
+{
+    return n + (abits == 8 ? n : abits == 4 ? (n + 1) / 2 : abits == 1 ? (n + 7) / 8 : 0);
+}
+/* }}} */
+
+/* {{{ static level_size: a smaller copy's width or height, never under 1 */
+static int level_size(int full, int level)
+{
+    int v = full >> level;
+    return v > 0 ? v : 1;
+}
+/* }}} */
+
+/* {{{ static decode_blp2 */
+static WErr decode_blp2(const unsigned char *s, size_t len, int level, BlpImage *out, WWhy *why)
+{
+    if (len < 148 + 1024) return w_fail(why, W_ERR_CORRUPT, "a BLP2 picture shorter than its header (%zu bytes)", len);
     int enc = s[8], abits = s[9], akind = s[10];
-    int w = (int)rd32(s + 12), h = (int)rd32(s + 16);
-    size_t at = rd32(s + 20);
-    uint8_t *o = malloc((size_t)w * h * 4);
+    int w = level_size((int)rd32(s + 12), level), h = level_size((int)rd32(s + 16), level);
+    size_t at = rd32(s + 20 + level * 4);
+    if (at == 0 || rd32(s + 84 + level * 4) == 0) return w_fail(why, W_ERR_NOT_FOUND, "the BLP2 picture has no copy at level %d", level);
+    size_t n = (size_t)w * h, need;
+    /* a dispatch over the three encodings: how many bytes each needs */
+    if (enc == 2) {
+        if (akind != 0 && akind != 1 && akind != 7) return w_fail(why, W_ERR_UNSUPPORTED, "BLP2 alpha kind %d is not known", akind);
+        size_t bw = w / 4 > 0 ? (size_t)w / 4 : 1, bh = h / 4 > 0 ? (size_t)h / 4 : 1;
+        need = bw * bh * (akind == 0 ? 8 : 16);
+    } else if (enc == 1) need = palette_bytes(n, abits);
+    else if (enc == 3) need = n * 4;
+    else return w_fail(why, W_ERR_UNSUPPORTED, "BLP2 encoding %d is not known", enc);
+    if (at > len || need > len - at) return w_fail(why, W_ERR_CORRUPT, "a BLP2 picture's level %d runs past the end (%zu bytes at %zu of %zu)", level, need, at, len);
+    uint8_t *o = malloc(n * 4);
+    if (!o) return w_fail(why, W_ERR_FULL, "no memory for a %d x %d picture", w, h);
     if (enc == 2) {
         decode_dxt(s + at, w, h, akind, o);
     } else if (enc == 1) {
-        /* palette: one byte a pixel, then the alpha bits packed after */
-        const unsigned char *pal = s + 148;
-        size_t n = (size_t)w * h;
+        decode_palette(s + 148, s + at, n, abits, o);
+    } else {
         for (size_t i = 0; i < n; ++i) {
-            int c = s[at + i];
-            o[i * 4 + 0] = pal[c * 4 + 2]; o[i * 4 + 1] = pal[c * 4 + 1]; o[i * 4 + 2] = pal[c * 4 + 0];
-            int a = 255;
-            if (abits == 8) a = s[at + n + i];
-            else if (abits == 4) { int byte = s[at + n + i / 2]; a = ((i % 2 == 0) ? (byte & 15) : (byte >> 4)) * 17; }
-            else if (abits == 1) { int byte = s[at + n + i / 8]; a = ((byte >> (i % 8)) & 1) ? 255 : 0; }
-            o[i * 4 + 3] = (uint8_t)a;
-        }
-    } else if (enc == 3) {
-        for (size_t i = 0; i < (size_t)w * h; ++i) {
             o[i * 4 + 0] = s[at + i * 4 + 2]; o[i * 4 + 1] = s[at + i * 4 + 1];
             o[i * 4 + 2] = s[at + i * 4 + 0]; o[i * 4 + 3] = s[at + i * 4 + 3];
         }
-    } else {
-        free(o);
-        w_fail(why, W_ERR_CORRUPT, "encoding %d is not known", enc);
-        return why->code;
     }
     out->width = w; out->height = h; out->rgba = o;
-    return 0;
+    return W_OK;
+}
+/* }}} */
+
+/* {{{ static decode_blp1
+ * WC3's pictures (see the header). The JPEG kind is the shared header
+ * and this level's remainder joined, decoded by 049-jpeg.c; the picture
+ * may come out larger than the level says (its blocks are whole 8 x 8
+ * squares), and only the level's own size is kept; where it comes out
+ * smaller, the rest stays zero, as in the Lua twin. */
+static WErr decode_blp1(const unsigned char *s, size_t len, int level, BlpImage *out, WWhy *why)
+{
+    if (len < 160) return w_fail(why, W_ERR_CORRUPT, "a BLP1 picture shorter than its header (%zu bytes)", len);
+    uint32_t enc = rd32(s + 4), abits = rd32(s + 8);
+    int w = level_size((int)rd32(s + 12), level), h = level_size((int)rd32(s + 16), level);
+    size_t at = rd32(s + 28 + level * 4), size = rd32(s + 92 + level * 4);
+    if (at == 0 || size == 0) return w_fail(why, W_ERR_NOT_FOUND, "the BLP1 picture has no copy at level %d", level);
+    if (at > len || size > len - at) return w_fail(why, W_ERR_CORRUPT, "a BLP1 picture's level %d runs past the end (%zu bytes at %zu of %zu)", level, size, at, len);
+    size_t n = (size_t)w * h;
+    /* a dispatch over the two encodings: JPEG (0) and palette (1) */
+    if (enc == 0) {
+        size_t hs = rd32(s + 156);
+        if (hs > len - 160) return w_fail(why, W_ERR_CORRUPT, "a BLP1 picture's JPEG header (%zu bytes) runs past the end", hs);
+        unsigned char *joined = malloc(hs + size);
+        if (!joined) return w_fail(why, W_ERR_FULL, "no memory to join a BLP1 picture's JPEG");
+        memcpy(joined, s + 160, hs);
+        memcpy(joined + hs, s + at, size);
+        JpegImage img;
+        WErr e = jpeg_decode(joined, hs + size, &img, why);
+        free(joined);
+        if (e) return e;
+        if (img.components != 3 && img.components != 4) {
+            jpeg_free(&img);
+            return w_fail(why, W_ERR_UNSUPPORTED, "a BLP1 picture's JPEG has %d parts (3 or 4 are read)", img.components);
+        }
+        uint8_t *o = calloc(n, 4);
+        if (!o) { jpeg_free(&img); return w_fail(why, W_ERR_FULL, "no memory for a %d x %d picture", w, h); }
+        int iw = w < img.width ? w : img.width, ih = h < img.height ? h : img.height, nc = img.components;
+        for (int y = 0; y < ih; ++y)
+            for (int x = 0; x < iw; ++x) {
+                const uint8_t *p = img.pixels + ((size_t)y * img.width + x) * nc;
+                uint8_t *q = o + ((size_t)y * w + x) * 4;
+                q[0] = p[2]; q[1] = p[1]; q[2] = p[0];               /* stored blue, green, red */
+                q[3] = (nc == 4 && abits > 0) ? p[3] : 255;
+            }
+        jpeg_free(&img);
+        out->width = w; out->height = h; out->rgba = o;
+        return W_OK;
+    }
+    if (enc == 1) {
+        if (len < 156 + 1024) return w_fail(why, W_ERR_CORRUPT, "a BLP1 picture shorter than its palette");
+        if (abits != 0 && abits != 1 && abits != 4 && abits != 8) return w_fail(why, W_ERR_UNSUPPORTED, "BLP1 alpha of %u bits a pixel is not known", abits);
+        if (palette_bytes(n, (int)abits) > len - at) return w_fail(why, W_ERR_CORRUPT, "a BLP1 picture's level %d runs past the end", level);
+        uint8_t *o = malloc(n * 4);
+        if (!o) return w_fail(why, W_ERR_FULL, "no memory for a %d x %d picture", w, h);
+        decode_palette(s + 156, s + at, n, (int)abits, o);
+        out->width = w; out->height = h; out->rgba = o;
+        return W_OK;
+    }
+    return w_fail(why, W_ERR_UNSUPPORTED, "BLP1 encoding %u is not known", enc);
+}
+/* }}} */
+
+/* {{{ blp_decode_level */
+WErr blp_decode_level(const unsigned char *s, size_t len, int level, BlpImage *out, WWhy *why)
+{
+    memset(out, 0, sizeof *out);
+    if (level < 0 || level > 15) return w_fail(why, W_ERR_REFUSED, "picture level %d is outside 0 to 15", level);
+    /* a dispatch over the two versions, by their first four bytes */
+    if (len >= 4 && memcmp(s, "BLP2", 4) == 0) return decode_blp2(s, len, level, out, why);
+    if (len >= 4 && memcmp(s, "BLP1", 4) == 0) return decode_blp1(s, len, level, out, why);
+    return w_fail(why, W_ERR_CORRUPT, "not a BLP picture (neither BLP1 nor BLP2)");
+}
+/* }}} */
+
+/* {{{ blp_decode */
+WErr blp_decode(const unsigned char *s, size_t len, BlpImage *out, WWhy *why)
+{
+    return blp_decode_level(s, len, 0, out, why);
 }
 /* }}} */
 

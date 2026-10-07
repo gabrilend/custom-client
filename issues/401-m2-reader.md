@@ -36,7 +36,11 @@ one fills the same structures.
 ## Suggested implementation steps
 
 1. Lower-detail views, chosen by distance.
-2. The WC3 model reader (MDX), filling the same model structure.
+2. The WC3 model reader (MDX), filling the same model structure, the C
+   twin of world-edit-to-execute's `src/parsers/mdx.lua` and
+   `src/assets/gpu.lua` (docs/009, the second crosswalk). Its pictures
+   already read: [107a](./completed/107a-wc3-pictures-blp1.md); its files
+   come out of `war3.mpq` through 015.
 3. Ribbon emitters (with 403) and model lights (with 310).
 
 ## Related

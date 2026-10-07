@@ -17,6 +17,7 @@ The phase ends with a runnable demo that touches every Phase 1 piece.
 | 105a | [Loose overlays and asset resolver](./105a-loose-overlays-and-asset-resolver.md) | pending | 104, 105 |
 | 106 | [DBC parser with data-described layouts](./106-dbc-parser.md) | partly built | 105        |
 | 107 | [BLP read and write](./107-blp-parser.md)       | partly built | 105        |
+| 107a | [WC3's pictures (BLP1)](./completed/107a-wc3-pictures-blp1.md) | completed | 105 |
 | 108 | [Phase 1 demo](./108-phase-demo.md)             | pending  | 102–107    |
 | 109 | [Test scenes: the client's half](./109-test-scenes-client-half.md) | pending | 101; wow-chat-2026 176a |
 
@@ -42,3 +43,9 @@ _(append entries here as issues complete, newest at the bottom)_
 2026-10-07: the code from wow-chat-2026's custom client arrived (its issue
 173v). "Partly built" marks an issue whose Current behavior now describes
 built code; each says what is left. Counts: `lua /home/ritz/programming/ai-stuff/scripts/progress-dashboard.lua /mnt/mtwo/games/azeroth-core/custom-client -m`.
+
+2026-10-07: 107a completed: WC3's pictures (BLP1, with a JPEG reader of
+the client's own) are read, the same bytes as world-edit-to-execute's
+Lua reader on every picture in WC3's archives. The first step of
+world-edit-to-execute's client moving here (docs/009, the second
+crosswalk). BLP writing stays open in 107.

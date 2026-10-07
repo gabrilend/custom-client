@@ -215,3 +215,52 @@ began, with a line pointing here; the issue here names it once in a
 | 173t | creatures from the world database | 404 *new*, then Phase 5 |
 | 173u | rendering on the graphics card | 005, 302, 305 |
 | 173w | queued inputs and test characters | 109 *new*: test scenes, the client's half |
+
+## The second crosswalk: world-edit-to-execute's client arriving (started 2026-10-07)
+
+world-edit-to-execute (WETE) has its own client: a small C host on raylib
+(`src/render/`) that Lua drives. Lua there reads every file (WC3's
+models, pictures, ground, placements), runs the game's rules, and hands
+C flat arrays to draw. Here C reads and draws, and Lua is only for
+scripting (docs/001). So WETE's client does not move file for file: each
+part either gets a **C twin** here (its Lua stays in WETE as the
+reference the twin is checked against, byte for byte where it can be),
+is **replaced** by a part this client already has, or **stays in WETE**
+because it is the game's rules, which run on AzerothCore (docs/004).
+
+Found 2026-10-07: this client's own archive reader (015) already opens
+WC3's `war3.mpq` and reads its models and pictures; no second archive
+reader is needed for the stock game. Maps with damaged or hidden file
+tables are still read by WETE through StormLib, before conversion.
+
+| WETE part | What it is | Here |
+|-----------|------------|------|
+| `parsers/blp.lua`, `parsers/jpeg.lua` | WC3's pictures (BLP1: JPEG inside, or a palette) | C twin in 017 and a JPEG reader beside it (049): [107a](../issues/completed/107a-wc3-pictures-blp1.md). **Done 2026-10-07**, byte for byte with the Lua |
+| `parsers/mdx.lua`, `assets/gpu.lua` | WC3 models into drawable parts | C twin filling 022's model structure: [401](../issues/401-m2-reader.md) step 2 |
+| `assets/anim.lua` | WC3 sequences posed (node matrices) | the same posing as M2: [402](../issues/402-skeletons-and-animation.md) step 1 |
+| particle and ribbon emitters inside `mdx.lua`; spell art (WETE 530, 538) | WC3 particles, ribbons, lightning | one particle system: [403](../issues/403-particles.md) |
+| `render/models.c` | draws Lua-built meshes with team colour | replaced by 041 (figure) and 042 (doodads), which learn team colour (404) |
+| `parsers/w3e.lua`, `assets/ground.lua`, `render/landscape.c`, `render/terrain.c` | WC3 ground and its tileset blending | replaced: WETE's converter (its W02) writes the map as ground tiles (ADT) into an overlay folder; 301 and 302 draw them. *Open question below* |
+| `parsers/doo.lua`, `parsers/unitsdoo.lua` | doodads and starting units placed | WETE's converter writes doodads into the tiles and units as the server's spawns |
+| `render/fog.c` | fog of war drawn over the world | Phase 11, new issue when it begins; the server decides what is seen, the client only shades it |
+| `render/input.c` | ground and unit picking, box select | [1108](../issues/1108-phase-demo.md)'s 1102 and 1103 |
+| `render/ui2d.c`, `ui/wc3/*.lua` | the WC3 interface (command card, resource bar, portraits) | Phase 7's interface runtime, then 1105; the Lua moves as "WC3 interface (Lua)" (docs/001's layers) |
+| `demo/wc3map/*.lua`, `runtime/`, `jass/`, `ai/` | the game's rules: combat, economy, triggers, computer players | **stays in WETE**: converted to server scripts on AzerothCore (WETE W02e); WETE's own engine keeps them for a possible lockstep LAN mode |
+| `render/ceramic/`, `render/threading.c`, `render/slots.c`, `render/bridge.c` | WETE's thread pool and render graph | not moving now: this client has its reading-ahead thread (034). Whether the pool replaces it is open |
+| `render/geometry.c`, `geometry/*.lua` | flat-shaded solids painted from designs | not moving now; *open question below* |
+| `net/` | WETE's own message server | superseded for both games by AzerothCore; WETE's W08 (its own server) is open |
+| `editor/` | the world editor | stays in WETE: it writes maps, this client plays them |
+
+### Open questions for the second crosswalk
+
+1. **WC3 ground: converted or read directly?** The design so far converts
+   a WC3 map's ground into ADT tiles (WETE W02). An ADT chunk blends at
+   most four ground pictures, and WC3 cliffs are models placed by rule,
+   not ground. A direct reader of `war3map.w3e` here would draw WC3 ground
+   exactly as WC3 does, at the cost of a second ground renderer. Which?
+2. **Flat-shaded designs.** WETE's geometry designs (boxes, wedges, quads
+   painted from Lua) are its placeholder art. Do they come here as a
+   placeholder kind for the resolver (012), or stay WETE-only?
+3. **The thread pool.** WETE's ceramic engine (a task graph over a worker
+   pool) is the larger threading design; this client has one reading-ahead
+   thread. Does the pool come here to replace it, later?

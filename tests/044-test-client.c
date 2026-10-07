@@ -38,6 +38,7 @@
 #include "../src/014-settings.h"
 #include "../src/032-sight.h"
 #include "../src/021-wmo.h"
+#include "../src/049-jpeg.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -48,6 +49,11 @@
 #include <string.h>
 
 static int checks, fails;
+
+/* WC3's footman picture (Textures\\Footman.blp in war3.mpq) as
+ * world-edit-to-execute's Lua reader decodes it: every byte folded as
+ * sum = sum * 31 + byte, kept to 32 bits (worked out 2026-10-07) */
+#define FOOTMAN_SUM 0xAF3B44C6u
 
 /* {{{ check */
 static void check(int ok, const char *what)
@@ -389,6 +395,70 @@ int main(int argc, char **argv)
         for (size_t i = 3; i < (size_t)hair.width * hair.height * 4; i += 4) if (hair.rgba[i] < 128) { cut = 1; break; }
     check(cut, "her hair picture has see-through strands (alpha)");
     free(b); blp_free(&hair);
+    /* }}} */
+
+    /* {{{ WC3's pictures (BLP1, issue 107): one built here, then WC3's own */
+    printf("WC3's pictures (BLP1)\n");
+    {
+        /* a 2 x 2 palette picture with 8-bit alpha and a 1 x 1 smaller copy:
+         * colour numbers 0 1 2 3, the palette's first four colours (BGRA)
+         * blue, green, red, white; alphas 255 128 64 0 */
+        unsigned char f[156 + 1024 + 8 + 2] = { 0 };
+        size_t flen = sizeof f;
+        memcpy(f, "BLP1", 4);
+        f[4] = 1;                        /* palette */
+        f[8] = 8;                        /* alpha bits */
+        f[12] = 2; f[16] = 2;            /* width, height */
+        f[24] = 1;                       /* has smaller copies */
+        f[28] = (156 + 1024) & 255; f[29] = (156 + 1024) >> 8;   /* level 0 at 1180 */
+        f[92] = 8;                                               /* 4 numbers + 4 alphas */
+        f[32] = (156 + 1024 + 8) & 255; f[33] = (156 + 1024 + 8) >> 8;   /* level 1 at 1188 */
+        f[96] = 2;
+        static const unsigned char pal[16] = { 255, 0, 0, 0,  0, 255, 0, 0,  0, 0, 255, 0,  255, 255, 255, 0 };
+        memcpy(f + 156, pal, 16);
+        static const unsigned char px[8] = { 0, 1, 2, 3, 255, 128, 64, 0 };
+        memcpy(f + 1180, px, 8);
+        f[1188] = 2; f[1189] = 77;       /* level 1: colour 2 (red), alpha 77 */
+        BlpImage p1;
+        static const unsigned char want[16] = { 0, 0, 255, 255,  0, 255, 0, 128,  255, 0, 0, 64,  255, 255, 255, 0 };
+        check(blp_decode(f, flen, &p1, &why) == W_OK && p1.width == 2 && p1.height == 2 && !memcmp(p1.rgba, want, 16),
+              "a palette BLP1 made here: blue, green, red, white, with their alphas 255, 128, 64, 0");
+        blp_free(&p1);
+        check(blp_decode_level(f, flen, 1, &p1, &why) == W_OK && p1.width == 1 && p1.height == 1
+              && p1.rgba[0] == 255 && p1.rgba[1] == 0 && p1.rgba[2] == 0 && p1.rgba[3] == 77,
+              "its smaller copy (level 1) is one red pixel with alpha 77");
+        blp_free(&p1);
+        check(blp_decode_level(f, flen, 2, &p1, &why) == W_ERR_NOT_FOUND, "it has no level 2: not found, with a sentence");
+        check(blp_decode(f, 1183, &p1, &why) == W_ERR_CORRUPT, "cut short inside its pixels: corrupt, not read past the end");
+        check(blp_decode((const unsigned char *)"BLP9", 4, &p1, &why) == W_ERR_CORRUPT, "neither BLP1 nor BLP2: corrupt");
+        static const unsigned char not_jpeg[4] = { 0xFF, 0xD8, 0xFF, 0x00 };
+        JpegImage ji;
+        check(jpeg_decode(not_jpeg, 4, &ji, &why) == W_ERR_CORRUPT, "a JPEG that stops after its first mark: corrupt");
+
+        /* WC3's own: the install world-edit-to-execute reads (its wc3-installs/) */
+        const char *war3 = argc > 3 ? argv[3] : "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/wc3-installs/frozen-throne/war3.mpq";
+        MpqArchive wa = { 0 };
+        check(mpq_open(&wa, war3, &why) == W_OK, "WC3's war3.mpq opens with this client's own archive reader");
+        size_t flen2 = 0;
+        unsigned char *fb = mpq_read(&wa, "Textures\\Footman.blp", &flen2, &why);
+        check(fb && !memcmp(fb, "BLP1", 4) && fb[4] == 0 && fb[5] == 0 && fb[6] == 0 && fb[7] == 0, "the footman's picture is there, a JPEG BLP1");
+        BlpImage foot;
+        if (fb && blp_decode(fb, flen2, &foot, &why) == W_OK) {
+            snprintf(line, sizeof line, "it decodes to %d x %d (Lua: 256 x 256)", foot.width, foot.height);
+            check(foot.width == 256 && foot.height == 256, line);
+            uint32_t sum = 0;
+            for (size_t i = 0; i < (size_t)foot.width * foot.height * 4; ++i) sum = sum * 31 + foot.rgba[i];
+            snprintf(line, sizeof line, "its bytes' running sum is %08X (Lua: %08X)", sum, FOOTMAN_SUM);
+            check(sum == FOOTMAN_SUM, line);
+            blp_free(&foot);
+        } else check(0, why.text);
+        free(fb);
+        if (wa.file) mpq_close(&wa);
+    }
+    /* }}} */
+
+    /* {{{ the character pictures table */
+    printf("the character pictures table\n");
     b = mpq_chain_read(&chain, "DBFilesClient\\CharSections.dbc", &len, NULL);
     Dbc d;
     check(dbc_open(&d, b, len, &why) == 0 && d.rows > 1000, "the character pictures table reads (over a thousand rows)");

@@ -35,7 +35,7 @@ picture options; this page doesn't copy numbers that go stale.
 | Reader | From | To |
 |---|---|---|
 | `016-dbc.c` | the client's tables (`DBFilesClient\*.dbc`) | rows and fields (Map, Light*, LiquidType, CharSections, ItemDisplayInfo, CreatureDisplayInfo ...) |
-| `017-blp.c` | pictures (`.blp`) | RGBA images |
+| `017-blp.c` (with `049-jpeg.c` for WC3's JPEG pictures) | pictures (`.blp`): the game's BLP2, and Warcraft III's BLP1 (from `war3.mpq`, read by `015-mpq.c` too) | RGBA images, at any of their smaller sizes |
 | `020-adt.c` | ground files (`World\Maps\<map>\<map>_<ty>_<tx>.adt`) | chunks (heights, layers, blend maps, shadows, tints), water layers, placements of doodads and buildings |
 | `022-m2.c` | models (`.m2` + `00.skin`) | points, pieces, units (pictures, layers, blends, tints), solid shapes |
 | `023-anim.c` | the same models (and `.anim` files) | skeletons, animations, poses, bent points, picture animations |

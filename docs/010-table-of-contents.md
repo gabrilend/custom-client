@@ -34,7 +34,7 @@ custom-client/
 ├── src/                                  # the engine, C, files numbered in reading order
 ├── libs/                                 # vendored deps (raylib, when fetched)
 ├── assets/                               # proprietary MPQ chain (gitignored)
-├── tests/                                # the one test program
+├── tests/                                # the test program (044); the WC3 picture parity check (050, LuaJIT)
 ├── scripts/                              # build, run, generate-info, …
 │
 ├── input/   output/   desire/   faith/   strategems/
