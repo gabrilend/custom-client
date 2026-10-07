@@ -30,7 +30,7 @@
  * building placed its pools to `liquids` and to the water drawer (173r;
  * NULL: none). W_OK, or a code with `why`. */
 typedef struct Doodads Doodads;
-Doodads *doodads_new(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);
+Doodads *doodads_new(MpqChain *chain, Textures *textures, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);
 void      doodads_free(Doodads *dd);
 
 /* Adds a tile's doodads, placed relative to the drawing origin (ox, oy),

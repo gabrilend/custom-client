@@ -22,6 +22,7 @@
 
 #include "020-adt.h"
 #include "033-ground-prep.h"
+#include "036-texture.h"
 #include "026-light.h"
 #include "018-maps.h"
 #include "015-mpq.h"
@@ -32,7 +33,7 @@
  * drawing origin); what it points to must outlive the painter. W_OK, or a code
  * with `why`. */
 typedef struct Ground Ground;
-Ground *ground_new(const GroundPlace *place, WWhy *why);
+Ground *ground_new(const GroundPlace *place, const Textures *textures, WWhy *why);
 void    ground_free(Ground *g);
 
 /* Whether a ground picture (by archive name) is on the card now. Safe on

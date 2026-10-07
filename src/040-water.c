@@ -60,6 +60,7 @@ struct Water {
     Kind      kinds[64];  int nkinds;
     Layer    *layers;     int nlayers, layers_cap;
     MpqChain *chain;
+    const Textures *textures;        /* how pictures go to the card (036-texture.h) */
     Dbc       table;      unsigned char *table_bytes;
     Shader    shader;
     Material  material;
@@ -77,9 +78,10 @@ void water_free(Water *w)
     if (IsShaderReady(w->shader)) UnloadShader(w->shader);
     free(w);
 }
-Water *water_new(MpqChain *c, WWhy *why)
+Water *water_new(MpqChain *c, const Textures *textures, WWhy *why)
 {
     Water *w = calloc(1, sizeof *w);
+    w->textures = textures;
     w->chain = c;
     size_t len;
     const char *from;
@@ -132,7 +134,7 @@ static int kind_of(Water *w, int id)
         blp_free(&img);
         GenTextureMipmaps(&k->frames[k->nframes]);
         SetTextureWrap(k->frames[k->nframes], TEXTURE_WRAP_REPEAT);
-        texture_filter(k->frames[k->nframes].id, 0x0DE1, k->frames[k->nframes].mipmaps);   /* a 2D picture, as Texture Filtering says (173b6) */
+        texture_filter(w->textures, k->frames[k->nframes].id, 0x0DE1, k->frames[k->nframes].mipmaps);   /* a 2D picture, as Texture Filtering says (173b6) */
         ++k->nframes;
     }
     return w->nkinds++;

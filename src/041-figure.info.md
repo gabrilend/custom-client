@@ -33,7 +33,7 @@ Where a figure's pictures come from:
   every figure it makes (a picture is read and sent once; eleven
   sentinels share one set of hair). Its pictures last until figures_free,
   so the figures it made must be freed first.
-- `Figures *figures_new(MpqChain *chain);`
+- `Figures *figures_new(MpqChain *chain, Textures *textures);`
 - `void figures_free(Figures *fs);`
 - `type FigureItem`
   an item hung on the figure (173p): its own figure, the bone it hangs

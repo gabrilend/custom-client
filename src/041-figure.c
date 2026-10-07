@@ -22,14 +22,14 @@
 static uint32_t u32le(const unsigned char *s, size_t at) { return s[at] | s[at + 1] << 8 | s[at + 2] << 16 | (uint32_t)s[at + 3] << 24; }
 
 /* {{{ static texture_of: a decoded picture onto the graphics card */
-static Texture2D texture_of(const BlpImage *img)
+static Texture2D texture_of(const Textures *tx, const BlpImage *img)
 {
     Image im = { .data = img->rgba, .width = img->width, .height = img->height, .mipmaps = 1,
                  .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     Texture2D t = LoadTextureFromImage(im);
     GenTextureMipmaps(&t);
     SetTextureWrap(t, TEXTURE_WRAP_REPEAT);
-    texture_filter(t.id, 0x0DE1, t.mipmaps);              /* a 2D picture, as the Texture Filtering setting says (173b6) */
+    texture_filter(tx, t.id, 0x0DE1, t.mipmaps);              /* a 2D picture, as the Texture Filtering setting says (173b6) */
     return t;
 }
 /* load_picture: a picture named in the archives, through a cache kept for
@@ -40,13 +40,15 @@ static Texture2D texture_of(const BlpImage *img)
  * archives match them. */
 struct Figures {
     MpqChain *chain;
+    Textures *textures;               /* how pictures go to the card (036-texture.h) */
     struct { char name[260]; Texture2D tex; } *cache;
     int ncache, cache_cap;
 };
-Figures *figures_new(MpqChain *chain)
+Figures *figures_new(MpqChain *chain, Textures *textures)
 {
     Figures *fs = calloc(1, sizeof *fs);
     fs->chain = chain;
+    fs->textures = textures;
     return fs;
 }
 void figures_free(Figures *fs)
@@ -63,7 +65,7 @@ static WErr load_picture(Figures *fs, const char *name, Texture2D *out, WWhy *wh
     unsigned char *s = mpq_chain_read(fs->chain, name, &len, &from);
     if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the picture %.200s is in none of the client's archives", name); return why->code; }
     WWhy inner;
-    int bad = texture_from_blp(s, len, out, &inner);   /* sent compressed when stored so (173u) */
+    int bad = texture_from_blp(fs->textures, s, len, out, &inner);   /* sent compressed when stored so (173u) */
     free(s);
     if (bad) { w_fail(why, inner.code, "the picture %.120s: %.150s", name, inner.text); return why->code; }
     if (fs->ncache == fs->cache_cap) { fs->cache_cap = fs->cache_cap ? fs->cache_cap * 2 : 64; fs->cache = realloc(fs->cache, sizeof *fs->cache * fs->cache_cap); }
@@ -72,9 +74,9 @@ static WErr load_picture(Figures *fs, const char *name, Texture2D *out, WWhy *wh
     return 0;
 }
 /* own: a picture made for this figure alone (a painted skin sheet), freed with it */
-static Texture2D own(Figure *f, const BlpImage *img)
+static Texture2D own(Figures *fs, Figure *f, const BlpImage *img)
 {
-    Texture2D t = texture_of(img);
+    Texture2D t = texture_of(fs->textures, img);
     if (f->nowned < (int)(sizeof f->owned / sizeof f->owned[0])) f->owned[f->nowned++] = t;
     return t;
 }
@@ -197,10 +199,10 @@ static WErr from_character(Figure *f, Figures *fs, const CharacterLook *look, co
     if (baked) {
         WWhy inner;
         if (load_picture(fs, baked, &skin, &inner)) { w_fail(why, inner.code, "%.250s", inner.text); character_free(&ch); return why->code; }
-    } else skin = own(f, &ch.skin);
-    if (ch.hair.width) hair = own(f, &ch.hair);
-    if (ch.fur.width) fur = own(f, &ch.fur);
-    if (ch.cape.width) cape = own(f, &ch.cape);
+    } else skin = own(fs, f, &ch.skin);
+    if (ch.hair.width) hair = own(fs, f, &ch.hair);
+    if (ch.fur.width) fur = own(fs, f, &ch.fur);
+    if (ch.cape.width) cape = own(fs, f, &ch.cape);
     /* a character's slots: kind 1 its skin sheet, kind 6 its hair, kind 8
      * its fur (a tauren's tail and coat), kind 2 its cloak, kind 0 a picture
      * named inside the model (the eye glow's) */

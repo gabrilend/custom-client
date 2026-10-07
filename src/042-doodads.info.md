@@ -22,7 +22,7 @@ How a placement becomes a position and a turn is adt_place_matrix
   adds its model's solid shape to `collide` (173q; NULL: none), and every
   building placed its pools to `liquids` and to the water drawer (173r;
   NULL: none). W_OK, or a code with `why`.
-- `Doodads *doodads_new(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);`
+- `Doodads *doodads_new(MpqChain *chain, Textures *textures, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);`
 - `void doodads_free(Doodads *dd);`
 - `WErr doodads_add_tile(Doodads *dd, const AdtTile *t, int tile, double ox, double oy, WWhy *why);`
   Adds a tile's doodads, placed relative to the drawing origin (ox, oy),

@@ -153,6 +153,7 @@ typedef struct { uint32_t uid; int building, tile; } Seen;
  * read, their copies, the placements by tile, and the shader */
 struct Doodads {
     MpqChain     *chain;
+    Textures     *textures;           /* how pictures go to the card (036-texture.h) */
     CollideWorld *solids;             /* where placed copies' solid shapes go */
     LiquidWorld  *liquids;            /* where placed buildings' pools go (for the mover) */
     Water        *pools;              /* where placed buildings' pools are drawn */
@@ -210,9 +211,10 @@ void doodads_free(Doodads *dd)
 }
 /* }}} */
 
-Doodads *doodads_new(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
+Doodads *doodads_new(MpqChain *c, Textures *textures, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
 {
     Doodads *dd = calloc(1, sizeof *dd);
+    dd->textures = textures;
     dd->skybox = -1;
     dd->view_right = (Vector3){ 1, 0, 0 };
     dd->view_up = (Vector3){ 0, 0, 1 };
@@ -254,7 +256,7 @@ static int picture(Doodads *dd, const char *name)
     if (!s) { fprintf(stderr, "doodads: the picture %s is in none of the client's archives; pieces using it are left out\n", name); return -1; }
     WWhy why;
     Texture2D t;
-    int bad = texture_from_blp(s, len, &t, &why);   /* sent compressed when stored so (173u) */
+    int bad = texture_from_blp(dd->textures, s, len, &t, &why);   /* sent compressed when stored so (173u) */
     free(s);
     if (bad) { fprintf(stderr, "doodads: the picture %s: %s; pieces using it are left out\n", name, why.text); return -1; }
     if (dd->npictures == dd->pictures_cap) {

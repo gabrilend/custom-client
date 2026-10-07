@@ -19,7 +19,7 @@ slime are drawn as their pictures, unlit and solid.
   A water drawer (the handle: docs/001, "Handles"), with the liquid
   table read; the chain must outlive it. NULL with `why` when the table
   or the shader can't be had. Freed with water_free.
-- `Water *water_new(MpqChain *chain, WWhy *why);`
+- `Water *water_new(MpqChain *chain, const Textures *textures, WWhy *why);`
 - `void water_free(Water *w);`
 - `void water_add_tile(Water *w, const AdtTile *t, int tile, double ox, double oy);`
   Adds a tile's water (tile = tx * 64 + ty), placed relative to the

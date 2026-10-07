@@ -25,6 +25,7 @@
 #define EG_FIGURE_H
 
 #include "013-errors.h"
+#include "036-texture.h"
 
 #include "023-anim.h"
 #include "025-character.h"
@@ -47,7 +48,7 @@ typedef struct {
  * sentinels share one set of hair). Its pictures last until figures_free,
  * so the figures it made must be freed first. */
 typedef struct Figures Figures;
-Figures *figures_new(MpqChain *chain);
+Figures *figures_new(MpqChain *chain, Textures *textures);
 void     figures_free(Figures *fs);
 
 /* an item hung on the figure (173p): its own figure, the bone it hangs

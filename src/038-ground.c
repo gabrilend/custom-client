@@ -115,6 +115,7 @@ struct Ground {
     unsigned int     array_id;
     GroundTile      *tiles[64 * 64];
     GroundPlace      place;           /* the archives, map, heights and origin (033-ground-prep.h) */
+    const Textures  *textures;        /* how pictures go to the card (036-texture.h) */
     pthread_mutex_t  names_lock;
     Shader           shader;
     Material         material;
@@ -136,9 +137,10 @@ void ground_free(Ground *g)
     pthread_mutex_destroy(&g->names_lock);
     free(g);
 }
-Ground *ground_new(const GroundPlace *p, WWhy *why)
+Ground *ground_new(const GroundPlace *p, const Textures *textures, WWhy *why)
 {
     Ground *g = calloc(1, sizeof *g);
+    g->textures = textures;
     pthread_mutex_init(&g->names_lock, NULL);
     g->place = *p;
     g->shader = LoadShaderFromMemory(VS, FS);
@@ -155,7 +157,7 @@ Ground *ground_new(const GroundPlace *p, WWhy *why)
     glad_glTexParameteri(GL_TEXTURE_2D_ARRAY_, GL_TEXTURE_WRAP_S_, GL_REPEAT_);
     glad_glTexParameteri(GL_TEXTURE_2D_ARRAY_, GL_TEXTURE_WRAP_T_, GL_REPEAT_);
     glad_glBindTexture(GL_TEXTURE_2D_ARRAY_, 0);
-    texture_filter(g->array_id, GL_TEXTURE_2D_ARRAY_, LAYER_LEVELS);   /* as the Texture Filtering setting says (173b6) */
+    texture_filter(g->textures, g->array_id, GL_TEXTURE_2D_ARRAY_, LAYER_LEVELS);   /* as the Texture Filtering setting says (173b6) */
     g->loc_eye = GetShaderLocation(g->shader, "eye");
     g->loc_blobs = GetShaderLocation(g->shader, "blobs");
     g->loc_nblobs = GetShaderLocation(g->shader, "nblobs");

@@ -25,7 +25,7 @@ what the tests check. This file is the sending half.
   archives, the map, its blend-map form, the server's heights, the
   drawing origin); what it points to must outlive the painter. W_OK, or a code
   with `why`.
-- `Ground *ground_new(const GroundPlace *place, WWhy *why);`
+- `Ground *ground_new(const GroundPlace *place, const Textures *textures, WWhy *why);`
 - `void ground_free(Ground *g);`
 - `int ground_on_card(void *ground, const char *name);`
   Whether a ground picture (by archive name) is on the card now. Safe on

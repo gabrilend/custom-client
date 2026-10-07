@@ -18,6 +18,7 @@
 #include "020-adt.h"
 #include "021-wmo.h"
 #include "026-light.h"
+#include "036-texture.h"
 #include "015-mpq.h"
 #include "raylib.h"
 
@@ -25,7 +26,7 @@
  * table read; the chain must outlive it. NULL with `why` when the table
  * or the shader can't be had. Freed with water_free. */
 typedef struct Water Water;
-Water *water_new(MpqChain *chain, WWhy *why);
+Water *water_new(MpqChain *chain, const Textures *textures, WWhy *why);
 void   water_free(Water *w);
 
 /* Adds a tile's water (tile = tx * 64 + ty), placed relative to the

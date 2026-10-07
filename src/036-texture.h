@@ -25,23 +25,33 @@
 #include <stddef.h>
 
 /* The picture in `s` (a whole .blp file) on the card. W_OK, or a code with `why`. */
-WErr texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, WWhy *why);
+/* How pictures go to the card (the handle, a small one, held by the
+ * caller; docs/001, "Handles"):
+ *   filter_mode     int: Texture Filtering, below
+ *   anisotropy      float: the samples it asks of the card (1 none, to 16)
+ *   bytes_sent      size_t: picture bytes gone to the card this way
+ *   bytes_unpacked  size_t: what they would have taken unpacked (for the picture report) */
+typedef struct {
+    int    filter_mode;
+    float  anisotropy;
+    size_t bytes_sent, bytes_unpacked;
+} Textures;
+
+WErr texture_from_blp(Textures *tx, const unsigned char *s, size_t len, Texture2D *out, WWhy *why);
 
 /* Texture Filtering (173b6), set once at start (`textureFilteringMode`,
  * the original's 0 to 5): 0 bilinear (smoothed within a copy, the nearest
  * copy), 1 trilinear (smoothed between copies too), 2 to 5 trilinear with
  * 2x, 4x, 8x or 16x anisotropic filtering (sharper where a picture is seen
  * at a slant; held to what the card offers). */
-void texture_filtering(int mode);
+void textures_init(Textures *tx, int mode);   /* needs the window (it asks the card its most) */
 
 /* Applies that filtering to the picture `id` on `target` (an OpenGL
  * texture kind: 2D, or the ground's array) with `levels` copies (1: no
  * smaller copies, plain smoothing). Every picture the client sends goes
  * through this. */
-void texture_filter(unsigned int id, unsigned int target, int levels);
+void texture_filter(const Textures *tx, unsigned int id, unsigned int target, int levels);
 
-/* How many bytes of pictures have gone to the card this way, and how many
- * they would have taken unpacked (for the picture report). */
-void texture_bytes(size_t *sent, size_t *unpacked);
+
 
 #endif

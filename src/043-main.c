@@ -196,6 +196,7 @@ static struct { double x, y, z; float facing; MovesState moves; int cycle; float
 static MapWorld world;
 static Doodads *doodads;                                 /* doodads and buildings (042-doodads.h) */
 static Ground *ground;                                   /* the painted ground (038-ground.h) */
+static Textures textures;                                /* how pictures go to the card (036-texture.h) */
 static Figures *figures;                                 /* the figure maker (041-figure.h) */
 static MpqChain chain;                                   /* the original client's archives, open for the whole run */
 static GroundPlace ground_place;                         /* where tiles' ground is prepared, on either thread (173u) */
@@ -523,13 +524,13 @@ int main(int argc, char **argv)
     SetConfigFlags((vsync_on ? FLAG_VSYNC_HINT : 0) | (resize_locked ? 0 : FLAG_WINDOW_RESIZABLE)
                    | (windowed ? 0 : FLAG_FULLSCREEN_MODE) | (maximized ? FLAG_WINDOW_MAXIMIZED | FLAG_WINDOW_UNDECORATED : 0));
     InitWindow(win_w, win_h, "Everland Ghostsong");
-    texture_filtering((int)settings_num(settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
+    textures_init(&textures, (int)settings_num(settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = LoadShaderFromMemory(FIGURE_VS, MODEL_FS);
     model_sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(model_sh, "bones");   /* 041-figure.c puts each figure's bone picture in that material slot */
     if (mpq_chain_open(&chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
-    figures = figures_new(&chain);                      /* makes her, the bystanders and the creatures (041-figure.h) */
+    figures = figures_new(&chain, &textures);                      /* makes her, the bystanders and the creatures (041-figure.h) */
     if (character_start_outfit(&chain, LOOK.race, HER_CLASS, LOOK.sex, LOOK.items, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     for (int k = 0; k < SLOT_COUNT; ++k) if (WEAR_OVER[k]) LOOK.items[k] = WEAR_OVER[k];
     if (figure_from_character(figures, &her, &LOOK, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
@@ -571,7 +572,7 @@ int main(int argc, char **argv)
         free(mt);
         if (!found) { fprintf(stderr, "no map %d in Map.dbc\n", map_id); CloseWindow(); return 1; }
     }
-    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || !(ground = ground_new(&ground_place, &why))) {
+    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || !(ground = ground_new(&ground_place, &textures, &why))) {
         fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1;
     }
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
@@ -579,9 +580,9 @@ int main(int argc, char **argv)
     prefetch_prepare_ground(pf, &ground_place, ground_on_card, ground);
     solids = collide_new(ox, oy);
     waters = liquid_new();
-    water = water_new(&chain, &why);
+    water = water_new(&chain, &textures, &why);
     if (!water) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
-    doodads = doodads_new(&chain, solids, waters, water, &why);
+    doodads = doodads_new(&chain, &textures, solids, waters, water, &why);
     if (!doodads) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     horizon = horizon_new(&chain, map_name, ox, oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
@@ -881,9 +882,7 @@ int main(int argc, char **argv)
             printf("frames took %.1f ms each on average, over %d (drawing, bending and all)\n", (GetTime() - loop_start) * 1000.0 / frames, frames);
             for (int ph = 0; ph < PH_COUNT; ++ph) printf("  %5.2f ms a frame: %s\n", phase_s[ph] * 1000.0 / frames, PHASE_NAME[ph]);
             printf("the ground sent %.1f draw orders a frame, the doodads %.1f (173u)\n", (double)ground_orders_last(ground) / frames, (double)doodads_orders_last(doodads) / frames);
-            size_t tex_sent, tex_unpacked;
-            texture_bytes(&tex_sent, &tex_unpacked);
-            printf("model pictures on the card: %.1f MB (%.1f MB if unpacked; 173u)\n", tex_sent / 1048576.0, tex_unpacked / 1048576.0);
+            printf("model pictures on the card: %.1f MB (%.1f MB if unpacked; 173u)\n", textures.bytes_sent / 1048576.0, textures.bytes_unpacked / 1048576.0);
             printf("creatures took %.2f ms a frame, %.2f of it posing (%d posed, %d drawn, of %d standing)\n", creature_s * 1000.0 / frames, creature_pose_s * 1000.0 / frames, last_posed, last_drawn, nstanding);
             printf("she ended at x %.2f y %.2f z %.2f, %s\n", elf.x, elf.y, elf.z, elf.swimming ? "swimming" : elf.grounded ? "on the ground" : "in the air");
             /* the creatures nearest her (173t), to check pictures against */
