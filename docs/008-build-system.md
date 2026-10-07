@@ -1,98 +1,93 @@
 # 008 — Build System
 
-CMake ≥ 3.20, wrapped by shell scripts under `scripts/`. Per CLAUDE.md, all
-scripts have a hard-coded `${DIR}` at the top and accept a path argument
-to override it; all paths inside the scripts are relative to `${DIR}`.
+One bash script calls the compiler directly. "bash is easier for me. We
+can always call cmake inside of bash" (owner, 2026-10-07). Rewritten
+2026-10-07 from the earlier CMake plan; the shape below is the working
+build of wow-chat-2026's custom client, carried over in the merge
+(wow-chat-2026 issue 173v).
+
+Per the house rules every script has a hard-coded `${DIR}` (the project
+folder) at the top, takes another as its first argument, and keeps every
+path relative to `${DIR}`.
 
 ## Entry points
 
-| Script               | Purpose                                                   |
-|----------------------|-----------------------------------------------------------|
-| `scripts/build.sh`   | Configure + build. Defaults to debug + asan.              |
-| `scripts/run.sh`     | Build then launch the client with a dev config.           |
-| `scripts/test.sh`    | Build then run the test binaries.                         |
-| `scripts/clean.sh`   | Remove the build tree.                                    |
-| `scripts/format.sh`  | `clang-format -i` over `src/`. Style: project `.clang-format`. |
+| Script | What it does |
+|--------|--------------|
+| `scripts/build` | Compiles the client, its test program and the shared reader library. Options: `--test` runs the tests after building; `--asan` also builds the address-checked client; `--tsan` also builds the race-checked client. Prints how long the build took and appends it to `tmp/shared-memory/build-times.log`. |
+| `scripts/run` | Runs the client, rebuilding it first when any source is newer than the program. `--shot` takes a picture and quits (the picture options are in the script's header). |
+| `scripts/generate-info` | Writes each module's `.info.md` from its header's comments. |
 
-All five take `--dir <path>` to override `${DIR}`, plus pass-through args
-to the underlying tool.
+## What one build makes
+
+| Product | From | Used by |
+|---------|------|---------|
+| the client (`w-client`) | every module and `main` | players, pictures |
+| the test program (`w-client-test`) | every module that needs no window, and the tests | `scripts/build --test` |
+| the reader library (`libwreaders.so`) and its header (`wreaders.h`) | the window-free readers: archives, tables, pictures, models, ground files, buildings | world-edit-to-execute, from Lua through LuaJIT's FFI ([001](./001-architecture-overview.md)) |
+| `w-client-asan`, `w-client-tsan` | the client, with clang's checkers | hunting memory faults and races |
+
+Modules are split by whether they need a window: the readers and the
+game's arithmetic (archives, tables, pictures, models, ground preparation,
+the mover, collision, the settings store) build without raylib's window,
+so the test program and the library link them alone. Drawing modules link
+raylib.
 
 ## Output layout
 
 ```
 ${DIR}/
-  build/
-    debug/        # cmake -DCMAKE_BUILD_TYPE=Debug -DUSE_ASAN=ON
-    release/      # cmake -DCMAKE_BUILD_TYPE=Release
-    test/         # built test binaries
   tmp/            # symlink → /tmp/azc-custom-client/ (RAM; the exec tier)
-    tmp/          #   things that get executed (scratch scripts)
-    shared-memory/  # symlink → /dev/shm/custom-client/ (RAM; logs, dumps, builds)
+    tmp/build/    #   the programs and the library (they are executed)
+    shared-memory/  # symlink → /dev/shm/custom-client/ (RAM; logs, pictures, timings)
 ```
 
 `tmp/` follows the house two-tier layout, kept by
-`/home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers`: executable
-scratch in `/tmp/<name>/tmp/`, everything that is only read or written (logs,
-dumps) in `/dev/shm/<name>` reached as `tmp/shared-memory/` (here `<name>` is
-`azc-custom-client` for the exec tier, set when the link was made, and
-`custom-client` for the artifact tier, named by the tool after the folder). Both live in RAM,
-so a reboot empties them; the link survives, and the session-start hook or a
-script calling `ensure_ram_tiers` rebuilds the folders behind it.
+`/home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers`:
+executable things in `/tmp/<name>/tmp/`, everything only read or written
+(logs, pictures, dumps) in `/dev/shm/<name>`, reached as
+`tmp/shared-memory/`. Both live in RAM, so a reboot empties them; the
+link survives, and scripts call `ensure_ram_tiers` before writing.
 
-We never write logs or intermediate artifacts to `${DIR}/` outside
-`build/` and `tmp/`. Git ignores both.
+Nothing is written into `${DIR}/` outside `tmp/`. Git ignores it.
 
-## CMake structure
-
-- Top-level `CMakeLists.txt` declares the project, options, and pulls in
-  `cmake/` modules.
-- `src/CMakeLists.txt` builds the client executable.
-- `src/<subsystem>/CMakeLists.txt` builds each subsystem as a static
-  library, linked into the executable. One static lib per subsystem keeps
-  link-order issues local.
-- `tests/CMakeLists.txt` builds the test binaries. One executable per
-  subsystem.
-
-## Dependency strategy
-
-- **Vendored** (in `libs/`, built from source as subdirectories): raylib,
-  StormLib, miniz, our math, our XML parser. raylib gets vendored because
-  distro packages lag the upstream release we want and the build is fast.
-- **System-provided** (found via `find_package`): OpenSSL, LuaJIT.
-  Distros ship them; bundling is more pain than gain.
-
-## Compile flags (all targets)
+## Compile flags
 
 ```
--std=c11 -Wall -Wextra -Wpedantic -Werror
--Wno-unused-parameter   # ubiquitous in event handlers
--Wno-missing-field-initializers
+-std=c11 -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -O2 -g
+-Wall -Wextra -Werror
 ```
 
-Sanitizer-debug additionally gets `-fsanitize=address,undefined -g3 -O1`.
+The checked builds use clang with `-fsanitize=address` or
+`-fsanitize=thread`, `-O1 -g`.
 
-## Test harness
+## Dependencies
 
-Each subsystem's `tests/` directory is its own tiny test executable
-linking against the subsystem's static lib. Convention: `assert_eq`,
-`assert_true`, exit 0 on success, exit non-zero with a printed line on
-first failure. No framework — keeps the test signal-to-noise high and the
-build dependency-free.
+- **raylib** 5.x, static, from `/usr/local` today. Planned: from `libs/`
+  when present, otherwise fetched once into `libs/` and built there, so a
+  fresh machine builds the same (carried over from wow-chat-2026 issue
+  173k, not built yet).
+- **zlib**, **pthreads**, **OpenSSL** (with networking), **LuaJIT** (with
+  scripting): the system's.
 
-## CI shape (future)
+## The five-minute rule
 
-Three jobs in a matrix:
+Claude may run this build. If a build ever takes more than about five
+minutes, it stops building and hands the build to the owner, as with
+every long build (the rule carried over from wow-chat-2026's CLAUDE.md).
+The script prints a warning when that line is crossed.
 
-1. Debug + asan + ubsan, run tests.
-2. Release, run tests.
-3. clang-format check.
+## Tests
 
-CI not configured yet — capture the shape now so the first config commit
-has somewhere to point.
+One test program, run by `scripts/build --test`. Each check prints `ok:`
+or `FAIL:` with what it measured, and the program ends with the count.
+The checks hold the client to facts about the original game's own files
+(Astranaar's ground height, her run speed, the server's own placement of
+every doodad) and to measured behaviour (tile loads, pictures compared
+pixel by pixel). No test framework.
 
 ## Related
 
-- [009-roadmap.md](./009-roadmap.md) — the build system itself is the
-  first Phase 1 issue.
-- [002-technology-stack.md](./002-technology-stack.md) — what's being
-  built.
+- [002-technology-stack.md](./002-technology-stack.md): what is built.
+- [009-roadmap.md](./009-roadmap.md): the build is the first Phase 1
+  issue (101).
