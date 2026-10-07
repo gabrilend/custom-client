@@ -51,6 +51,6 @@ Lua reader on every picture in WC3's archives. The first step of
 world-edit-to-execute's client moving here (docs/009, the second
 crosswalk). BLP writing stays open in 107.
 
-2026-10-07: 110 written with 110a-110f: the client becomes a ceramic
+2026-10-07: 110 written with 110a-110g: the client becomes a ceramic
 program, with workers and render threads only (the owner's choice; the
 design and measurements from world-edit-to-execute 515).

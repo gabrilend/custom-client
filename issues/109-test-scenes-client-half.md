@@ -65,7 +65,7 @@ scenes are kept apart; whether the picture options stay as shortcuts).
 
 ## Related
 
-- Pictures drawn with no window come from a windowless render thread: [110f](./110f-more-render-threads.md).
+- Pictures drawn into a texture and written to a file: [110f](./110f-views-drawn-into-textures.md).
 
 - wow-chat-2026 176 (the cc-test profile) and 176a (test scenes).
 - [403](./403-particles.md) (runs repeat), [101](./101-build-system.md).

@@ -25,8 +25,6 @@ and the player are), reading a file out of the archives, decoding a
 model or picture, preparing a tile's ground. Many run at once on the
 workers. Sending to the card is a render thread's: between frames it
 uploads entries finished since the last frame and marks them drawable.
-With several render threads in one share group (110f), one upload
-serves them all.
 
 The reading-ahead thread (034) retires: its work is these stations,
 asked for further out.

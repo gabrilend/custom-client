@@ -56,11 +56,19 @@ works with rather than against:
   process's first thread becomes the window's render thread, and it
   reads events and hands them in; it does no game work.
 
-Several render threads, each with its own context, are possible
-(110f): a windowless one drawing pictures for previews and comparison
-(the map browser's thumbnails, world-edit-to-execute W04), and a second
-view of the world. Contexts made in one share group share textures and
-buffers, so an asset is sent to the card once.
+Further views (a second view of the world, pictures for previews and
+comparisons, the map browser's page) are drawn by the one render thread
+into textures (110f; the owner, 2026-10-07: "I guess displaying it on a
+texture is fine"). More render threads stay possible later if a
+measurement asks for them.
+
+Work that must happen at a time (polling the server's socket, ticks,
+timers) is handed in by a clock (110g), so there is no network thread
+and no timer thread. Per-frame work runs as **standing tasks**: a task
+that stays in existence and is handed in again each tick, writing only
+its own slice, skipped for a tick while still running (a flag says so).
+The owner: "Let's build it now and see what happens. We can optimize it
+later." Built here (110e), and offered to soramech after.
 
 Everything else is a station: loading and decoding files, preparing
 ground, posing models, stepping particles, deciding what is in view,
@@ -75,9 +83,10 @@ the mover, Lua scripts, decoding the server's packets.
 | 110c | [the-mailbox](./110c-the-mailbox.md) | 110a | The three-buffer mailbox per view (515c): stations write, a render thread takes the newest, neither waits; extrapolation and snapping corrections (515d) |
 | 110d | [the-asset-table-and-loading-stations](./110d-the-asset-table-and-loading-stations.md) | 110a, 110b | The append-only asset table (515e); reading tiles, models and pictures as stations; the reading-ahead thread (034) retired into them |
 | 110e | [per-frame-work-as-stations](./110e-per-frame-work-as-stations.md) | 110c, 110d | Posing, particles, what is in view and the mover as stations in chunks, writing the mailbox; measured against the single-thread frame |
-| 110f | [more-render-threads](./110f-more-render-threads.md) | 110b, 110d | A windowless render thread for pictures, and a second view; contexts in one share group; measured against drawing the second view into a picture in one context |
+| 110f | [views-drawn-into-textures](./110f-views-drawn-into-textures.md) | 110b, 110d | A second view, pictures for files, and the map browser's page, each drawn into a texture by the one render thread |
+| 110g | [the-clock](./110g-the-clock.md) | 110a | Work at given moments (socket polling, ticks, timers) with no thread asleep waiting; design open |
 
-Execution order: 110a → (110b ∥ 110c) → 110d → 110e → 110f
+Execution order: 110a → (110b ∥ 110c ∥ 110g) → 110d → 110e → 110f
 
 ## Suggested implementation steps
 
@@ -85,7 +94,7 @@ Execution order: 110a → (110b ∥ 110c) → 110d → 110e → 110f
 2. 110b and 110c together: the window thread and the mailbox it reads.
 3. 110d: loading as stations; this retires 034's thread.
 4. 110e: the frame's work as stations; the frame-time comparison.
-5. 110f: further render threads.
+5. 110f: views into textures. 110g once its shape is chosen.
 6. Rewrite docs/001 "Threads" and docs/005 "The frame" to the built shape.
 
 ## Acceptance
@@ -96,21 +105,23 @@ Execution order: 110a → (110b ∥ 110c) → 110d → 110e → 110f
 - A crowd of 500 WC3-sized figures, posed and drawn: frame time and
   render-thread time recorded beside the single-thread frame's, in this
   issue.
-- Two render threads drawing at once (the window and a windowless
-  picture) in one run.
+- A second view and a picture for a file drawn into textures while the
+  window draws, in one run.
 
 ## Open questions
 
-1. **Where the kept engine lives.** This client takes over the kept copy
-   (world-edit-to-execute's own renderer is retiring into this one), or
-   both projects keep copies, or both point at one copy in `my-libs/`?
-2. **The network thread.** A socket waiting for the server blocks; a
-   station must not. Is a thread that only waits on the socket and hands
-   each decoded packet in as an argument (the engine's "outside
-   submitter") acceptable as a third kind of thread?
-3. **Standing tasks** (515's proposal to soramech: a per-frame task that
-   stays in existence and is re-queued each tick, writing only its slice,
-   with no copy). Adopt here only once soramech has it?
+1. **Where the kept engine lives.** Copies today (2026-10-07): soramech
+   itself (`ai-playground/minimal-soramech`, the original, and
+   `tiny-soramech`), supcom-derivative-clone (`libs/900-cera.c`),
+   world-edit-to-execute (`src/render/ceramic/engine/`, the improved
+   copy, used by its benchmarks, whose job ends as its renderer retires),
+   and from 110a this client. Recommended: this client takes over
+   world-edit-to-execute's copy, which is frozen there with its
+   benchmarks as the record of 515; improvements go back to soramech by
+   its owner's say. Or one shared copy in `my-libs/`?
+2. ~~The network thread~~ Answered 2026-10-07: none; the socket is read
+   without waiting by a task the clock hands in (110g).
+3. ~~Standing tasks~~ Answered 2026-10-07: built now, here (110e).
 
 ## Related
 

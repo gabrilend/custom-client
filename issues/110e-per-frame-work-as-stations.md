@@ -12,8 +12,11 @@ and Lua runs.
 
 ## Intended behavior
 
-Each of these is a station, fed by the tick and the input argument, and
-writing its slice of the mailbox's buffer being written:
+Each of these is a **standing task** (110; the owner, 2026-10-07: "Let's
+build it now and see what happens"): it stays in existence, the clock
+(110g) hands it in each tick, it writes only its slice of the mailbox's
+buffer being written, and a flag skips it for a tick while it is still
+running, so a slow machine updates less often but never queues up work:
 
 - **Posing** in chunks of figures (515a measured that one task per unit
   costs half a frame; 8 to 64 units a task, or one batch per frame,
