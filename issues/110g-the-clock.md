@@ -41,22 +41,34 @@ earliest moment in the registry (one atomic read and one comparison);
 when that moment has passed, it takes the due entries and hands them in.
 The checking rides on work that is happening anyway.
 
+## Leaning (2026-10-07, not yet settled)
+
+The owner considered a task that hands itself in again each time it
+finishes, to check the clock, and noticed it "would certainly spin when
+nothing else is going on", then: "maybe the render thread is the right
+idea, with the 'ring of buckets'". So the leaning is:
+
+- **The render thread moves the clock's hand** once a frame (it is awake
+  every frame anyway); any worker taking a task may also move it, which
+  makes the clock finer while the client is busy. Lateness while idle:
+  at most one frame (about 16 ms at 60 a second); on average half that.
+- **The registry is a timing wheel**: a ring of buckets like a clock
+  face, one bucket per increment. Something due 5 increments from now
+  goes into the bucket 5 past the hand. Each time the hand moves on a
+  bucket, everything in that bucket is handed in. Putting an entry in
+  costs the same however many entries exist; so does firing a bucket.
+  Something due further off than one turn of the ring waits in a coarser
+  wheel (as minutes wait for the hour hand) and drops into the fine one
+  as its time approaches. Entries are added from any thread by pushing
+  onto the bucket's list with one compare-and-swap, so adding takes no
+  lock. A repeating entry puts itself back one period on when fired.
+
 ## Open questions
 
-1. **When nothing is happening.** If every worker is idle, none is
-   taking tasks, so none reads the clock, and a due entry waits until
-   some task arrives. Something must notice the moment. Candidates:
-   (a) the window's render thread, awake every frame anyway, also reads
-   the clock (one comparison a frame; lateness at most one frame);
-   (b) the last worker to go idle sleeps only until the earliest due
-   moment (a sleep with a deadline, so not a spin and not an open-ended
-   wait); (c) both. Which?
-2. **The registry's shape.** A timing wheel (a ring of buckets, one per
-   increment, an entry put in the bucket of its moment; inserting and
-   taking due entries cost the same whatever the count) or a sorted list
-   (simplest; inserting costs more as it grows)?
-3. **The increment.** One millisecond, the simulation's tick (16 ms), or
-   per entry?
+1. Is a frame's lateness acceptable for everything the clock serves? The
+   socket polled once a frame adds up to 16 ms before a server message
+   is seen.
+2. The increment: one millisecond, or the frame?
 
 ## Suggested implementation steps
 

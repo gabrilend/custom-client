@@ -110,15 +110,11 @@ Execution order: 110a → (110b ∥ 110c ∥ 110g) → 110d → 110e → 110f
 
 ## Open questions
 
-1. **Where the kept engine lives.** Copies today (2026-10-07): soramech
-   itself (`ai-playground/minimal-soramech`, the original, and
-   `tiny-soramech`), supcom-derivative-clone (`libs/900-cera.c`),
-   world-edit-to-execute (`src/render/ceramic/engine/`, the improved
-   copy, used by its benchmarks, whose job ends as its renderer retires),
-   and from 110a this client. Recommended: this client takes over
-   world-edit-to-execute's copy, which is frozen there with its
-   benchmarks as the record of 515; improvements go back to soramech by
-   its owner's say. Or one shared copy in `my-libs/`?
+1. ~~Where the kept engine lives~~ Answered 2026-10-07: nowhere as a
+   copy. soramech (`minimal-soramech`) is the upstream, pinned and
+   cloned at build time, and world-edit-to-execute's improvements are
+   patches applied on top (110a; the owner: "we should use the patch
+   system to apply patches when needed, and keep the upstream clean").
 2. ~~The network thread~~ Answered 2026-10-07: none; the socket is read
    without waiting by a task the clock hands in (110g).
 3. ~~Standing tasks~~ Answered 2026-10-07: built now, here (110e).
