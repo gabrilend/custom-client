@@ -1,0 +1,69 @@
+#!/bin/bash
+# run - runs the W client.
+#
+# For a general audience: opens the client: a night elf, the original
+# game's own model, on the ground of Ashenvale near Astranaar, read from
+# the original client's archives and the server's own map files, moved
+# with the game's own controls at 120% speed. Escape quits. Rebuilt first
+# (scripts/build) when any source is newer than the program.
+#
+# Where things come from (git-ignored, in assets/):
+#   assets/server-data/   the server's extracted maps, mmaps, vmaps (a link to
+#                         an AzerothCore server's data-files folder)
+#   assets/world/         the creature lists (creatures-<map>.tsv), generated
+#                         from a world database (wow-chat-2026's
+#                         scripts/generate-custom-client-creatures) until the
+#                         world comes from the server
+#   assets/settings/      the player's Config.wtf
+#   CLIENT                the original 3.3.5a client's Data folder (default below)
+#
+# Usage: scripts/run [PROJECT_DIR] [--shot [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]]
+#   --shot   run the world a few seconds, save a picture to
+#            tmp/shared-memory/shot.png, and quit (the window shows for a
+#            moment). After it: --zoom N (camera N yards off, 0 first
+#            person), --front (looking at her face), --turn DEG (the camera
+#            turned DEG degrees round her), --pitch DEG (raised DEG degrees,
+#            up to 83), --pose ID MS (her held in animation ID at MS
+#            milliseconds: 0 stand, 4 walk, 5 run, 38 jump ...), --clock MS
+#            (the world's animations started MS milliseconds in), --hour H
+#            (the time of day, 0-24; without it, this machine's clock),
+#            --face DEG (her start facing turned DEG degrees left), --walk S
+#            (hold forward for S world-seconds), --walking (walk toggled on,
+#            as the keypad's / does), --dive S (then hold X, swimming down),
+#            --wait S (then wait S world-seconds more), --wear SLOT:LOOK,...
+#            (dress her: e.g. chest:41143,hands:41138), --goto X Y (one
+#            world-second in, move her to world X, Y), --map ID X Y (start
+#            on map ID at world X, Y: 0 Eastern Kingdoms, 1 Kalimdor, 530
+#            Outland, 571 Northrend).
+#   --no-read-ahead (with or without --shot) no second thread reading tiles ahead
+
+# {{{ set_dir
+DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+if [[ -n "$1" && "$1" != --* ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+source /home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers
+ensure_ram_tiers "${DIR}" || exit 1
+
+MAPS="${DIR}/assets/server-data/maps"
+[[ -d "${MAPS}" ]] || { echo "ERROR: ${MAPS} missing: link assets/server-data to an AzerothCore server's extracted data-files folder"; exit 1; }
+CLIENT="${CLIENT:-/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data}"
+[[ -f "${CLIENT}/common.MPQ" ]] || { echo "ERROR: ${CLIENT} has no common.MPQ: set CLIENT to the 3.3.5a client's Data folder"; exit 1; }
+SETTINGS="${DIR}/assets/settings/Config.wtf"
+mkdir -p "$(dirname "${SETTINGS}")"
+
+ARGS=(--maps "${MAPS}" --client "${CLIENT}" --settings "${SETTINGS}" --world "${DIR}/assets/world")
+if [[ "${1:-}" == "--shot" ]]; then
+    shift
+    ARGS+=(--shot "${DIR}/tmp/shared-memory/shot.png")
+fi
+ARGS+=("$@")                                     # the picture options and --no-read-ahead
+
+BIN="${DIR}/tmp/tmp/build/w-client"
+if [[ ! -x "${BIN}" ]] || [[ -n "$(find "${DIR}/src" -newer "${BIN}" -name '*.[ch]' -print -quit)" ]]; then
+    "${DIR}/scripts/build" "${DIR}" || exit 1
+fi
+exec "${BIN}" "${ARGS[@]}"

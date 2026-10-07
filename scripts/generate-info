@@ -1,0 +1,114 @@
+#!/usr/bin/env luajit
+-- generate-info - writes a <name>.info.md beside each of the W client's C
+-- modules, from its header's own comments.
+--
+-- For a general audience: every part of the client (the ground
+-- reader, the camera, the water ...) is a pair of files: a header saying
+-- what the part offers, and the code doing it. The header already
+-- explains, in plain words, what the part is for and what each of its
+-- offered functions takes and gives back. This copies that into one short
+-- page per part (<name>.info.md, beside the code), so a reader can learn
+-- a part without reading its code. Re-run it after headers change; the
+-- pages are never edited by hand.
+--
+-- Usage: scripts/generate-info [PROJECT_DIR]
+--   default: /mnt/mtwo/games/azeroth-core/custom-client
+--   reads:   PROJECT_DIR/src/*.h
+--   writes:  PROJECT_DIR/src/<name>.info.md
+
+local DIR = arg[1] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local SRC = DIR .. "/src"
+
+-- {{{ local function read
+local function read(path)
+    local f = assert(io.open(path, "r"))
+    local s = f:read("*a")
+    f:close()
+    return s
+end
+-- }}}
+
+-- {{{ local function strip
+-- A C comment's text without its markers and the " * " each line starts with.
+local function strip(comment)
+    comment = comment:gsub("^/%*+", ""):gsub("%*+/$", "")
+    local lines = {}
+    for line in (comment .. "\n"):gmatch("(.-)\n") do
+        line = line:gsub("^%s*%* ?", ""):gsub("%s+$", "")
+        lines[#lines + 1] = line
+    end
+    while lines[1] == "" do table.remove(lines, 1) end
+    if lines[1] then lines[1] = lines[1]:gsub("^%s+", "") end   -- the text after "/*" on the comment's first line
+    while lines[#lines] == "" do table.remove(lines) end
+    return table.concat(lines, "\n")
+end
+-- }}}
+
+-- {{{ local function offered
+-- Each declaration the header offers, with the comment just above it:
+-- functions (a line ending in ");" that isn't inside a struct), and the
+-- names of structures and enums. Returns a list of { what, text }.
+local function offered(header)
+    local items = {}
+    local pending = nil                      -- the last comment seen, until a declaration takes it
+    local depth = 0                          -- inside { } of a struct or enum
+    local i = 1
+    while i <= #header do
+        local c0 = header:find("/%*", i)
+        local nl = header:find("\n", i) or #header + 1
+        local line = header:sub(i, nl - 1)
+        if c0 and c0 < nl and line:match("^%s*/%*") then
+            local c1 = header:find("%*/", c0) or #header
+            pending = strip(header:sub(c0, c1 + 1))
+            i = (header:find("\n", c1) or #header) + 1
+        else
+            local opens = select(2, line:gsub("{", "")) ; local closes = select(2, line:gsub("}", ""))
+            if depth == 0 and line:match("%);%s*$") and line:match("%(") and not line:match("^%s*#") then
+                -- a function; it may run over several lines (join until ");")
+                items[#items + 1] = { what = line:gsub("^%s+", ""), text = pending }
+                pending = nil
+            elseif depth == 0 and line:match("^typedef") and line:match("[%w_]+;%s*$") and not line:match("{") then
+                items[#items + 1] = { what = line, text = pending }
+                pending = nil
+            elseif depth == 0 and line:match("^%s*}%s*[%w_]+;") then
+                items[#items + 1] = { what = "typedef " .. line:match("}%s*([%w_]+);"), text = pending }
+                pending = nil
+            end
+            depth = depth + opens - closes
+            if depth == 0 and closes > 0 then
+                local name = line:match("}%s*([%w_]+);")
+                if name then items[#items + 1] = { what = "type " .. name, text = pending }; pending = nil end
+            end
+            i = nl + 1
+        end
+    end
+    return items
+end
+-- }}}
+
+-- {{{ main
+local listing = io.popen('ls "' .. SRC .. '"/*.h')
+local written = 0
+for path in listing:lines() do
+    local name = path:match("([^/]+)%.h$")
+    local h = read(path)
+    local head = h:match("^%s*(/%*.-%*/)")
+    local out = { "# " .. name, "", "*Written by `scripts/generate-info` from `" .. name .. ".h`; don't edit, re-run it.*", "" }
+    if head then out[#out + 1] = strip(head); out[#out + 1] = "" end
+    local items = offered(h:sub(#(head or "") + 1))
+    if #items > 0 then out[#out + 1] = "## What it offers"; out[#out + 1] = "" end
+    for _, it in ipairs(items) do
+        out[#out + 1] = "- `" .. it.what:gsub("%s+", " ") .. "`"
+        if it.text and it.text ~= "" then
+            for line in (it.text .. "\n"):gmatch("(.-)\n") do out[#out + 1] = "  " .. line end
+        end
+    end
+    out[#out + 1] = ""
+    local f = assert(io.open(SRC .. "/" .. name .. ".info.md", "w"))
+    f:write(table.concat(out, "\n"))
+    f:close()
+    written = written + 1
+end
+listing:close()
+print("generate-info: wrote " .. written .. " pages beside the code in " .. SRC)
+-- }}}
