@@ -54,7 +54,7 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1):
 
 - `type LightNow`
 - `type LightTables`
-- `int light_open(LightTables *t, MpqChain *chain, char *why, int why_len);`
+- `WErr light_open(LightTables *t, MpqChain *chain, WWhy *why);`
 - `void light_close(LightTables *t);`
 - `int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out);`
   The light at world (x, y, z) on map `map` at `hours` since midnight

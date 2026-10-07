@@ -42,8 +42,8 @@ blocks (PartBlock: n keys of time 0-1 and up to 3 values).
 - `type Particle`
 - `type EmitterRun`
   One emitter running on one placed copy.
-- `int particles_read(const Anim *a, Emitter **out, int *n, char *why, int why_len);`
-  The model's emitters (from the model file kept in `a`). 0, or 1 with `why`.
+- `WErr particles_read(const Anim *a, Emitter **out, int *n, WWhy *why);`
+  The model's emitters (from the model file kept in `a`). W_OK, or a code with `why`.
 - `void particles_step(const Anim *a, const Emitter *e, EmitterRun *run, const float world[16], int seq, uint32_t ms, float dt, float density);`
   One frame: ages and moves the living, then gives birth at the rate.
   `world` is where the emitter's bone is in the world this frame (the

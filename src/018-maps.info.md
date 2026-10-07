@@ -23,7 +23,7 @@ count from the world's north-west corner:
 - `type MapWorld`
   A world on one map: tiles loaded as needed and kept.
 - `void maps_tile_of(float x, float y, int *tx, int *ty);`
-- `MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, char *why, int why_len);`
+- `MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, WWhy *why);`
 - `void maps_free_tile(MapTile *t);`
 - `int maps_is_hole(const MapTile *t, int row, int col);`
 - `float maps_height_in_tile(const MapTile *t, float x, float y, float *gx, float *gy);`

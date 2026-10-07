@@ -47,7 +47,7 @@ move back from pivot, as the original builds it.
 - `type AnimTrack`
 - `type AnimBone`
 - `type Anim`
-- `int anim_read(const unsigned char *m2, size_t len, Anim *out, char *why, int why_len);`
+- `WErr anim_read(const unsigned char *m2, size_t len, Anim *out, WWhy *why);`
   Reads the skeleton and animation list of a model file (copied).
 - `void anim_free(Anim *a);`
 - `int anim_find(const Anim *a, int id, int variation);`

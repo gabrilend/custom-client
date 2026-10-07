@@ -37,6 +37,7 @@
  *                     0 stand, 5 run, 13 walk backwards, 38 jump ...) at MS
  */
 #include "023-anim.h"
+#include "013-errors.h"
 #include "031-camera.h"
 #include "025-character.h"
 #include "028-collide.h"
@@ -246,12 +247,12 @@ static int build_creature(int k)
     for (int b = 0; b < nbad_display; ++b) if (bad_display[b] == sp->display) return 1;
     if (nstanding == standing_cap) { standing_cap = standing_cap ? standing_cap * 2 : 64; standing = realloc(standing, sizeof *standing * standing_cap); }
     Standing *st = &standing[nstanding];
-    char why[600];
+    WWhy why;
     double t0 = GetTime();
-    int failed = figure_from_display(&st->fig, &chain, sp->display, why, sizeof why);
+    int failed = figure_from_display(&st->fig, &chain, sp->display, &why);
     creature_build_s += GetTime() - t0;
     if (failed) {
-        fprintf(stderr, "creatures: %s (%s and any others with its look are left out)\n", why, sp->name);
+        fprintf(stderr, "creatures: %s (%s and any others with its look are left out)\n", why.text, sp->name);
         if (nbad_display < 512) bad_display[nbad_display++] = sp->display;
         return 1;
     }
@@ -373,23 +374,26 @@ static void refresh_tiles(void)
         for (int dy = -TILE_REACH; dy <= TILE_REACH; ++dy) {
             int x = tx + dx, y = ty + dy;
             if (x < 0 || x >= 64 || y < 0 || y >= 64 || tile_state[x * 64 + y]) continue;
-            char why[600];
+            WWhy why;
             AdtTile *adt;
             double load_t0 = GetTime();
             /* the ground: prepared ahead by the helper thread when it got
              * there first (then only sent to the card here), else prepared
              * here (the start's tiles, a jump, or the helper turned off) */
             GroundPrep *prep;
-            int got = prefetch_take_ground(x, y, &prep);
-            if (got == 2) got = ground_prep_tile(&ground_place, x, y, ground_on_card, &prep, why, sizeof why);
-            if (got == 0) got = ground_load_tile(prep, &adt, why, sizeof why);
-            if (got < 0) { fprintf(stderr, "painting tile (%d, %d): %s\n", x, y, why); exit(1); }
+            int taken = prefetch_take_ground(x, y, &prep);   /* 0 prepared, 1 no ground file there, 2 not prepared */
+            WErr got = taken == 0 ? W_OK : taken == 1 ? W_ERR_NOT_FOUND
+                     : ground_prep_tile(&ground_place, x, y, ground_on_card, &prep, &why);
+            if (got == W_OK) got = ground_load_tile(prep, &adt, &why);
+            /* no ground file there (open sea) is a tile with nothing to draw;
+             * anything else stops the client */
+            if (got != W_OK && got != W_ERR_NOT_FOUND) { fprintf(stderr, "painting tile (%d, %d): %s (%s)\n", x, y, why.text, w_err_name(got)); exit(1); }
             double ground_t1 = GetTime();
             if (started_walking) walk_ground_s += ground_t1 - load_t0;
             if (got == 0) {
                 liquid_add_tile(waters, x, y, adt);
                 water_add_tile(adt, x * 64 + y, ox, oy);
-                if (doodads_add_tile(adt, x * 64 + y, ox, oy, why, sizeof why)) { fprintf(stderr, "doodads on tile (%d, %d): %s\n", x, y, why); exit(1); }
+                if (doodads_add_tile(adt, x * 64 + y, ox, oy, &why)) { fprintf(stderr, "doodads on tile (%d, %d): %s\n", x, y, why.text); exit(1); }
                 if (started_walking) walk_doodads_s += GetTime() - ground_t1;
                 adt_free(adt);
                 free(adt);
@@ -485,7 +489,7 @@ int main(int argc, char **argv)
     int win_w, win_h;
     settings_resolution(settings_text("gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
 
-    char why[900];
+    WWhy why;
     maps_world_init(&world, maps, map_id);
     float gx, gy;
     float z = maps_world_height(&world, (float)start_x, (float)start_y, &gx, &gy);
@@ -497,8 +501,8 @@ int main(int argc, char **argv)
     char *cut = strstr(mmaps, "/maps");
     if (!cut) { fprintf(stderr, "the maps folder %s doesn't end in /maps; can't find mmaps beside it\n", maps); return 1; }
     strcpy(cut, "/mmaps");
-    float max_slope = navmesh_slope_read(mmaps, map_id, why, sizeof why);
-    if (max_slope < 0) { fprintf(stderr, "%s\n", why); return 1; }
+    float max_slope = navmesh_slope_read(mmaps, map_id, &why);
+    if (max_slope < 0) { fprintf(stderr, "%s\n", why.text); return 1; }
     mover_init(&elf, start_x, start_y, z, START_O + face_deg * PI / 180, SPEED, max_slope);
     view.yaw = (float)elf.o + (view.yaw - (float)START_O);   /* the camera keeps its place behind her */
     ox = floor(start_x); oy = floor(start_y);
@@ -515,11 +519,11 @@ int main(int argc, char **argv)
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = LoadShaderFromMemory(FIGURE_VS, MODEL_FS);
     model_sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(model_sh, "bones");   /* 041-figure.c puts each figure's bone picture in that material slot */
-    if (mpq_chain_open(&chain, client, "enUS", why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
+    if (mpq_chain_open(&chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
-    if (character_start_outfit(&chain, LOOK.race, HER_CLASS, LOOK.sex, LOOK.items, why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
+    if (character_start_outfit(&chain, LOOK.race, HER_CLASS, LOOK.sex, LOOK.items, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     for (int k = 0; k < SLOT_COUNT; ++k) if (WEAR_OVER[k]) LOOK.items[k] = WEAR_OVER[k];
-    if (figure_from_character(&her, &chain, &LOOK, why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
+    if (figure_from_character(&her, &chain, &LOOK, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     static const int NEEDED[] = { MOVE_STAND, MOVE_RUN, MOVE_WALK, MOVE_WALK_BACK, MOVE_SHUFFLE_LEFT, MOVE_SHUFFLE_RIGHT, MOVE_JUMP_START, MOVE_JUMP, MOVE_JUMP_END, MOVE_FALL };
     for (unsigned i = 0; i < sizeof NEEDED / sizeof NEEDED[0]; ++i)
         if (anim_find(&her.anim, NEEDED[i], 0) < 0) fprintf(stderr, "her animations: her model has no animation %d; she stands instead\n", NEEDED[i]);
@@ -528,13 +532,13 @@ int main(int argc, char **argv)
     for (int i = 0; i < NBYSTANDERS; ++i) {
         Figure *f = &others[nothers];
         CharacterLook look = { BYSTANDERS[i].race, BYSTANDERS[i].sex, 0, 0, 0, 0, { 0 }, BYSTANDERS[i].facial_hair, 0 };
-        if (BYSTANDERS[i].race && character_start_outfit(&chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, why, sizeof why)) {
-            fprintf(stderr, "bystander %d left out: %s\n", i, why);
+        if (BYSTANDERS[i].race && character_start_outfit(&chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, &why)) {
+            fprintf(stderr, "bystander %d left out: %s\n", i, why.text);
             continue;
         }
-        int bad = BYSTANDERS[i].race ? figure_from_character(f, &chain, &look, why, sizeof why)
-                                     : figure_from_display(f, &chain, BYSTANDERS[i].display, why, sizeof why);
-        if (bad) { fprintf(stderr, "bystander %d left out: %s\n", i, why); continue; }
+        int bad = BYSTANDERS[i].race ? figure_from_character(f, &chain, &look, &why)
+                                     : figure_from_display(f, &chain, BYSTANDERS[i].display, &why);
+        if (bad) { fprintf(stderr, "bystander %d left out: %s\n", i, why.text); continue; }
         double fx = cos(START_O), fy = sin(START_O);
         other_at[nothers].x = start_x + fx * BYSTANDERS[i].ahead - fy * BYSTANDERS[i].left;
         other_at[nothers].y = start_y + fy * BYSTANDERS[i].ahead + fx * BYSTANDERS[i].left;
@@ -551,15 +555,15 @@ int main(int argc, char **argv)
         const char *from;
         unsigned char *mt = mpq_chain_read(&chain, "DBFilesClient\\Map.dbc", &len, &from);
         Dbc maps_table;
-        if (!mt || dbc_open(&maps_table, mt, len, why, sizeof why)) { fprintf(stderr, "Map.dbc: %s\n", mt ? why : "not in the archives"); CloseWindow(); return 1; }
+        if (!mt || dbc_open(&maps_table, mt, len, &why)) { fprintf(stderr, "Map.dbc: %s\n", mt ? why.text : "not in the archives"); CloseWindow(); return 1; }
         int found = 0;
         for (uint32_t r = 0; r < maps_table.rows && !found; ++r)
             if ((int)dbc_u32(&maps_table, r, 1) == map_id) { snprintf(map_name, sizeof map_name, "%s", dbc_text(&maps_table, r, 2)); found = 1; }
         free(mt);
         if (!found) { fprintf(stderr, "no map %d in Map.dbc\n", map_id); CloseWindow(); return 1; }
     }
-    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, why, sizeof why) || ground_init(&ground_place, why, sizeof why)) {
-        fprintf(stderr, "%s\n", why); CloseWindow(); return 1;
+    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || ground_init(&ground_place, &why)) {
+        fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1;
     }
     if (read_ahead) {                                    /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
         prefetch_start(&chain, map_name);
@@ -567,11 +571,11 @@ int main(int argc, char **argv)
     }
     solids = collide_new(ox, oy);
     waters = liquid_new();
-    if (doodads_init(&chain, solids, waters, why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
-    if (horizon_init(&chain, map_name, ox, oy, why, sizeof why)) printf("horizon: %s\n", why);
-    if (water_init(&chain, why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
+    if (doodads_init(&chain, solids, waters, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (horizon_init(&chain, map_name, ox, oy, &why)) printf("horizon: %s\n", why.text);
+    if (water_init(&chain, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     LightTables lights;
-    if (light_open(&lights, &chain, why, sizeof why)) { fprintf(stderr, "%s\n", why); CloseWindow(); return 1; }
+    if (light_open(&lights, &chain, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     sky_init();
     LightNow light;
     int light_id = light_at(&lights, map_id, (float)elf.x, (float)elf.y, (float)elf.z, hours, LIGHT_CLEAR, &light);
@@ -582,9 +586,10 @@ int main(int argc, char **argv)
     if (world_dir) {
         char path[600];
         snprintf(path, sizeof path, "%s/creatures-%d.tsv", world_dir, map_id);
-        int got = creatures_read(path, &spawns, why, sizeof why);
-        if (got < 0) { fprintf(stderr, "creatures: %s\n", why); CloseWindow(); return 1; }
-        if (got > 0) fprintf(stderr, "creatures: %s\n", why);
+        WErr got = creatures_read(path, &spawns, &why);
+        /* no list: said, and the world runs without creatures; a broken one stops the client */
+        if (got != W_OK && got != W_ERR_NOT_FOUND) { fprintf(stderr, "creatures: %s\n", why.text); CloseWindow(); return 1; }
+        if (got == W_ERR_NOT_FOUND) fprintf(stderr, "creatures: %s\n", why.text);
         else printf("creatures: %d spawns on this map in %s\n", spawns.n, path);
     } else fprintf(stderr, "creatures: no --world folder given; running without creatures\n");
     refresh_tiles();
@@ -896,11 +901,11 @@ int main(int argc, char **argv)
         snprintf(size, sizeof size, "%dx%d", GetScreenWidth(), GetScreenHeight());
         if (!strcmp(size, settings_text("gxResolution"))) {
             /* not resized: nothing to keep */
-        } else if (settings_set("gxResolution", size, why, sizeof why)) {
-            fprintf(stderr, "settings: the window's size isn't kept: %s\n", why);   /* smaller than 640x480 */
+        } else if (settings_set("gxResolution", size, &why)) {
+            fprintf(stderr, "settings: the window's size isn't kept: %s\n", why.text);   /* smaller than 640x480 */
         } else {
             if (!settings_file) printf("settings: the window is now %s, but no --settings file was given to keep it in\n", size);
-            else if (settings_save(settings_file, why, sizeof why)) fprintf(stderr, "settings: the window's size %s could not be saved: %s\n", size, why);
+            else if (settings_save(settings_file, &why)) fprintf(stderr, "settings: the window's size %s could not be saved: %s\n", size, why.text);
             else printf("settings: the window's size %s saved to %s\n", size, settings_file);
         }
     }

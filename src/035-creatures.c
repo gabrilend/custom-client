@@ -6,6 +6,7 @@
  * creatures sit together and are found by halving the list.
  */
 #include "035-creatures.h"
+#include "013-errors.h"
 #include "018-maps.h"
 
 #include <errno.h>
@@ -23,13 +24,13 @@ static int by_tile(const void *a, const void *b)
 /* }}} */
 
 /* {{{ creatures_read */
-int creatures_read(const char *path, SpawnList *out, char *why, int why_len)
+WErr creatures_read(const char *path, SpawnList *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     FILE *f = fopen(path, "r");
     if (!f) {
-        snprintf(why, why_len, "%.200s: %s (make it with scripts/generate-custom-client-creatures; running without creatures)", path, strerror(errno));
-        return 1;
+        w_fail(why, W_ERR_NOT_FOUND, "%.200s: %s (make it with wow-chat-2026's scripts/generate-custom-client-creatures; running without creatures)", path, strerror(errno));
+        return why->code;
     }
     char line[512];
     int cap = 0, number = 0;
@@ -41,10 +42,10 @@ int creatures_read(const char *path, SpawnList *out, char *why, int why_len)
         int name_at = 0;
         /* the name is the rest of the line after the eighth tab */
         if (sscanf(line, "%u\t%u\t%d\t%f\t%lf\t%lf\t%lf\t%f\t%n", &s.guid, &s.entry, &s.display, &s.size, &s.x, &s.y, &s.z, &s.facing, &name_at) != 8 || !name_at) {
-            snprintf(why, why_len, "%.200s, line %d: not nine tab-separated fields (guid, entry, display, size, x, y, z, facing, name)", path, number);
+            w_fail(why, W_ERR_CORRUPT, "%.200s, line %d: not nine tab-separated fields (guid, entry, display, size, x, y, z, facing, name)", path, number);
             fclose(f);
             creatures_free(out);
-            return -1;
+            return why->code;
         }
         snprintf(s.name, sizeof s.name, "%.*s", (int)strcspn(line + name_at, "\r\n"), line + name_at);
         int tx, ty;

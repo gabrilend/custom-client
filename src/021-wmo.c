@@ -6,6 +6,7 @@
  * batches. Every block is checked to lie inside its file.
  */
 #include "021-wmo.h"
+#include "013-errors.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +29,7 @@ static void name_at(const unsigned char *blk, size_t blk_len, uint32_t off, char
 /* }}} */
 
 /* {{{ wmo_read_root */
-int wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, char *why, int why_len)
+WErr wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     const unsigned char *motx = NULL, *modn = NULL;
@@ -37,17 +38,17 @@ int wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, char *why, i
     /* first pass: the name blocks (materials and furnishings point into them) */
     for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4)) {
         size_t size = u32(s, at + 4);
-        if (at + 8 + size > len) { snprintf(why, why_len, "a block at byte %zu runs past the file's end", at); return 1; }
+        if (at + 8 + size > len) { w_fail(why, W_ERR_CORRUPT, "a block at byte %zu runs past the file's end", at); return why->code; }
         if (is_tag(s, at, "MOTX")) { motx = s + at + 8; motx_len = size; }
         if (is_tag(s, at, "MODN")) { modn = s + at + 8; modn_len = size; }
         if (is_tag(s, at, "MOHD")) {
-            if (size < 28) { snprintf(why, why_len, "its MOHD header is %zu bytes, too short", size); return 1; }
+            if (size < 28) { w_fail(why, W_ERR_CORRUPT, "its MOHD header is %zu bytes, too short", size); return why->code; }
             out->ngroups = (int)u32(s, at + 8 + 4);
             out->flags = size >= 64 ? u32(s, at + 8 + 60) : 0;
             got_header = 1;
         }
     }
-    if (!got_header) { snprintf(why, why_len, "no MOHD header: not a building's root file"); return 1; }
+    if (!got_header) { w_fail(why, W_ERR_CORRUPT, "no MOHD header: not a building's root file"); return why->code; }
     for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4)) {
         size_t size = u32(s, at + 4), d = at + 8;
         if (is_tag(s, at, "MOMT")) {
@@ -83,24 +84,24 @@ int wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, char *why, i
     }
     for (int i = 0; i < out->nsets; ++i)
         if (out->sets[i].first < 0 || out->sets[i].count < 0 || out->sets[i].first + out->sets[i].count > out->nfurnishings) {
-            snprintf(why, why_len, "furnishing set %d (%s) runs past the %d furnishings", i, out->sets[i].name, out->nfurnishings);
+            w_fail(why, W_ERR_CORRUPT, "furnishing set %d (%s) runs past the %d furnishings", i, out->sets[i].name, out->nfurnishings);
             wmo_free_root(out);
-            return 1;
+            return why->code;
         }
     return 0;
 }
 /* }}} */
 
 /* {{{ wmo_read_group */
-int wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, char *why, int why_len)
+WErr wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     size_t mogp = 0, mogp_end = 0;
     for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4)) {
-        if (at + 8 + u32(s, at + 4) > len) { snprintf(why, why_len, "a block at byte %zu runs past the file's end", at); return 1; }
+        if (at + 8 + u32(s, at + 4) > len) { w_fail(why, W_ERR_CORRUPT, "a block at byte %zu runs past the file's end", at); return why->code; }
         if (is_tag(s, at, "MOGP")) { mogp = at; mogp_end = at + 8 + u32(s, at + 4); break; }
     }
-    if (!mogp || mogp + 8 + 68 > mogp_end) { snprintf(why, why_len, "no MOGP block: not a building's group file"); return 1; }
+    if (!mogp || mogp + 8 + 68 > mogp_end) { w_fail(why, W_ERR_CORRUPT, "no MOGP block: not a building's group file"); return why->code; }
     out->flags = u32(s, mogp + 8 + 8);
     out->liquid = u32(s, mogp + 8 + 52);
     const unsigned char *movt = NULL, *monr = NULL, *motv = NULL, *mocv = NULL;
@@ -108,7 +109,7 @@ int wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, char *why,
     /* the group's own blocks follow its 68-byte header, inside MOGP */
     for (size_t at = mogp + 8 + 68; at + 8 <= mogp_end; at += 8 + u32(s, at + 4)) {
         size_t size = u32(s, at + 4), d = at + 8;
-        if (d + size > mogp_end) { snprintf(why, why_len, "a block inside MOGP at byte %zu runs past it", at); wmo_free_group(out); return 1; }
+        if (d + size > mogp_end) { w_fail(why, W_ERR_CORRUPT, "a block inside MOGP at byte %zu runs past it", at); wmo_free_group(out); return why->code; }
         if (is_tag(s, at, "MOPY")) {
             size_t n = size / 2;
             out->tri_flags = malloc(n ? n : 1);
@@ -149,7 +150,7 @@ int wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, char *why,
             }
         }
     }
-    if (!movt) { snprintf(why, why_len, "the group has no points (MOVT)"); wmo_free_group(out); return 1; }
+    if (!movt) { w_fail(why, W_ERR_CORRUPT, "the group has no points (MOVT)"); wmo_free_group(out); return why->code; }
     out->nvertices = (uint32_t)nmovt;
     out->vertices = calloc(nmovt ? nmovt : 1, sizeof *out->vertices);
     out->has_colours = mocv && nmocv >= nmovt;
@@ -164,15 +165,15 @@ int wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, char *why,
     }
     for (int i = 0; i < out->nbatches; ++i)
         if ((uint64_t)out->batches[i].first + out->batches[i].count > out->nindices) {
-            snprintf(why, why_len, "batch %d (%u corners from %u) runs past the group's %u", i, out->batches[i].count, out->batches[i].first, out->nindices);
+            w_fail(why, W_ERR_CORRUPT, "batch %d (%u corners from %u) runs past the group's %u", i, out->batches[i].count, out->batches[i].first, out->nindices);
             wmo_free_group(out);
-            return 1;
+            return why->code;
         }
     for (uint32_t i = 0; i < out->nindices; ++i)
         if (out->indices[i] >= out->nvertices) {
-            snprintf(why, why_len, "triangle corner %u names point %u; the group has %u", i, out->indices[i], out->nvertices);
+            w_fail(why, W_ERR_CORRUPT, "triangle corner %u names point %u; the group has %u", i, out->indices[i], out->nvertices);
             wmo_free_group(out);
-            return 1;
+            return why->code;
         }
     return 0;
 }

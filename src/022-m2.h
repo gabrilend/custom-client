@@ -15,6 +15,8 @@
 #ifndef EG_M2_H
 #define EG_M2_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -61,15 +63,15 @@ typedef struct {
     M2Unit    *units;     uint32_t nunits;
 } M2Model;
 
-int  m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, size_t skin_len,
-             M2Model *out, char *why, int why_len);
+WErr  m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, size_t skin_len,
+             M2Model *out, WWhy *why);
 void m2_free(M2Model *m);
 
 /* The model's solid shape (173q): its collision triangles (header 216:
  * corner numbers, u16, three a triangle; 224: the corners, 3 floats each),
  * 9 floats a triangle in model space, in a buffer for the caller to
  * free. 0 with *ntri 0 for a model with none (grass, flowers: walked
- * through); 1 with `why` when the lists run past the file. */
-int  m2_collision(const unsigned char *m2, size_t len, float **tris, int *ntri, char *why, int why_len);
+ * through); W_ERR_CORRUPT with `why` when the lists run past the file. */
+WErr  m2_collision(const unsigned char *m2, size_t len, float **tris, int *ntri, WWhy *why);
 
 #endif

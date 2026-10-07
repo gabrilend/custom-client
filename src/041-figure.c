@@ -6,6 +6,7 @@
  * its animation and draws it.
  */
 #include "041-figure.h"
+#include "013-errors.h"
 #include "017-blp.h"
 #include "016-dbc.h"
 #include "036-texture.h"
@@ -39,17 +40,17 @@ static Texture2D texture_of(const BlpImage *img)
  * archives match them. */
 static struct { char name[260]; Texture2D tex; } *cache;
 static int ncache, cache_cap;
-static int load_picture(MpqChain *chain, const char *name, Texture2D *out, char *why, int why_len)
+static WErr load_picture(MpqChain *chain, const char *name, Texture2D *out, WWhy *why)
 {
     for (int i = 0; i < ncache; ++i) if (!strcasecmp(cache[i].name, name)) { *out = cache[i].tex; return 0; }
     size_t len;
     const char *from;
     unsigned char *s = mpq_chain_read(chain, name, &len, &from);
-    if (!s) { snprintf(why, why_len, "the picture %.200s is in none of the client's archives", name); return 1; }
-    char inner[300];
-    int bad = texture_from_blp(s, len, out, inner, sizeof inner);   /* sent compressed when stored so (173u) */
+    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the picture %.200s is in none of the client's archives", name); return why->code; }
+    WWhy inner;
+    int bad = texture_from_blp(s, len, out, &inner);   /* sent compressed when stored so (173u) */
     free(s);
-    if (bad) { snprintf(why, why_len, "the picture %.120s: %.150s", name, inner); return 1; }
+    if (bad) { w_fail(why, inner.code, "the picture %.120s: %.150s", name, inner.text); return why->code; }
     if (ncache == cache_cap) { cache_cap = cache_cap ? cache_cap * 2 : 64; cache = realloc(cache, sizeof *cache * cache_cap); }
     snprintf(cache[ncache].name, sizeof cache[ncache].name, "%s", name);
     cache[ncache++].tex = *out;
@@ -68,8 +69,8 @@ static Texture2D own(Figure *f, const BlpImage *img)
  * `shown` says which pieces show (NULL: all); `pics` holds one picture
  * per model texture slot (id 0 where the slot has none: its pieces are
  * left out). `base` is the model's archive path without its extension. */
-static int build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *shown, const Texture2D *pics,
-                 const char *base, char *why, int why_len)
+static WErr build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *shown, const Texture2D *pics,
+                 const char *base, WWhy *why)
 {
     for (uint32_t u = 0; u < mod->nunits && f->npieces < 64; ++u) {
         M2Unit un = mod->units[u];
@@ -105,7 +106,7 @@ static int build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *
         fp->moving_uv = un.moving_uv;
         ++f->npieces;
     }
-    if (f->npieces == 0) { snprintf(why, why_len, "%s: nothing to draw (no shown piece has a picture)", f->name); return 1; }
+    if (f->npieces == 0) { w_fail(why, W_ERR_NOT_FOUND, "%s: nothing to draw (no shown piece has a picture)", f->name); return why->code; }
     f->nrest = mod->nvertices;
     f->rest = malloc(sizeof *f->rest * f->nrest);
     memcpy(f->rest, mod->vertices, sizeof *f->rest * f->nrest);
@@ -116,11 +117,11 @@ static int build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *
     const char *from;
     snprintf(path, sizeof path, "%s.m2", base);
     unsigned char *m2 = mpq_chain_read(chain, path, &len, &from);
-    char inner[300];
-    if (!m2 || anim_read(m2, len, &f->anim, inner, sizeof inner)) {
-        snprintf(why, why_len, "%s's skeleton (%s): %s", f->name, path, m2 ? inner : "not in the archives");
+    WWhy inner;
+    if (!m2 || anim_read(m2, len, &f->anim, &inner)) {
+        w_fail(why, m2 ? inner.code : W_ERR_NOT_FOUND, "%s's skeleton (%s): %s", f->name, path, m2 ? inner.text : "not in the archives");
         free(m2);
-        return 1;
+        return why->code;
     }
     free(m2);
     for (int i = 0; i < f->anim.nseqs; ++i) {
@@ -131,8 +132,8 @@ static int build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *
         anim_attach_file(&f->anim, i, a, len);
     }
     if (f->anim.npoints != f->nrest) {
-        snprintf(why, why_len, "%s: the skeleton's model has %u points, the mesh %u", f->name, f->anim.npoints, f->nrest);
-        return 1;
+        w_fail(why, W_ERR_CORRUPT, "%s: the skeleton's model has %u points, the mesh %u", f->name, f->anim.npoints, f->nrest);
+        return why->code;
     }
     f->poses = malloc(sizeof *f->poses * (f->anim.nbones ? f->anim.nbones : 1));
     f->scratch = malloc(sizeof *f->scratch * (f->anim.nbones ? f->anim.nbones : 1));
@@ -169,18 +170,18 @@ static int build(Figure *f, MpqChain *chain, const M2Model *mod, const uint8_t *
  * `baked` (NULL: none) names a finished skin sheet in the archives, which
  * replaces the one 025-character.c paints: a townsperson's (173t), whose
  * clothes and face the game painted in advance. */
-static int from_character(Figure *f, MpqChain *chain, const CharacterLook *look, const char *baked, char *why, int why_len)
+static WErr from_character(Figure *f, MpqChain *chain, const CharacterLook *look, const char *baked, WWhy *why)
 {
     memset(f, 0, sizeof *f);
     f->scale = 1;
     Character ch;
-    if (character_build(chain, look, &ch, why, why_len)) return 1;
+    if (character_build(chain, look, &ch, why)) return why->code;
     snprintf(f->name, sizeof f->name, "%.63s", strrchr(ch.base, '\\') ? strrchr(ch.base, '\\') + 1 : ch.base);
     Texture2D pics[64] = { 0 };
     Texture2D skin = { 0 }, hair = { 0 }, fur = { 0 }, cape = { 0 };
     if (baked) {
-        char inner[300];
-        if (load_picture(chain, baked, &skin, inner, sizeof inner)) { snprintf(why, why_len, "%.250s", inner); character_free(&ch); return 1; }
+        WWhy inner;
+        if (load_picture(chain, baked, &skin, &inner)) { w_fail(why, inner.code, "%.250s", inner.text); character_free(&ch); return why->code; }
     } else skin = own(f, &ch.skin);
     if (ch.hair.width) hair = own(f, &ch.hair);
     if (ch.fur.width) fur = own(f, &ch.fur);
@@ -194,12 +195,12 @@ static int from_character(Figure *f, MpqChain *chain, const CharacterLook *look,
         if (ch.model.textures[t].kind == 8) pics[t] = fur;
         if (ch.model.textures[t].kind == 2) pics[t] = cape;   /* the cloak (173p) */
         if (ch.model.textures[t].kind == 0 && ch.model.textures[t].file[0]) {   /* named inside the model: the eye glow's */
-            char inner[300];
-            if (load_picture(chain, ch.model.textures[t].file, &pics[t], inner, sizeof inner))
-                fprintf(stderr, "character: %s; the pieces using it are left off\n", inner);
+            WWhy inner;
+            if (load_picture(chain, ch.model.textures[t].file, &pics[t], &inner))
+                fprintf(stderr, "character: %s; the pieces using it are left off\n", inner.text);
         }
     }
-    int bad = build(f, chain, &ch.model, ch.shown, pics, ch.base, why, why_len);
+    int bad = build(f, chain, &ch.model, ch.shown, pics, ch.base, why);
     /* the attached items (173p): each its own figure, hung from the
      * attachment point it names (header 240: count, 244: offset; 40 bytes
      * each: 0 id, 4 bone, 8 position); one that can't be read is named and
@@ -213,9 +214,9 @@ static int from_character(Figure *f, MpqChain *chain, const CharacterLook *look,
             if ((int)u32le(m2, oa + k * 40) == a->point) { found = (int)k; break; }
         if (found < 0) { fprintf(stderr, "character: the model has no attachment point %d; %s is left off\n", a->point, a->model); continue; }
         Figure *it = calloc(1, sizeof *it);
-        char inner[400];
-        if (figure_from_item(it, chain, a->model, a->picture, inner, sizeof inner)) {
-            fprintf(stderr, "character: %s; left off\n", inner);
+        WWhy inner;
+        if (figure_from_item(it, chain, a->model, a->picture, &inner)) {
+            fprintf(stderr, "character: %s; left off\n", inner.text);
             free(it);
             continue;
         }
@@ -229,19 +230,20 @@ static int from_character(Figure *f, MpqChain *chain, const CharacterLook *look,
     character_free(&ch);
     return bad;
 }
-int figure_from_character(Figure *f, MpqChain *chain, const CharacterLook *look, char *why, int why_len)
+WErr figure_from_character(Figure *f, MpqChain *chain, const CharacterLook *look, WWhy *why)
 {
-    return from_character(f, chain, look, NULL, why, why_len);
+    return from_character(f, chain, look, NULL, why);
 }
 /* }}} */
 
 /* {{{ figure_from_item: an item's model, its pictures named inside it
  * (kind 0) or the item's own picture (kind 2, "object skin") */
-int figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *picture_path, char *why, int why_len)
+WErr figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *picture_path, WWhy *why)
 {
     memset(f, 0, sizeof *f);
     f->scale = 1;
-    char base[260], path[300], inner[300];
+    char base[260], path[300];
+    WWhy inner;
     snprintf(base, sizeof base, "%s", model);
     char *dot = strrchr(base, '.');
     if (dot) *dot = '\0';
@@ -252,18 +254,18 @@ int figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *
     unsigned char *m2 = mpq_chain_read(chain, path, &mlen, &from);
     snprintf(path, sizeof path, "%s00.skin", base);
     unsigned char *skin = mpq_chain_read(chain, path, &slen, &from);
-    if (!m2 || !skin) { snprintf(why, why_len, "%.200s is in none of the archives", !m2 ? model : path); free(m2); free(skin); return 1; }
+    if (!m2 || !skin) { w_fail(why, W_ERR_NOT_FOUND, "%.200s is in none of the archives", !m2 ? model : path); free(m2); free(skin); return why->code; }
     M2Model mod;
-    int bad = m2_read(m2, mlen, skin, slen, &mod, inner, sizeof inner);
+    int bad = m2_read(m2, mlen, skin, slen, &mod, &inner);
     free(m2); free(skin);
-    if (bad) { snprintf(why, why_len, "%.100s: %.200s", f->name, inner); return 1; }
+    if (bad) { w_fail(why, inner.code, "%.100s: %.200s", f->name, inner.text); return why->code; }
     Texture2D pics[64] = { 0 };
     for (uint32_t t = 0; t < mod.ntextures && t < 64; ++t) {
         const char *name = mod.textures[t].kind == 0 ? mod.textures[t].file : mod.textures[t].kind == 2 ? picture_path : NULL;
         if (!name || !name[0]) continue;
-        if (load_picture(chain, name, &pics[t], inner, sizeof inner)) { snprintf(why, why_len, "%.100s: %.200s", f->name, inner); m2_free(&mod); return 1; }
+        if (load_picture(chain, name, &pics[t], &inner)) { w_fail(why, inner.code, "%.100s: %.200s", f->name, inner.text); m2_free(&mod); return why->code; }
     }
-    bad = build(f, chain, &mod, NULL, pics, base, why, why_len);
+    bad = build(f, chain, &mod, NULL, pics, base, why);
     m2_free(&mod);
     return bad;
 }
@@ -276,24 +278,24 @@ int figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *
  * Pieces: the body group (ids under 100) and the first variant of every
  * other group (id % 100 == 1), the original's choice when the display
  * names no other (its geoset data, not read yet). */
-static int open_table(MpqChain *chain, const char *name, Dbc *d, unsigned char **keep, char *why, int why_len)
+static WErr open_table(MpqChain *chain, const char *name, Dbc *d, unsigned char **keep, WWhy *why)
 {
     size_t len;
     const char *from;
     *keep = mpq_chain_read(chain, name, &len, &from);
-    if (!*keep) { snprintf(why, why_len, "%s is in none of the client's archives", name); return 1; }
-    return dbc_open(d, *keep, len, why, why_len);
+    if (!*keep) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", name); return why->code; }
+    return dbc_open(d, *keep, len, why);
 }
-int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, int why_len)
+WErr figure_from_display(Figure *f, MpqChain *chain, int display_id, WWhy *why)
 {
     memset(f, 0, sizeof *f);
     Dbc di, md;
     unsigned char *di_s = NULL, *md_s = NULL;
-    if (open_table(chain, "DBFilesClient\\CreatureDisplayInfo.dbc", &di, &di_s, why, why_len) ||
-        open_table(chain, "DBFilesClient\\CreatureModelData.dbc", &md, &md_s, why, why_len)) { free(di_s); free(md_s); return 1; }
+    if (open_table(chain, "DBFilesClient\\CreatureDisplayInfo.dbc", &di, &di_s, why) ||
+        open_table(chain, "DBFilesClient\\CreatureModelData.dbc", &md, &md_s, why)) { free(di_s); free(md_s); return why->code; }
     int row = -1;
     for (uint32_t r = 0; r < di.rows; ++r) if (dbc_u32(&di, r, 1) == (uint32_t)display_id) { row = (int)r; break; }
-    if (row < 0) { snprintf(why, why_len, "no creature display %d in CreatureDisplayInfo", display_id); free(di_s); free(md_s); return 1; }
+    if (row < 0) { w_fail(why, W_ERR_NOT_FOUND, "no creature display %d in CreatureDisplayInfo", display_id); free(di_s); free(md_s); return why->code; }
     uint32_t model_id = dbc_u32(&di, (uint32_t)row, 2), scale_bits = dbc_u32(&di, (uint32_t)row, 5), extra = dbc_u32(&di, (uint32_t)row, 4);
     float scale;
     memcpy(&scale, &scale_bits, 4);
@@ -308,10 +310,10 @@ int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, i
         free(di_s); free(md_s);
         Dbc ex;
         unsigned char *ex_s = NULL;
-        if (open_table(chain, "DBFilesClient\\CreatureDisplayInfoExtra.dbc", &ex, &ex_s, why, why_len)) { free(ex_s); return 1; }
+        if (open_table(chain, "DBFilesClient\\CreatureDisplayInfoExtra.dbc", &ex, &ex_s, why)) { free(ex_s); return why->code; }
         int er = -1;
         for (uint32_t r = 0; r < ex.rows; ++r) if (dbc_u32(&ex, r, 1) == extra) { er = (int)r; break; }
-        if (er < 0) { snprintf(why, why_len, "display %d names extra row %u, which CreatureDisplayInfoExtra lacks", display_id, extra); free(ex_s); return 1; }
+        if (er < 0) { w_fail(why, W_ERR_NOT_FOUND, "display %d names extra row %u, which CreatureDisplayInfoExtra lacks", display_id, extra); free(ex_s); return why->code; }
         static const int SLOT[11] = { SLOT_HEAD, SLOT_SHOULDERS, SLOT_SHIRT, SLOT_CHEST, SLOT_WAIST, SLOT_LEGS, SLOT_FEET, SLOT_WRISTS, SLOT_HANDS, SLOT_TABARD, SLOT_BACK };
         CharacterLook look = { 0 };
         uint32_t e = (uint32_t)er;
@@ -325,7 +327,7 @@ int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, i
         const char *bake = dbc_text(&ex, e, 21);
         if (bake && bake[0]) snprintf(baked, sizeof baked, "Textures\\BakedNpcTextures\\%.200s", bake);
         free(ex_s);
-        int bad = from_character(f, chain, &look, baked[0] ? baked : NULL, why, why_len);
+        int bad = from_character(f, chain, &look, baked[0] ? baked : NULL, why);
         if (!bad) {
             char model_name[64];
             snprintf(model_name, sizeof model_name, "%s", f->name);
@@ -341,7 +343,7 @@ int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, i
     for (uint32_t r = 0; r < md.rows; ++r)
         if (dbc_u32(&md, r, 1) == model_id) { snprintf(base, sizeof base, "%s", dbc_text(&md, r, 3)); break; }
     free(di_s); free(md_s);
-    if (!base[0]) { snprintf(why, why_len, "display %d names model %u, which CreatureModelData lacks", display_id, model_id); return 1; }
+    if (!base[0]) { w_fail(why, W_ERR_NOT_FOUND, "display %d names model %u, which CreatureModelData lacks", display_id, model_id); return why->code; }
     char *dot = strrchr(base, '.');
     if (dot) *dot = '\0';
     char folder[260];
@@ -357,12 +359,12 @@ int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, i
     unsigned char *m2 = mpq_chain_read(chain, path, &mlen, &from);
     snprintf(path, sizeof path, "%s00.skin", base);
     unsigned char *skin = mpq_chain_read(chain, path, &slen, &from);
-    if (!m2 || !skin) { snprintf(why, why_len, "%s: its %s is in none of the archives", f->name, !m2 ? ".m2" : "00.skin"); free(m2); free(skin); return 1; }
+    if (!m2 || !skin) { w_fail(why, W_ERR_NOT_FOUND, "%s: its %s is in none of the archives", f->name, !m2 ? ".m2" : "00.skin"); free(m2); free(skin); return why->code; }
     M2Model mod;
-    char inner[300];
-    int bad = m2_read(m2, mlen, skin, slen, &mod, inner, sizeof inner);
+    WWhy inner;
+    int bad = m2_read(m2, mlen, skin, slen, &mod, &inner);
     free(m2); free(skin);
-    if (bad) { snprintf(why, why_len, "%s: %s", f->name, inner); return 1; }
+    if (bad) { w_fail(why, inner.code, "%s: %s", f->name, inner.text); return why->code; }
 
     Texture2D pics[64] = { 0 };
     for (uint32_t t = 0; t < mod.ntextures && t < 64; ++t) {
@@ -370,15 +372,15 @@ int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, i
         if (kind == 0 && mod.textures[t].file[0]) snprintf(path, sizeof path, "%s", mod.textures[t].file);
         else if (kind >= 11 && kind <= 13 && skins[kind - 11][0]) snprintf(path, sizeof path, "%s%s.blp", folder, skins[kind - 11]);
         else continue;                                     /* a slot this display doesn't fill */
-        if (load_picture(chain, path, &pics[t], inner, sizeof inner)) {
-            snprintf(why, why_len, "%s: %s", f->name, inner);
+        if (load_picture(chain, path, &pics[t], &inner)) {
+            w_fail(why, inner.code, "%s: %s", f->name, inner.text);
             m2_free(&mod);
-            return 1;
+            return why->code;
         }
     }
     uint8_t *shown = calloc(mod.npieces ? mod.npieces : 1, 1);
     for (uint32_t i = 0; i < mod.npieces; ++i) shown[i] = mod.pieces[i].id < 100 || mod.pieces[i].id % 100 == 1;
-    bad = build(f, chain, &mod, shown, pics, base, why, why_len);
+    bad = build(f, chain, &mod, shown, pics, base, why);
     free(shown);
     m2_free(&mod);
     return bad;

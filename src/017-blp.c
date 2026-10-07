@@ -2,6 +2,7 @@
  * 017-blp.c (issue 173k) - see 017-blp.h. Ported from src/custom-client/lib/blp.lua.
  */
 #include "017-blp.h"
+#include "013-errors.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,10 +79,10 @@ static void decode_dxt(const unsigned char *p, int w, int h, int kind, uint8_t *
 /* }}} */
 
 /* {{{ blp_decode */
-int blp_decode(const unsigned char *s, size_t len, BlpImage *out, char *why, int why_len)
+WErr blp_decode(const unsigned char *s, size_t len, BlpImage *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
-    if (len < 148 + 1024 || memcmp(s, "BLP2", 4) != 0) { snprintf(why, why_len, "not a BLP2 texture"); return -1; }
+    if (len < 148 + 1024 || memcmp(s, "BLP2", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "not a BLP2 texture"); return why->code; }
     int enc = s[8], abits = s[9], akind = s[10];
     int w = (int)rd32(s + 12), h = (int)rd32(s + 16);
     size_t at = rd32(s + 20);
@@ -108,8 +109,8 @@ int blp_decode(const unsigned char *s, size_t len, BlpImage *out, char *why, int
         }
     } else {
         free(o);
-        snprintf(why, why_len, "encoding %d is not known", enc);
-        return -1;
+        w_fail(why, W_ERR_CORRUPT, "encoding %d is not known", enc);
+        return why->code;
     }
     out->width = w; out->height = h; out->rgba = o;
     return 0;

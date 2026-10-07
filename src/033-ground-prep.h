@@ -18,6 +18,8 @@
 #ifndef EG_GROUND_PREP_H
 #define EG_GROUND_PREP_H
 
+#include "013-errors.h"
+
 #include "020-adt.h"
 #include "018-maps.h"
 #include "015-mpq.h"
@@ -69,24 +71,25 @@ typedef struct {
     int           chunk_tex[256][4];  /* each chunk's four pictures, by the tile's picture number */
 } GroundPrep;
 
-/* Reads the map's WDT for its blend-map form and fills `p`. 0, or 1
+/* Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
  * with `why`. */
-int  ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, char *why, int why_len);
+WErr  ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);
 
 /* Prepares tile (tx, ty). `on_card`, when given, answers whether a
  * picture (by archive name) is already on the card; those aren't
  * unpacked (sending finds them there, or unpacks them itself if they
- * have gone since). 0 with `*out` (freed by ground_prep_free); 1 the
- * map has no ground file there (open sea); -1 an error, with `why`. */
-int  ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, char *why, int why_len);
+ * have gone since). W_OK with `*out` (freed by ground_prep_free);
+ * W_ERR_NOT_FOUND when the map has no ground file there (open sea: not a
+ * failure, nothing to draw); another code, with `why`, for a fault. */
+WErr  ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, WWhy *why);
 
 /* Frees a prepared tile. `keep_adt`: 1 when the ground file was taken
  * by the caller (it then frees it with adt_free and free). */
 void ground_prep_free(GroundPrep *g, int keep_adt);
 
 /* Unpacks one ground picture by archive name into `px`, with its smaller
- * copies. 0, or 1 with `why`. */
-int  ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, char *why, int why_len);
+ * copies. W_OK, or a code with `why`. */
+WErr  ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, WWhy *why);
 
 /* Makes a square picture's smaller copies (into px->smaller): each pixel
  * the average of the four beneath it, as the card itself would make them.

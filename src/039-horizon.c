@@ -5,6 +5,7 @@
  * wanted, drawn with a simple shader in the fog's colour.
  */
 #include "039-horizon.h"
+#include "013-errors.h"
 #include "020-adt.h"
 #include "032-sight.h"
 
@@ -44,7 +45,7 @@ static int    ready, loc_sun, loc_fog;
 /* }}} */
 
 /* {{{ horizon_init */
-int horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, char *why, int why_len)
+WErr horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, WWhy *why)
 {
     ox_ = ox; oy_ = oy;
     char path[200];
@@ -52,10 +53,10 @@ int horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, ch
     size_t len;
     const char *from;
     unsigned char *s = mpq_chain_read(chain, path, &len, &from);
-    if (!s) { snprintf(why, why_len, "%s is in none of the archives: no far horizon", path); return 1; }
+    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the archives: no far horizon", path); return why->code; }
     wdl = malloc(sizeof *wdl);
-    char inner[200];
-    if (adt_wdl_read(s, len, wdl, inner, sizeof inner)) { free(s); free(wdl); wdl = NULL; snprintf(why, why_len, "%s: %s", path, inner); return 1; }
+    WWhy inner;
+    if (adt_wdl_read(s, len, wdl, &inner)) { free(s); free(wdl); wdl = NULL; w_fail(why, inner.code, "%s: %s", path, inner.text); return why->code; }
     free(s);
     shader = LoadShaderFromMemory(VS, FS);
     loc_sun = GetShaderLocation(shader, "sun_dir");

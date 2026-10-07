@@ -18,6 +18,8 @@
 #ifndef EG_GROUND_H
 #define EG_GROUND_H
 
+#include "013-errors.h"
+
 #include "020-adt.h"
 #include "033-ground-prep.h"
 #include "026-light.h"
@@ -27,9 +29,9 @@
 
 /* Readies the painter for one map, at `place` (ground_place_init: the
  * archives, the map, its blend-map form, the server's heights, the
- * drawing origin); what it points to must outlive the painter. 0, or 1
+ * drawing origin); what it points to must outlive the painter. W_OK, or a code
  * with `why`. */
-int  ground_init(const GroundPlace *place, char *why, int why_len);
+WErr  ground_init(const GroundPlace *place, WWhy *why);
 
 /* Whether a ground picture (by archive name) is on the card now. Safe on
  * any thread: given to ground_prep_tile so pictures already sent aren't
@@ -40,8 +42,8 @@ int  ground_on_card(const char *name);
  * and draws it from then on; the preparation is used up (freed). The
  * ground file read is handed back in `*kept` (for the water, doodads and
  * buildings on it); the caller frees it with adt_free and free.
- * 0, or -1 with `why` (a picture couldn't be had). Main thread only. */
-int  ground_load_tile(GroundPrep *prepared, AdtTile **kept, char *why, int why_len);
+ * W_OK, or a code with `why` (a picture couldn't be had). Main thread only. */
+WErr  ground_load_tile(GroundPrep *prepared, AdtTile **kept, WWhy *why);
 
 /* Drops tile (tx, ty): its meshes and blend pictures (its ground pictures
  * stay loaded, shared and cached; 173s). */

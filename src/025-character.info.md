@@ -25,13 +25,13 @@ the same for one character's choices, and dresses it in its items
   right hand, 2 left hand, 0 shield, 5 right shoulder, 6 left shoulder,
   11 helm)
 - `type Character`
-- `int character_start_outfit(MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], char *why, int why_len);`
+- `WErr character_start_outfit(MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], WWhy *why);`
   A fresh character's clothes and weapons: the client's starting-outfit
   table (CharStartOutfit.dbc) row for race, class (ChrClasses id: 1
   warrior, 3 hunter, 11 druid ...) and sex, its items' looks put into
   `items` by the kind of slot each fills. Slots it doesn't fill are left
   as they were. Ranged weapons (bows, guns, thrown), ammunition, bags and
-  food have no slot here and are left out. 0, or -1 with `why` (no such
+  food have no slot here and are left out. W_OK, or a code with `why` (no such
   row).
-- `int character_build(MpqChain *archives, const CharacterLook *look, Character *out, char *why, int why_len);`
+- `WErr character_build(MpqChain *archives, const CharacterLook *look, Character *out, WWhy *why);`
 - `void character_free(Character *c);`

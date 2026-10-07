@@ -28,6 +28,8 @@
 #ifndef EG_CREATURES_H
 #define EG_CREATURES_H
 
+#include "013-errors.h"
+
 #include <stdint.h>
 
 typedef struct {
@@ -42,10 +44,10 @@ typedef struct {
 
 typedef struct { Spawn *spawns; int n; } SpawnList;
 
-/* Reads the file at `path`. 0 read; 1 there is no such file (`why` says
- * how to make one: the client runs without creatures); -1 a line that
- * can't be read (`why` names its number). */
-int  creatures_read(const char *path, SpawnList *out, char *why, int why_len);
+/* Reads the file at `path`. W_OK; W_ERR_NOT_FOUND when there is no such
+ * file (`why` says how to make one: the client runs without creatures);
+ * W_ERR_CORRUPT for a line that can't be read (`why` names its number). */
+WErr  creatures_read(const char *path, SpawnList *out, WWhy *why);
 
 /* The spawns standing in tile (tx, ty): `*first` the first's index, the
  * count returned (0: none). */

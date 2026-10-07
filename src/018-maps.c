@@ -3,6 +3,7 @@
  * src/custom-client/lib/maps.lua; the tests hold both to the same numbers.
  */
 #include "018-maps.h"
+#include "013-errors.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -46,23 +47,23 @@ void maps_tile_of(float x, float y, int *tx, int *ty)
  * missing or not a map file. Heights stored as whole numbers (int16 /
  * int8) become yards here (raw x step + base): the server's triangle sums
  * are linear, so decoding first changes nothing but rounding. */
-MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, char *why, int why_len)
+MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, WWhy *why)
 {
     char path[640];
     snprintf(path, sizeof path, "%s/%03d%02d%02d.map", dir, map_id, tx, ty);
     FILE *f = fopen(path, "rb");
-    if (!f) { snprintf(why, why_len, "no tile file %s", path); return NULL; }
+    if (!f) { w_fail(why, W_ERR_CORRUPT, "no tile file %s", path); return NULL; }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
     unsigned char *s = malloc((size_t)len);
-    if (fread(s, 1, (size_t)len, f) != (size_t)len) { fclose(f); free(s); snprintf(why, why_len, "%s: short read", path); return NULL; }
+    if (fread(s, 1, (size_t)len, f) != (size_t)len) { fclose(f); free(s); w_fail(why, W_ERR_CORRUPT, "%s: short read", path); return NULL; }
     fclose(f);
-    if (len < 44 || memcmp(s, "MAPS", 4) != 0) { free(s); snprintf(why, why_len, "%s is not a map file (no MAPS mark)", path); return NULL; }
+    if (len < 44 || memcmp(s, "MAPS", 4) != 0) { free(s); w_fail(why, W_ERR_CORRUPT, "%s is not a map file (no MAPS mark)", path); return NULL; }
 
     size_t height_at = u32(s, 20);                       /* heightMapOffset (6th field) */
     size_t holes_at = u32(s, 36), holes_size = u32(s, 40);
-    if (memcmp(s + height_at, "MHGT", 4) != 0) { free(s); snprintf(why, why_len, "%s: height block missing", path); return NULL; }
+    if (memcmp(s + height_at, "MHGT", 4) != 0) { free(s); w_fail(why, W_ERR_CORRUPT, "%s: height block missing", path); return NULL; }
 
     MapTile *t = calloc(1, sizeof *t);
     t->tx = tx; t->ty = ty;
@@ -193,8 +194,8 @@ MapTile *maps_world_tile(MapWorld *w, int tx, int ty)
         pthread_mutex_lock(&world_lock);
         t = *slot;
         if (!t) {
-            char why[700];
-            t = maps_load_tile(w->dir, w->map_id, tx, ty, why, sizeof why);
+            WWhy why;
+            t = maps_load_tile(w->dir, w->map_id, tx, ty, &why);
             if (!t) t = MAPS_NO_TILE;                    /* none there: asked once, remembered */
             __atomic_store_n(slot, t, __ATOMIC_RELEASE);
         }

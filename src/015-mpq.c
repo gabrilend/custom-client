@@ -2,6 +2,7 @@
  * 015-mpq.c (issue 173k) - see 015-mpq.h. Ported from src/custom-client/lib/mpq.lua.
  */
 #include "015-mpq.h"
+#include "013-errors.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -79,12 +80,12 @@ static uint32_t rd32(const unsigned char *s) { return (uint32_t)s[0] | ((uint32_
 /* }}} */
 
 /* {{{ mpq_open */
-int mpq_open(MpqArchive *a, const char *path, char *why, int why_len)
+WErr mpq_open(MpqArchive *a, const char *path, WWhy *why)
 {
     memset(a, 0, sizeof *a);
     snprintf(a->path, sizeof a->path, "%s", path);
     a->file = fopen(path, "rb");
-    if (!a->file) { snprintf(why, why_len, "can't open %s", path); return -1; }
+    if (!a->file) { w_fail(why, W_ERR_IO, "can't open %s", path); return why->code; }
     unsigned char head[44];
     int found = 0;
     /* the header sits at the start, or at a later multiple of 512 */
@@ -94,7 +95,7 @@ int mpq_open(MpqArchive *a, const char *path, char *why, int why_len)
         if (got < 32) break;
         if (memcmp(head, "MPQ\x1a", 4) == 0) { a->base = at; found = 1; break; }
     }
-    if (!found) { snprintf(why, why_len, "%s is not an MPQ archive (no MPQ mark)", path); fclose(a->file); a->file = NULL; return -1; }
+    if (!found) { w_fail(why, W_ERR_CORRUPT, "%s is not an MPQ archive (no MPQ mark)", path); fclose(a->file); a->file = NULL; return why->code; }
 
     a->sector = 512u << (head[14] | (head[15] << 8));
     uint64_t hash_at = rd32(head + 16), block_at = rd32(head + 20);
@@ -108,9 +109,9 @@ int mpq_open(MpqArchive *a, const char *path, char *why, int why_len)
     a->hashes = malloc((size_t)a->nhash * 16);
     a->blocks = malloc((size_t)a->nblock * 16);
     fseeko(a->file, (off_t)(a->base + hash_at), SEEK_SET);
-    if (fread(a->hashes, 16, a->nhash, a->file) != a->nhash) { snprintf(why, why_len, "%s: short index", path); return -1; }
+    if (fread(a->hashes, 16, a->nhash, a->file) != a->nhash) { w_fail(why, W_ERR_CORRUPT, "%s: short index", path); return why->code; }
     fseeko(a->file, (off_t)(a->base + block_at), SEEK_SET);
-    if (fread(a->blocks, 16, a->nblock, a->file) != a->nblock) { snprintf(why, why_len, "%s: short block list", path); return -1; }
+    if (fread(a->blocks, 16, a->nblock, a->file) != a->nblock) { w_fail(why, W_ERR_CORRUPT, "%s: short block list", path); return why->code; }
     decrypt(a->hashes, (size_t)a->nhash * 4, mpq_hash("(hash table)", 3));
     decrypt(a->blocks, (size_t)a->nblock * 4, mpq_hash("(block table)", 3));
     return 0;
@@ -134,12 +135,12 @@ static long find_block(MpqArchive *a, const char *name)
 
 /* {{{ static inflate_piece
  * One compressed piece: its first byte names the compression; only zlib (0x02). */
-static int inflate_piece(const unsigned char *raw, size_t len, unsigned char *out, size_t want, const char *name, char *why, int why_len)
+static WErr inflate_piece(const unsigned char *raw, size_t len, unsigned char *out, size_t want, const char *name, WWhy *why)
 {
-    if (raw[0] != 0x02) { snprintf(why, why_len, "%s: compression 0x%02x is not read by this reader (zlib only)", name, raw[0]); return -1; }
+    if (raw[0] != 0x02) { w_fail(why, W_ERR_UNSUPPORTED, "%s: compression 0x%02x is not read by this reader (zlib only)", name, raw[0]); return why->code; }
     uLongf got = want;
     int rc = uncompress(out, &got, raw + 1, len - 1);
-    if (rc != Z_OK || got != want) { snprintf(why, why_len, "%s: zlib failed (%d)", name, rc); return -1; }
+    if (rc != Z_OK || got != want) { w_fail(why, W_ERR_CORRUPT, "%s: zlib failed (%d)", name, rc); return why->code; }
     return 0;
 }
 /* }}} */
@@ -158,15 +159,14 @@ static void unscramble(unsigned char *buf, size_t len, uint32_t key)
 /* }}} */
 
 /* {{{ mpq_read */
-unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, char *why, int why_len)
+unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, WWhy *why)
 {
-    why[0] = 0;
     long bi = find_block(a, name);
-    if (bi < 0) return NULL;
+    if (bi < 0) { w_fail(why, W_ERR_NOT_FOUND, "%s is not in %s", name, a->path); return NULL; }
     uint32_t *b = a->blocks + bi * 4;
     uint32_t pos = b[0], csize = b[1], fsize = b[2], flags = b[3];
-    if (!(flags & FILE_EXISTS)) return NULL;
-    if (flags & FILE_IMPLODE) { snprintf(why, why_len, "%s: PKWARE implode is not read by this reader", name); return NULL; }
+    if (!(flags & FILE_EXISTS)) { w_fail(why, W_ERR_NOT_FOUND, "%s is listed in %s as deleted", name, a->path); return NULL; }
+    if (flags & FILE_IMPLODE) { w_fail(why, W_ERR_UNSUPPORTED, "%s: PKWARE implode is not read by this reader", name); return NULL; }
 
     int encrypted = (flags & FILE_ENCRYPTED) != 0;
     uint32_t key = 0;
@@ -184,17 +184,17 @@ unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, char *why
     /* one piece: the whole file at once */
     if (flags & FILE_SINGLE_UNIT) {
         unsigned char *raw = malloc(csize ? csize : 1);
-        if (fread(raw, 1, csize, a->file) != csize) { free(raw); free(out); snprintf(why, why_len, "%s: short read", name); return NULL; }
+        if (fread(raw, 1, csize, a->file) != csize) { free(raw); free(out); w_fail(why, W_ERR_CORRUPT, "%s: short read", name); return NULL; }
         if (encrypted) unscramble(raw, csize, key);
         if (compressed && csize < fsize) {
-            if (inflate_piece(raw, csize, out, fsize, name, why, why_len)) { free(raw); free(out); return NULL; }
+            if (inflate_piece(raw, csize, out, fsize, name, why)) { free(raw); free(out); return NULL; }
         } else memcpy(out, raw, fsize);
         free(raw);
         return out;
     }
     uint32_t n = (fsize + a->sector - 1) / a->sector;
     if (!compressed) {
-        if (fread(out, 1, fsize, a->file) != fsize) { free(out); snprintf(why, why_len, "%s: short read", name); return NULL; }
+        if (fread(out, 1, fsize, a->file) != fsize) { free(out); w_fail(why, W_ERR_CORRUPT, "%s: short read", name); return NULL; }
         if (encrypted)
             for (uint32_t i = 0; i < n; ++i) {
                 size_t from = (size_t)i * a->sector, len = fsize - from < a->sector ? fsize - from : a->sector;
@@ -204,18 +204,18 @@ unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, char *why
     }
     /* sectors: a table of where each one starts, then each sector */
     uint32_t *offsets = malloc(((size_t)n + 1) * 4);
-    if (fread(offsets, 4, (size_t)n + 1, a->file) != (size_t)n + 1) { free(offsets); free(out); snprintf(why, why_len, "%s: short sector table", name); return NULL; }
+    if (fread(offsets, 4, (size_t)n + 1, a->file) != (size_t)n + 1) { free(offsets); free(out); w_fail(why, W_ERR_CORRUPT, "%s: short sector table", name); return NULL; }
     if (encrypted) decrypt(offsets, (size_t)n + 1, key - 1);
     unsigned char *raw = malloc(a->sector + 64);
     for (uint32_t i = 0; i < n; ++i) {
         uint32_t from = offsets[i], len = offsets[i + 1] - from;
         size_t want = fsize - (size_t)i * a->sector < a->sector ? fsize - (size_t)i * a->sector : a->sector;
-        if (len > a->sector + 64) { free(raw); free(offsets); free(out); snprintf(why, why_len, "%s: sector %u is %u bytes", name, i, len); return NULL; }
+        if (len > a->sector + 64) { free(raw); free(offsets); free(out); w_fail(why, W_ERR_CORRUPT, "%s: sector %u is %u bytes", name, i, len); return NULL; }
         fseeko(a->file, (off_t)(a->base + pos + from), SEEK_SET);
-        if (fread(raw, 1, len, a->file) != len) { free(raw); free(offsets); free(out); snprintf(why, why_len, "%s: short sector", name); return NULL; }
+        if (fread(raw, 1, len, a->file) != len) { free(raw); free(offsets); free(out); w_fail(why, W_ERR_CORRUPT, "%s: short sector", name); return NULL; }
         if (encrypted) unscramble(raw, len, key + i);
         if (len < want) {
-            if (inflate_piece(raw, len, out + (size_t)i * a->sector, want, name, why, why_len)) { free(raw); free(offsets); free(out); return NULL; }
+            if (inflate_piece(raw, len, out + (size_t)i * a->sector, want, name, why)) { free(raw); free(offsets); free(out); return NULL; }
         } else memcpy(out + (size_t)i * a->sector, raw, want);
     }
     free(raw);
@@ -243,7 +243,7 @@ static const char *const ORDER[] = {
     "%s/lichking.MPQ", "%s/expansion.MPQ", "%s/common-2.MPQ", "%s/common.MPQ",
     "%s/%s/lichking-locale-%s.MPQ", "%s/%s/expansion-locale-%s.MPQ", "%s/%s/locale-%s.MPQ",
 };
-int mpq_chain_open(MpqChain *c, const char *data, const char *locale, char *why, int why_len)
+WErr mpq_chain_open(MpqChain *c, const char *data, const char *locale, WWhy *why)
 {
     memset(c, 0, sizeof *c);
     pthread_mutex_init(&c->lock, NULL);
@@ -255,10 +255,10 @@ int mpq_chain_open(MpqChain *c, const char *data, const char *locale, char *why,
         if (!f) continue;
         fclose(f);
         MpqArchive *a = malloc(sizeof *a);
-        if (mpq_open(a, path, why, why_len)) { free(a); mpq_chain_close(c); return -1; }
+        if (mpq_open(a, path, why)) { free(a); mpq_chain_close(c); return why->code; }
         c->archives[c->count++] = a;
     }
-    if (c->count == 0) { snprintf(why, why_len, "no MPQ archives found in %s", data); return -1; }
+    if (c->count == 0) { w_fail(why, W_ERR_NOT_FOUND, "no MPQ archives found in %s", data); return why->code; }
     return 0;
 }
 /* {{{ static same_name: archive names match without regard to case, and
@@ -297,9 +297,9 @@ static unsigned char *chain_read(MpqChain *c, const char *name, size_t *size, co
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     unsigned char *got = NULL;
-    char why[700];
+    WWhy why;
     for (int i = 0; i < c->count; ++i) {
-        unsigned char *s = mpq_read(c->archives[i], name, size, why, sizeof why);
+        unsigned char *s = mpq_read(c->archives[i], name, size, &why);
         if (s) {
             if (from) *from = c->archives[i]->path;
             /* remembered, if it fits the budget once older ones are forgotten
@@ -326,7 +326,7 @@ static unsigned char *chain_read(MpqChain *c, const char *name, size_t *size, co
             got = s;
             break;
         }
-        if (why[0]) { fprintf(stderr, "mpq: %s\n", why); break; }
+        if (why.code != W_ERR_NOT_FOUND) { fprintf(stderr, "mpq: %s\n", why.text); break; }   /* not in this archive: the next one down; anything else is a broken file */
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
     c->unpack_s += (double)(t1.tv_sec - t0.tv_sec) + (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;

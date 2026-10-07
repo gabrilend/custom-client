@@ -16,6 +16,7 @@
  * Usage: test-client PROJECT_DIR CLIENT_DATA_DIR
  */
 #include "../src/020-adt.h"
+#include "../src/013-errors.h"
 #include "../src/023-anim.h"
 #include "../src/017-blp.h"
 #include "../src/031-camera.h"
@@ -223,7 +224,8 @@ int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/mtwo/games/azeroth-core/wow-chat-2026";
     const char *client = argc > 2 ? argv[2] : "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data";
-    char path[700], why[800], line[300];
+    char path[700], line[300];
+    WWhy why;
 
     /* {{{ the ground */
     printf("the ground (server map files)\n");
@@ -298,7 +300,7 @@ int main(int argc, char **argv)
     /* {{{ steep ground */
     printf("steep ground (the server's navigation rule)\n");
     snprintf(path, sizeof path, "%s/assets/server-data/mmaps", dir);
-    float limit = navmesh_slope_read(path, 1, why, sizeof why);
+    float limit = navmesh_slope_read(path, 1, &why);
     snprintf(line, sizeof line, "the server's tiles for Kalimdor say %.1f degrees is the steepest walkable", limit);
     check(near(limit, 60, 1e-4), line);
     ramp_tan = tan(45 * 3.14159265358979 / 180);
@@ -328,7 +330,7 @@ int main(int argc, char **argv)
     check(mpq_hash("(block table)", 3) == 0xEC83B3A3u, "the block list's key is EC83B3A3");
     check(mpq_hash("a/b", 0) == mpq_hash("A\\B", 0), "names match without regard to case or slash");
     MpqChain chain;
-    if (mpq_chain_open(&chain, client, "enUS", why, sizeof why)) { printf("  FAIL: %s\n", why); return 1; }
+    if (mpq_chain_open(&chain, client, "enUS", &why)) { printf("  FAIL: %s\n", why.text); return 1; }
     snprintf(line, sizeof line, "all 13 of the client's archives open (%d)", chain.count);
     check(chain.count == 13, line);
     const char *base = "Character\\NightElf\\Female\\NightElfFemale";
@@ -358,7 +360,7 @@ int main(int argc, char **argv)
     snprintf(path, sizeof path, "%s00.skin", base);
     unsigned char *skin = mpq_chain_read(&chain, path, &skin_len, NULL);
     M2Model model;
-    check(m2_read(m2, m2_len, skin, skin_len, &model, why, sizeof why) == 0, "her model and mesh read");
+    check(m2_read(m2, m2_len, skin, skin_len, &model, &why) == 0, "her model and mesh read");
     float zmax = -1e9f;
     for (uint32_t i = 0; i < model.nvertices; ++i) if (model.vertices[i].z > zmax) zmax = model.vertices[i].z;
     snprintf(line, sizeof line, "she stands %.2f yards tall (Lua: 2.29)", zmax);
@@ -377,18 +379,18 @@ int main(int argc, char **argv)
     snprintf(path, sizeof path, "%sSkin00_00.blp", base);
     unsigned char *b = mpq_chain_read(&chain, path, &len, NULL);
     BlpImage img;
-    check(b && blp_decode(b, len, &img, why, sizeof why) == 0 && img.width == 512 && img.height == 512, "her skin sheet decodes to 512 x 512");
+    check(b && blp_decode(b, len, &img, &why) == 0 && img.width == 512 && img.height == 512, "her skin sheet decodes to 512 x 512");
     free(b);
     b = mpq_chain_read(&chain, "Character\\NightElf\\Hair00_00.blp", &len, NULL);
     BlpImage hair;
     int cut = 0;
-    if (b && blp_decode(b, len, &hair, why, sizeof why) == 0)
+    if (b && blp_decode(b, len, &hair, &why) == 0)
         for (size_t i = 3; i < (size_t)hair.width * hair.height * 4; i += 4) if (hair.rgba[i] < 128) { cut = 1; break; }
     check(cut, "her hair picture has see-through strands (alpha)");
     free(b); blp_free(&hair);
     b = mpq_chain_read(&chain, "DBFilesClient\\CharSections.dbc", &len, NULL);
     Dbc d;
-    check(dbc_open(&d, b, len, why, sizeof why) == 0 && d.rows > 1000, "the character pictures table reads (over a thousand rows)");
+    check(dbc_open(&d, b, len, &why) == 0 && d.rows > 1000, "the character pictures table reads (over a thousand rows)");
     free(b);
     /* }}} */
 
@@ -396,8 +398,8 @@ int main(int argc, char **argv)
     printf("putting her together\n");
     Character ch;
     CharacterLook look = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
-    int built = character_build(&chain, &look, &ch, why, sizeof why) == 0;
-    check(built, built ? "she is put together" : why);
+    int built = character_build(&chain, &look, &ch, &why) == 0;
+    check(built, built ? "she is put together" : why.text);
     if (built) {
         int body = 0, hair2 = 0, others = 0, clothes = 0, bare = 0;
         for (uint32_t i = 0; i < ch.model.npieces; ++i) {
@@ -445,7 +447,7 @@ int main(int argc, char **argv)
                 size_t ml;
                 unsigned char *gm2 = mpq_chain_read(&chain, "Character\\NightElf\\Female\\NightElfFemale.m2", &ml, &gfrom);
                 Anim ga;
-                if (gm2 && !anim_read(gm2, ml, &ga, why, sizeof why)) {
+                if (gm2 && !anim_read(gm2, ml, &ga, &why)) {
                     float tint[4];
                     anim_unit_tint(&ga, un.colour, un.fade, anim_find(&ga, 0, 0), 0, 0, tint);
                     snprintf(line, sizeof line, "standing, the glow's tint is visible (%.2f %.2f %.2f, opacity %.2f)", tint[0], tint[1], tint[2], tint[3]);
@@ -463,7 +465,7 @@ int main(int argc, char **argv)
         CharacterLook dressed = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 }, bare = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
         dressed.items[SLOT_CHEST] = 41143; dressed.items[SLOT_FEET] = 41480; dressed.items[SLOT_HANDS] = 41138;
         Character dc, bc;
-        if (character_build(&chain, &dressed, &dc, why, sizeof why) || character_build(&chain, &bare, &bc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &dressed, &dc, &why) || character_build(&chain, &bare, &bc, &why)) check(0, why.text);
         else {
             int changed = 0, boots = 0, bare_feet = 0;
             int k = dc.skin.width / 256;
@@ -482,7 +484,7 @@ int main(int argc, char **argv)
         }
         /* hung items: the rogue's hood hides her hair; shoulders and a sword */
         dressed.items[SLOT_HEAD] = 41139; dressed.items[SLOT_SHOULDERS] = 41142; dressed.items[SLOT_MAIN_HAND] = 40857;
-        if (character_build(&chain, &dressed, &dc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &dressed, &dc, &why)) check(0, why.text);
         else {
             int points = 0, hair = 0;
             for (int i = 0; i < dc.nattached; ++i) points |= 1 << dc.attached[i].point;
@@ -502,7 +504,7 @@ int main(int argc, char **argv)
          * the skin row's second; without it the tail was skipped (173d) */
         CharacterLook tauren = { 6, 0, 0, 0, 0, 0, { 0 }, 0, 0 };
         Character tc;
-        if (character_build(&chain, &tauren, &tc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             int tail = 0, tail_fur = 0;
             for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.model.pieces[i].id == 1501 && tc.shown[i]) tail = 1;
@@ -519,7 +521,7 @@ int main(int argc, char **argv)
          * order groups 1, 3, 2; choice 0 is clean-shaven (no 1xx-3xx), choice
          * 1 shows 102, 302 and 202; his race has no eye glow */
         int shaven_any = 1, beard = 0, glow = 0;
-        if (character_build(&chain, &tauren, &tc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             shaven_any = 0;
             for (uint32_t i = 0; i < tc.model.npieces; ++i) {
@@ -530,7 +532,7 @@ int main(int argc, char **argv)
             character_free(&tc);
         }
         tauren.facial_hair = 1;
-        if (character_build(&chain, &tauren, &tc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             for (uint32_t i = 0; i < tc.model.npieces; ++i) {
                 uint32_t id = tc.model.pieces[i].id;
@@ -543,24 +545,24 @@ int main(int argc, char **argv)
                  shaven_any ? "some" : "none", beard, glow ? "one" : "none");
         check(!shaven_any && beard == 3 && !glow, line);
         tauren.facial_hair = 99;
-        int refused = character_build(&chain, &tauren, &tc, why, sizeof why) != 0;
-        snprintf(line, sizeof line, "a facial-hair choice the table lacks is refused, naming it (%.80s)", refused ? why : "built");
-        check(refused && strstr(why, "facial-hair choice 99"), line);
+        int refused = character_build(&chain, &tauren, &tc, &why) != 0;
+        snprintf(line, sizeof line, "a facial-hair choice the table lacks is refused, naming it (%.80s)", refused ? why.text : "built");
+        check(refused && strstr(why.text, "facial-hair choice 99"), line);
         if (!refused) character_free(&tc);
         /* starting outfits (173p): a fresh night-elf hunter woman wears the
          * table's shirt, trousers, boots and axe; her bow, quiver and arrows
          * have no slot here; a tauren warrior man his shirt, trousers, axe */
         {
             int hunter[SLOT_COUNT] = { 0 }, warrior[SLOT_COUNT] = { 0 };
-            int ok1 = !character_start_outfit(&chain, 4, 3, 1, hunter, why, sizeof why);
-            int ok2 = !character_start_outfit(&chain, 6, 1, 0, warrior, why, sizeof why);
+            int ok1 = !character_start_outfit(&chain, 4, 3, 1, hunter, &why);
+            int ok2 = !character_start_outfit(&chain, 6, 1, 0, warrior, &why);
             int filled = 0;
             for (int k = 0; k < SLOT_COUNT; ++k) filled += hunter[k] != 0;
             snprintf(line, sizeof line, "a fresh night-elf hunter wears shirt %d, trousers %d, boots %d, axe %d and nothing else (%d slots)",
                      hunter[SLOT_SHIRT], hunter[SLOT_LEGS], hunter[SLOT_FEET], hunter[SLOT_MAIN_HAND], filled);
             check(ok1 && hunter[SLOT_SHIRT] == 9976 && hunter[SLOT_LEGS] == 9975 && hunter[SLOT_FEET] == 9977 && hunter[SLOT_MAIN_HAND] == 22291 && filled == 4, line);
             check(ok2 && warrior[SLOT_SHIRT] == 9995 && warrior[SLOT_LEGS] == 9988 && warrior[SLOT_MAIN_HAND] == 8690, "a fresh tauren warrior wears his shirt, trousers and axe");
-            check(character_start_outfit(&chain, 4, 2, 1, hunter, why, sizeof why) != 0 && strstr(why, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
+            check(character_start_outfit(&chain, 4, 2, 1, hunter, &why) != 0 && strstr(why.text, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
         }
         /* a creature's look (173t) may use a choice players can't: an
          * Astranaar sentinel's facial-hair 10 (a night-elf woman's rows stop
@@ -568,13 +570,13 @@ int main(int argc, char **argv)
          * a player's look with it is refused */
         CharacterLook sentinel = { 4, 1, 0, 0, 0, 0, { 0 }, 10, 1 };
         int glow10 = 0;
-        if (character_build(&chain, &sentinel, &tc, why, sizeof why)) check(0, why);
+        if (character_build(&chain, &sentinel, &tc, &why)) check(0, why.text);
         else {
             for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.shown[i] && tc.model.pieces[i].id == 1702) glow10 = 1;
             character_free(&tc);
         }
         sentinel.npc = 0;
-        int player_refused = character_build(&chain, &sentinel, &tc, why, sizeof why) != 0;
+        int player_refused = character_build(&chain, &sentinel, &tc, &why) != 0;
         if (!player_refused) character_free(&tc);
         check(glow10 && player_refused, "a creature's facial-hair choice beyond the table builds with the race's plain pieces (her eye glow kept); a player's is refused");
         /* the sentinel's look: display 4841 names a CreatureDisplayInfoExtra
@@ -586,7 +588,7 @@ int main(int argc, char **argv)
             Dbc dd, ed;
             uint32_t extra = 0;
             int race = 0, sex = -1, baked = 0;
-            if (ds && es && !dbc_open(&dd, ds, dl, why, sizeof why) && !dbc_open(&ed, es, el, why, sizeof why)) {
+            if (ds && es && !dbc_open(&dd, ds, dl, &why) && !dbc_open(&ed, es, el, &why)) {
                 for (uint32_t r = 0; r < dd.rows; ++r) if (dbc_u32(&dd, r, 1) == 4841) extra = dbc_u32(&dd, r, 4);
                 for (uint32_t r = 0; extra && r < ed.rows; ++r)
                     if (dbc_u32(&ed, r, 1) == extra) {
@@ -628,7 +630,7 @@ int main(int argc, char **argv)
     printf("reading ahead\n");
     {
         MpqChain rc;
-        if (mpq_chain_open(&rc, client, "enUS", why, sizeof why)) check(0, why);
+        if (mpq_chain_open(&rc, client, "enUS", &why)) check(0, why.text);
         else {
             prefetch_start(&rc, "Kalimdor");
             prefetch_tile(26, 32);
@@ -668,14 +670,14 @@ int main(int argc, char **argv)
             MapWorld gw;
             maps_world_init(&gw, maps_dir, 1);
             GroundPlace gp;
-            if (ground_place_init(&gp, &rc, "Kalimdor", &gw, 2700, -400, why, sizeof why)) check(0, why);
+            if (ground_place_init(&gp, &rc, "Kalimdor", &gw, 2700, -400, &why)) check(0, why.text);
             else {
                 prefetch_prepare_ground(&gp, test_on_card);
                 prefetch_tile(26, 31);
                 prefetch_wait();
                 GroundPrep *ahead = NULL, *here = NULL;
                 int took = prefetch_take_ground(26, 31, &ahead);
-                int made = ground_prep_tile(&gp, 26, 31, test_on_card, &here, why, sizeof why);
+                int made = ground_prep_tile(&gp, 26, 31, test_on_card, &here, &why);
                 check(took == 0 && made == 0, "the helper prepared the tile's ground, and the main thread can too");
                 if (took == 0 && made == 0) {
                     int same = 1, quarters = 0, unpacked = 0, skipped = 0;
@@ -728,7 +730,7 @@ int main(int argc, char **argv)
                   "33409\t6087\t4842\t1\t2814.51\t-272.127\t108\t0.5\tAstranaar Sentinel\n", cf);
             fclose(cf);
             SpawnList sl;
-            int got = creatures_read(cpath, &sl, why, sizeof why);
+            int got = creatures_read(cpath, &sl, &why);
             int tx, ty, first = -1;
             maps_tile_of(2735.93f, -416.844f, &tx, &ty);
             int n = got == 0 ? creatures_in_tile(&sl, tx, ty, &first) : 0;
@@ -740,12 +742,39 @@ int main(int argc, char **argv)
             cf = fopen(cpath, "w");
             fputs("33406\t6087\tnot-a-number\n", cf);
             fclose(cf);
-            got = creatures_read(cpath, &sl, why, sizeof why);
-            check(got < 0 && strstr(why, "line 1"), "a line that can't be read stops the reading, naming its line");
-            check(creatures_read("/no/such/list.tsv", &sl, why, sizeof why) == 1 && strstr(why, "generate-custom-client-creatures"),
+            got = creatures_read(cpath, &sl, &why);
+            check(got == W_ERR_CORRUPT && strstr(why.text, "line 1"), "a line that can't be read stops the reading, naming its line");
+            check(creatures_read("/no/such/list.tsv", &sl, &why) == W_ERR_NOT_FOUND && strstr(why.text, "generate-custom-client-creatures"),
                   "no list at all: said, with how to make one");
             remove(cpath);
         }
+    }
+    /* }}} */
+
+    /* {{{ errors (013): a code to branch on, a sentence to read */
+    printf("errors\n");
+    {
+        WWhy w = { 0 };
+        WErr e = w_fail(&w, W_ERR_NOT_FOUND, "the picture %s is in none of the archives", "X.blp");
+        check(e == W_ERR_NOT_FOUND && w.code == e && !strcmp(w.text, "the picture X.blp is in none of the archives"),
+              "w_fail fills the code and the sentence, and returns the code");
+        check(!strcmp(w_err_name(W_ERR_CORRUPT), "W_ERR_CORRUPT") && !strcmp(w_err_name((WErr)99), "W_ERR_(not a code)"),
+              "each code has its name; a number outside the list says so");
+        size_t n;
+        WWhy r;
+        MpqChain ec;
+        if (mpq_chain_open(&ec, client, "enUS", &r)) check(0, r.text);
+        else {
+            check(!mpq_read(ec.archives[0], "No\\Such\\File.blp", &n, &r) && r.code == W_ERR_NOT_FOUND,
+                  "a file an archive doesn't hold: W_ERR_NOT_FOUND, the next archive is tried");
+            mpq_chain_close(&ec);
+        }
+        Dbc d;
+        check(dbc_open(&d, (const unsigned char *)"not a table at all, just words", 30, &r) == W_ERR_CORRUPT,
+              "bytes that aren't a table: W_ERR_CORRUPT");
+        settings_init();
+        check(settings_set("cameraYawMoveSpeed", "5000", &r) == W_ERR_REFUSED && settings_set("noSuchSetting", "1", &r) == W_ERR_REFUSED,
+              "a setting out of its range, or with no such name: W_ERR_REFUSED");
     }
     /* }}} */
 
@@ -763,15 +792,15 @@ int main(int argc, char **argv)
               && w->decl->restart && mx->decl->restart && !vs->decl->restart && !rl->decl->restart,
               "the window settings start windowed, vsync on, unmaximized and resizable; windowed and maximized need a restart");
     }
-    check(settings_set("cameraYawMoveSpeed", "300", why, sizeof why) && strstr(why, "out of its range") && settings_num("cameraYawMoveSpeed") == 180,
+    check(settings_set("cameraYawMoveSpeed", "300", &why) && strstr(why.text, "out of its range") && settings_num("cameraYawMoveSpeed") == 180,
           "a slider refuses a value past its range, says so, and keeps its value");
-    check(settings_set("gxResolution", "wide", why, sizeof why) && settings_set("gxResolution", "9000x1000", why, sizeof why),
+    check(settings_set("gxResolution", "wide", &why) && settings_set("gxResolution", "9000x1000", &why),
           "the resolution refuses words and sizes past 7680x4320");
-    check(!settings_set("gxResolution", "5120x1440", why, sizeof why) && !settings_set("cameraYawMoveSpeed", "250.0", why, sizeof why)
+    check(!settings_set("gxResolution", "5120x1440", &why) && !settings_set("cameraYawMoveSpeed", "250.0", &why)
           && settings_num("cameraYawMoveSpeed") == 250 && !strcmp(settings_text("cameraYawMoveSpeed"), "250"),
           "an ultrawide resolution and a slider value are accepted, the number kept in one written form");
     snprintf(path, sizeof path, "%s/tmp/shared-memory/test-settings.wtf", dir);
-    check(!settings_save(path, why, sizeof why), "the changes are saved");
+    check(!settings_save(path, &why), "the changes are saved");
     FILE *saved = fopen(path, "r");
     char text[400] = "";
     size_t got = saved ? fread(text, 1, sizeof text - 1, saved) : 0;
@@ -802,7 +831,7 @@ int main(int argc, char **argv)
           "a hand-edited file: the good line is taken, three bad lines are skipped");
     check(log && strstr(log, "line 4: no setting named nonsense") && strstr(log, "line 5: cameraYawMoveSpeed \"20\": out of its range (90 to 270)")
           && strstr(log, "line 6: not SET name"),
-          "each bad line is reported with its line number and why");
+          "each bad line is reported with its line number and why.text");
     free(log);
     remove(path);
     settings_init();
@@ -819,21 +848,21 @@ int main(int argc, char **argv)
     printf("the ground files (the original's ADTs)\n");
     {
         MpqChain gc;
-        if (mpq_chain_open(&gc, client, "enUS", why, sizeof why)) { check(0, why); goto ground_done; }
+        if (mpq_chain_open(&gc, client, "enUS", &why)) { check(0, why.text); goto ground_done; }
         size_t len;
         const char *from;
         unsigned char *s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor.wdt", &len, &from);
-        check(s && adt_wdt_big_alpha(s, len, why, sizeof why) == 0, "Kalimdor's blend maps are the 4-bit form");
+        check(s && adt_wdt_big_alpha(s, len, &why) == 0, "Kalimdor's blend maps are the 4-bit form");
         free(s);
         s = mpq_chain_read(&gc, "World\\Maps\\Northrend\\Northrend.wdt", &len, &from);
-        check(s && adt_wdt_big_alpha(s, len, why, sizeof why) == 1, "Northrend's are the 8-bit form");
+        check(s && adt_wdt_big_alpha(s, len, &why) == 1, "Northrend's are the 8-bit form");
         free(s);
 
         AdtTile *t = malloc(sizeof *t);
         s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor_32_26.adt", &len, &from);
-        int bad = !s || adt_read(s, len, 0, t, why, sizeof why);
+        int bad = !s || adt_read(s, len, 0, t, &why);
         free(s);
-        check(!bad, bad ? why : "Astranaar's tile (Kalimdor_32_26) reads: 256 chunks");
+        check(!bad, bad ? why.text : "Astranaar's tile (Kalimdor_32_26) reads: 256 chunks");
         if (!bad) {
             int found = 0;
             for (int i = 0; i < t->ntextures; ++i) {
@@ -906,7 +935,7 @@ int main(int argc, char **argv)
                 AdtPlace *pl = &t->places[k];
                 unsigned char *rs = mpq_chain_read(&gc, t->buildings[pl->name], &len, &from);
                 WmoRoot root;
-                if (!rs || wmo_read_root(rs, len, &root, why, sizeof why)) { free(rs); continue; }
+                if (!rs || wmo_read_root(rs, len, &root, &why)) { free(rs); continue; }
                 free(rs);
                 ++roots;
                 char base[260], gpath[300];
@@ -915,7 +944,7 @@ int main(int argc, char **argv)
                 snprintf(gpath, sizeof gpath, "%s_000.wmo", base);
                 unsigned char *gs = mpq_chain_read(&gc, gpath, &len, &from);
                 WmoGroup g;
-                if (!gs || wmo_read_group(gs, len, &g, why, sizeof why)) groups_ok = 0; else wmo_free_group(&g);
+                if (!gs || wmo_read_group(gs, len, &g, &why)) groups_ok = 0; else wmo_free_group(&g);
                 free(gs);
                 float bm[16], fm[16];
                 adt_place_matrix(pl, 0, 0, bm);
@@ -973,7 +1002,7 @@ int main(int argc, char **argv)
                 unsigned char *hr = house < 0 ? NULL : mpq_chain_read(&gc, "World\\wmo\\Kalimdor\\Buildings\\NightElfSmallHouse\\NightElfSmallHouse.wmo", &rl, &from);
                 WmoGroup hg;
                 WmoRoot hroot;
-                if (!hs || !hr || wmo_read_group(hs, hl, &hg, why, sizeof why) || wmo_read_root(hr, rl, &hroot, why, sizeof why))
+                if (!hs || !hr || wmo_read_group(hs, hl, &hg, &why) || wmo_read_root(hr, rl, &hroot, &why))
                     check(0, house < 0 ? "the small house isn't placed on the tile" : "the small house's files couldn't be read");
                 else {
                     int kind = wmo_liquid_kind(&hroot, &hg);
@@ -1002,7 +1031,7 @@ int main(int argc, char **argv)
          * ground at Astranaar's tile's corner */
         s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor.wdl", &len, &from);
         AdtWdl *wdl = malloc(sizeof *wdl);
-        if (!s || adt_wdl_read(s, len, wdl, why, sizeof why)) check(0, s ? why : "Kalimdor.wdl is in the archives");
+        if (!s || adt_wdl_read(s, len, wdl, &why)) check(0, s ? why.text : "Kalimdor.wdl is in the archives");
         else {
             int tiles = 0;
             for (int i = 0; i < 4096; ++i) tiles += wdl->have[i];
@@ -1013,9 +1042,9 @@ int main(int argc, char **argv)
         free(wdl);
         free(s);
         s = mpq_chain_read(&gc, "World\\Maps\\Northrend\\Northrend_30_20.adt", &len, &from);
-        bad = !s || adt_read(s, len, 1, t, why, sizeof why);
+        bad = !s || adt_read(s, len, 1, t, &why);
         free(s);
-        check(!bad, bad ? why : "a Northrend tile with packed and plain 8-bit blend maps reads (Northrend_30_20)");
+        check(!bad, bad ? why.text : "a Northrend tile with packed and plain 8-bit blend maps reads (Northrend_30_20)");
         if (!bad) adt_free(t);
         free(t);
         mpq_chain_close(&gc);
@@ -1027,17 +1056,17 @@ ground_done:
     printf("her animations\n");
     {
         MpqChain ac;
-        if (mpq_chain_open(&ac, client, "enUS", why, sizeof why)) { check(0, why); goto anim_done; }
+        if (mpq_chain_open(&ac, client, "enUS", &why)) { check(0, why.text); goto anim_done; }
         size_t len;
         const char *from;
         const char *base = "Character\\NightElf\\Female\\NightElfFemale";
         snprintf(path, sizeof path, "%s.m2", base);
         unsigned char *s = mpq_chain_read(&ac, path, &len, &from);
         Anim a;
-        int bad = !s || anim_read(s, len, &a, why, sizeof why);
+        int bad = !s || anim_read(s, len, &a, &why);
         free(s);
         snprintf(line, sizeof line, "her skeleton reads (%d bones, %d animations, %u points)", bad ? 0 : a.nbones, bad ? 0 : a.nseqs, bad ? 0 : a.npoints);
-        check(!bad && a.nbones > 50 && a.npoints == 4113, bad ? why : line);
+        check(!bad && a.nbones > 50 && a.npoints == 4113, bad ? why.text : line);
         if (bad) { mpq_chain_close(&ac); goto anim_done; }
         int needed = 0, found = 0;
         for (int i = 0; i < a.nseqs; ++i) {
@@ -1266,17 +1295,17 @@ anim_done:
     printf("particles\n");
     {
         MpqChain pc;
-        if (mpq_chain_open(&pc, client, "enUS", why, sizeof why)) { check(0, why); goto particles_done; }
+        if (mpq_chain_open(&pc, client, "enUS", &why)) { check(0, why.text); goto particles_done; }
         size_t len;
         const char *from;
         unsigned char *s = mpq_chain_read(&pc, "World\\Generic\\PassiveDoodads\\Lights\\GeneralTorch01.m2", &len, &from);
         Anim a;
         Emitter *em = NULL;
         int ne = 0;
-        int bad = !s || anim_read(s, len, &a, why, sizeof why) || particles_read(&a, &em, &ne, why, sizeof why);
+        int bad = !s || anim_read(s, len, &a, &why) || particles_read(&a, &em, &ne, &why);
         free(s);
         snprintf(line, sizeof line, "the torch has %d emitters (a flame and its glow), each on a bone", ne);
-        check(!bad && ne == 2, bad ? why : line);
+        check(!bad && ne == 2, bad ? why.text : line);
         if (!bad && ne == 2) {
             int st = anim_find(&a, 0, 0);
             float rate = 0, life = 0;
@@ -1322,7 +1351,7 @@ anim_done:
             unsigned char *as = mpq_chain_read(&pc, "Environments\\Stars\\AuroraYellowGreen00.skin", &sl, &from);
             M2Model aur;
             Anim aan;
-            if (am && as && !m2_read(am, ml, as, sl, &aur, why, sizeof why) && !anim_read(am, ml, &aan, why, sizeof why)) {
+            if (am && as && !m2_read(am, ml, as, sl, &aur, &why) && !anim_read(am, ml, &aan, &why)) {
                 int two = 0, moving = -1;
                 for (uint32_t u = 0; u < aur.nunits; ++u) {
                     if (aur.units[u].layers == 2 && aur.units[u].tex[1] >= 0) ++two;
@@ -1342,7 +1371,7 @@ anim_done:
         /* camera-facing bones (173g's flat halos): the street lamp's glow */
         s = mpq_chain_read(&pc, "World\\Generic\\NightElf\\Passive Doodads\\Lamps\\KalidarStreetLamp02.m2", &len, &from);
         Anim lamp;
-        if (s && !anim_read(s, len, &lamp, why, sizeof why)) {
+        if (s && !anim_read(s, len, &lamp, &why)) {
             int bb = -1;
             for (int i = 0; i < lamp.nbones && bb < 0; ++i) if (lamp.bones[i].flags & 0x8) bb = i;
             float (*po)[16] = malloc(sizeof *po * lamp.nbones);
@@ -1365,7 +1394,7 @@ particles_done:
     {
         MpqChain lc;
         LightTables lt;
-        if (mpq_chain_open(&lc, client, "enUS", why, sizeof why) || light_open(&lt, &lc, why, sizeof why)) { check(0, why); goto light_done; }
+        if (mpq_chain_open(&lc, client, "enUS", &why) || light_open(&lt, &lc, &why)) { check(0, why.text); goto light_done; }
         LightNow noon, night, far;
         int id = light_at(&lt, 1, 2717, -400, 110, 12, LIGHT_CLEAR, &noon);
         light_at(&lt, 1, 2717, -400, 110, 0.5f, LIGHT_CLEAR, &night);
@@ -1436,38 +1465,38 @@ light_done:
         check(near(cam.yaw, 351.8 * deg, 1e-4), "from 350 degrees it swings on round through 360, the shorter way");
 
         /* style 4: the pitch returns too */
-        check(!settings_set("cameraSmoothStyle", "4", why, sizeof why), "the style can be changed to 4 (only when moving)");
+        check(!settings_set("cameraSmoothStyle", "4", &why), "the style can be changed to 4 (only when moving)");
         cam = (FollowCam){ .yaw = (float)(30 * deg), .pitch = 1.0f, .dist = 12, .rest_pitch = 0.35f };
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 0, 1e-5) && near(cam.pitch, 0.35, 1e-5), "style 4, running: heading and pitch both return to rest");
 
         /* style 2: also while standing; style 0: never */
-        settings_set("cameraSmoothStyle", "2", why, sizeof why);
+        settings_set("cameraSmoothStyle", "2", &why);
         cam.yaw = (float)(30 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 0, facing);
         check(near(cam.yaw, 0, 1e-5), "style 2, standing still: still swings back behind her");
-        settings_set("cameraSmoothStyle", "0", why, sizeof why);
+        settings_set("cameraSmoothStyle", "0", &why);
         cam.yaw = (float)(30 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 30 * deg, 1e-6), "style 0, running: never moves on its own");
-        check(settings_set("cameraSmoothStyle", "3", why, sizeof why) != 0, "a style the table doesn't have is refused by the store");
+        check(settings_set("cameraSmoothStyle", "3", &why) != 0, "a style the table doesn't have is refused by the store");
 
         /* Follow Terrain: off, nothing; on, climbing tilts the camera up */
         cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f };
         camera_tilt(&cam, &idle, 1, 0.5f);
         check(cam.pitch == 0.35f, "Follow Terrain off (the default): a slope doesn't tilt the camera");
-        settings_set("cameraTerrainTilt", "1", why, sizeof why);
+        settings_set("cameraTerrainTilt", "1", &why);
         for (int i = 0; i < 100; ++i) camera_tilt(&cam, &idle, 1, 0.5f);
         snprintf(line, sizeof line, "Follow Terrain on: running up a 1-in-2 slope, the camera tilts up to rest less the slope's angle (pitch %.3f, %.3f expected)", cam.pitch, 0.35 - atan(0.5));
         check(near(cam.pitch, 0.35 - atan(0.5), 1e-4), line);
-        settings_set("cameraTerrainTilt", "0", why, sizeof why);
+        settings_set("cameraTerrainTilt", "0", &why);
         /* follow speed */
-        settings_set("cameraSmoothStyle", "1", why, sizeof why);
-        settings_set("cameraYawSmoothSpeed", "90", why, sizeof why);
+        settings_set("cameraSmoothStyle", "1", &why);
+        settings_set("cameraYawSmoothSpeed", "90", &why);
         cam.yaw = (float)(90 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 0, 1e-4), "Auto Follow Speed 90: a full second to swing back 90 degrees");
-        settings_set("cameraYawSmoothSpeed", "180", why, sizeof why);
+        settings_set("cameraYawSmoothSpeed", "180", &why);
 
         /* the keys turn the camera with her, unless the left button holds it */
         cam.yaw = 0;
@@ -1491,10 +1520,10 @@ light_done:
         FollowCamInput down = { .left = 1, .dy = 10, .dt = 0.01f };
         camera_drag(&cam, &down, 0, &facing);
         check(near(cam.pitch, 0.35 + 0.06, 1e-5), "dragging down 10 pixels raises the camera 0.06 radians");
-        settings_set("mouseInvertPitch", "1", why, sizeof why);
+        settings_set("mouseInvertPitch", "1", &why);
         camera_drag(&cam, &down, 0, &facing);
         check(near(cam.pitch, 0.35, 1e-5), "with Invert Mouse, the same drag lowers it");
-        settings_set("cameraYawMoveSpeed", "90", why, sizeof why);
+        settings_set("cameraYawMoveSpeed", "90", &why);
         cam.yaw = 0;
         camera_drag(&cam, &(FollowCamInput){ .left = 1, .dx = -px90, .dt = 0.01f }, 0, &facing);
         check(near(cam.yaw, 45 * deg, 1e-4), "Mouse Look Speed 90: the same drag turns half as far");
@@ -1518,7 +1547,7 @@ light_done:
         check(near(cam.dist, 20, 1e-6), "a lowered zoom limit pulls the camera in at once");
         float phase = 0;
         check(camera_bob(&phase, CAMERA_BOB_STEP / 2, 0.05f) == 0, "Head Bob off (the default): the view doesn't move");
-        settings_set("cameraBobbing", "1", why, sizeof why);
+        settings_set("cameraBobbing", "1", &why);
         phase = 0;
         check(near(camera_bob(&phase, CAMERA_BOB_STEP / 2, 0.05f), CAMERA_BOB_HEIGHT, 1e-5), "Head Bob on: mid-step the view is lifted its full height");
         float lift = 1;

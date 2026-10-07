@@ -32,9 +32,9 @@ Where a figure's pictures come from:
   from and where on it (the model's attachment point), and its place in
   the wearer's model space this frame (figure_bend)
 - `type Figure`
-- `int figure_from_character(Figure *f, MpqChain *chain, const CharacterLook *look, char *why, int why_len);`
-- `int figure_from_display(Figure *f, MpqChain *chain, int display_id, char *why, int why_len);`
-- `int figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *picture, char *why, int why_len);`
+- `WErr figure_from_character(Figure *f, MpqChain *chain, const CharacterLook *look, WWhy *why);`
+- `WErr figure_from_display(Figure *f, MpqChain *chain, int display_id, WWhy *why);`
+- `WErr figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *picture, WWhy *why);`
   An item's model (a helm, a shoulder, a weapon), its pictures named
   inside it or the item's own picture (kind 2); hung on a character
   figure by figure_from_character (173p).

@@ -6,6 +6,7 @@
  * strongly each shows at every point, and its baked shadow.
  */
 #include "020-adt.h"
+#include "013-errors.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -23,15 +24,15 @@ static int is_tag(const unsigned char *s, size_t at, const char *tag)
 /* }}} */
 
 /* {{{ adt_wdt_big_alpha */
-int adt_wdt_big_alpha(const unsigned char *s, size_t len, char *why, int why_len)
+int adt_wdt_big_alpha(const unsigned char *s, size_t len, WWhy *why)
 {
     for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4))
         if (is_tag(s, at, "MPHD")) {
             if (at + 12 > len) break;
             return (u32(s, at + 8) & 0x4) ? 1 : 0;
         }
-    snprintf(why, why_len, "the map's WDT file has no MPHD block (read %zu bytes)", len);
-    return -1;
+    w_fail(why, W_ERR_CORRUPT, "the map's WDT file has no MPHD block (read %zu bytes)", len);
+    return -1;                                       /* a value function: 0 or 1 is the answer, below 0 a failure */
 }
 /* }}} */
 
@@ -82,10 +83,10 @@ static size_t read_alpha(const unsigned char *s, size_t avail, int big, int pack
 /* }}} */
 
 /* {{{ static read_chunk: one MCNK block, `at` at its tag */
-static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alpha, AdtChunk *c, char *why, int why_len)
+static WErr read_chunk(const unsigned char *s, size_t len, size_t at, int big_alpha, AdtChunk *c, WWhy *why)
 {
     size_t size = u32(s, at + 4), h = at + 8;
-    if (h + 128 > len || at + 8 + size > len) { snprintf(why, why_len, "MCNK block at byte %zu runs past the file's end", at); return 1; }
+    if (h + 128 > len || at + 8 + size > len) { w_fail(why, W_ERR_CORRUPT, "MCNK block at byte %zu runs past the file's end", at); return why->code; }
     uint32_t flags = u32(s, h);
     c->ix = (int)u32(s, h + 4);
     c->iy = (int)u32(s, h + 8);
@@ -95,15 +96,15 @@ static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alp
     c->y = f32(s, h + 108);
     c->z = f32(s, h + 112);
     if (c->ix > 15 || c->iy > 15 || c->nlayers < 1 || c->nlayers > 4) {
-        snprintf(why, why_len, "MCNK at byte %zu: index (%d, %d) or layer count %d out of range", at, c->ix, c->iy, c->nlayers);
-        return 1;
+        w_fail(why, W_ERR_CORRUPT, "MCNK at byte %zu: index (%d, %d) or layer count %d out of range", at, c->ix, c->iy, c->nlayers);
+        return why->code;
     }
     /* each sub-block found by its header offset, its tag checked */
     #define SUB(off, tag, need) \
         size_t off##_at = at + u32(s, h + (off)); \
         if (off##_at + 8 + (need) > at + 8 + size || !is_tag(s, off##_at, tag)) { \
-            snprintf(why, why_len, "chunk (%d, %d): no %s block where its header says (byte %zu)", c->ix, c->iy, tag, off##_at); \
-            return 1; }
+            w_fail(why, W_ERR_CORRUPT, "chunk (%d, %d): no %s block where its header says (byte %zu)", c->ix, c->iy, tag, off##_at); \
+            return why->code; }
     enum { OFS_MCVT = 20, OFS_MCLY = 28, OFS_MCAL = 36, OFS_MCSH = 44 };
     SUB(OFS_MCVT, "MCVT", 145 * 4)
     for (int i = 0; i < 145; ++i) c->heights[i] = f32(s, OFS_MCVT_at + 8 + i * 4);
@@ -111,8 +112,8 @@ static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alp
     size_t mcal_at = at + u32(s, h + OFS_MCAL), mcal_size = 0;
     if (c->nlayers > 1) {
         if (mcal_at + 8 > at + 8 + size || !is_tag(s, mcal_at, "MCAL")) {
-            snprintf(why, why_len, "chunk (%d, %d): %d layers but no MCAL block where its header says", c->ix, c->iy, c->nlayers);
-            return 1;
+            w_fail(why, W_ERR_CORRUPT, "chunk (%d, %d): %d layers but no MCAL block where its header says", c->ix, c->iy, c->nlayers);
+            return why->code;
         }
         /* the size comes from the chunk header (offset 40, which counts
          * MCAL's own 8-byte head), not from MCAL's size field: in packed
@@ -120,8 +121,8 @@ static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alp
          * 512 in MCAL, 3688 in the header, and the blend maps use 3680) */
         uint32_t told = u32(s, h + 40);
         if (told < 8 || mcal_at + told > at + 8 + size) {
-            snprintf(why, why_len, "chunk (%d, %d): its header gives MCAL %u bytes, which doesn't fit in the chunk", c->ix, c->iy, told);
-            return 1;
+            w_fail(why, W_ERR_CORRUPT, "chunk (%d, %d): its header gives MCAL %u bytes, which doesn't fit in the chunk", c->ix, c->iy, told);
+            return why->code;
         }
         mcal_size = told - 8;
     }
@@ -134,8 +135,8 @@ static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alp
         if (!(lflags & 0x100)) { memset(c->alpha[l], 0, 4096); continue; }   /* a layer with no blend map doesn't show */
         if (offset >= mcal_size || !read_alpha(s + mcal_at + 8 + offset, mcal_size - offset, big_alpha, (lflags & 0x200) != 0,
                                                !(flags & 0x8000), c->alpha[l])) {
-            snprintf(why, why_len, "chunk (%d, %d) layer %d: its blend map runs past MCAL's end (offset %u of %zu)", c->ix, c->iy, l, offset, mcal_size);
-            return 1;
+            w_fail(why, W_ERR_CORRUPT, "chunk (%d, %d) layer %d: its blend map runs past MCAL's end (offset %u of %zu)", c->ix, c->iy, l, offset, mcal_size);
+            return why->code;
         }
     }
     /* the shadow is optional: a chunk with none is all lit */
@@ -161,7 +162,7 @@ static int read_chunk(const unsigned char *s, size_t len, size_t at, int big_alp
 /* }}} */
 
 /* {{{ adt_read */
-int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, char *why, int why_len)
+WErr adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     int nchunks = 0;
@@ -171,7 +172,7 @@ int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, ch
     size_t mmdx_len = 0, mwmo_len = 0;
     for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4)) {
         size_t size = u32(s, at + 4);
-        if (at + 8 + size > len) { snprintf(why, why_len, "a block at byte %zu says it is %zu bytes, past the file's end (%zu)", at, size, len); adt_free(out); return 1; }
+        if (at + 8 + size > len) { w_fail(why, W_ERR_CORRUPT, "a block at byte %zu says it is %zu bytes, past the file's end (%zu)", at, size, len); adt_free(out); return why->code; }
         if (is_tag(s, at, "MTEX")) {
             int n = 0;
             for (size_t i = 0; i < size; ++i) if (s[at + 8 + i] == 0) ++n;
@@ -185,12 +186,12 @@ int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, ch
         } else if (is_tag(s, at, "MH2O")) {
             /* water: per chunk, its layers (173r) */
             const unsigned char *w = s + at + 8;
-            if (size < 256 * 12) { snprintf(why, why_len, "MH2O is %zu bytes, shorter than its 256 heads", size); adt_free(out); return 1; }
+            if (size < 256 * 12) { w_fail(why, W_ERR_CORRUPT, "MH2O is %zu bytes, shorter than its 256 heads", size); adt_free(out); return why->code; }
             for (int k = 0; k < 256; ++k) {
                 uint32_t oi = u32(w, (size_t)k * 12), layers = u32(w, (size_t)k * 12 + 4);
                 for (uint32_t l = 0; l < layers; ++l) {
                     size_t e = oi + (size_t)l * 24;
-                    if (e + 24 > size) { snprintf(why, why_len, "chunk %d's water layer %u runs past MH2O", k, l); adt_free(out); return 1; }
+                    if (e + 24 > size) { w_fail(why, W_ERR_CORRUPT, "chunk %d's water layer %u runs past MH2O", k, l); adt_free(out); return why->code; }
                     AdtLiquid q;
                     memset(&q, 0, sizeof q);
                     q.chunk = k;
@@ -198,7 +199,7 @@ int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, ch
                     int fmt = w[e + 2] | w[e + 3] << 8;
                     float lo = f32(w, e + 4);
                     q.col = w[e + 12]; q.row = w[e + 13]; q.w = w[e + 14]; q.h = w[e + 15];
-                    if (q.col + q.w > 8 || q.row + q.h > 8) { snprintf(why, why_len, "chunk %d's water covers cells past the chunk", k); adt_free(out); return 1; }
+                    if (q.col + q.w > 8 || q.row + q.h > 8) { w_fail(why, W_ERR_CORRUPT, "chunk %d's water covers cells past the chunk", k); adt_free(out); return why->code; }
                     uint32_t ob = u32(w, e + 16), ov = u32(w, e + 20);
                     for (int r = 0; r < q.h; ++r)
                         for (int c = 0; c < q.w; ++c) {
@@ -242,7 +243,7 @@ int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, ch
             char (*names)[260] = calloc(n ? n : 1, sizeof *names);
             for (int k = 0; k < n; ++k) {
                 uint32_t o = u32(s, at + 8 + (size_t)k * 4);
-                if (!text || o >= text_len) { snprintf(why, why_len, "%s entry %d points past its names", is_m ? "MMID" : "MWID", k); free(names); adt_free(out); return 1; }
+                if (!text || o >= text_len) { w_fail(why, W_ERR_CORRUPT, "%s entry %d points past its names", is_m ? "MMID" : "MWID", k); free(names); adt_free(out); return why->code; }
                 snprintf(names[k], sizeof names[k], "%.*s", (int)strnlen((const char *)text + o, text_len - o), text + o);
             }
             if (is_m) { out->models = names; out->nmodels = n; } else { out->buildings = names; out->nbuildings = n; }
@@ -274,43 +275,43 @@ int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, ch
             }
             if (is_d) { out->doodads = list; out->ndoodads = n; } else { out->places = list; out->nplaces = n; }
         } else if (is_tag(s, at, "MCNK")) {
-            if (nchunks == 256) { snprintf(why, why_len, "more than 256 MCNK blocks"); adt_free(out); return 1; }
+            if (nchunks == 256) { w_fail(why, W_ERR_CORRUPT, "more than 256 MCNK blocks"); adt_free(out); return why->code; }
             AdtChunk c;
-            if (read_chunk(s, len, at, big_alpha, &c, why, why_len)) { adt_free(out); return 1; }
+            if (read_chunk(s, len, at, big_alpha, &c, why)) { adt_free(out); return why->code; }
             out->chunks[c.iy * 16 + c.ix] = c;
             ++nchunks;
         }
     }
-    if (nchunks != 256) { snprintf(why, why_len, "%d MCNK blocks, not 256", nchunks); adt_free(out); return 1; }
+    if (nchunks != 256) { w_fail(why, W_ERR_CORRUPT, "%d MCNK blocks, not 256", nchunks); adt_free(out); return why->code; }
     for (int k = 0; k < out->ndoodads; ++k)
         if (out->doodads[k].name < 0 || out->doodads[k].name >= out->nmodels) {
-            snprintf(why, why_len, "doodad placement %d names model %d; the tile lists %d", k, out->doodads[k].name, out->nmodels);
+            w_fail(why, W_ERR_CORRUPT, "doodad placement %d names model %d; the tile lists %d", k, out->doodads[k].name, out->nmodels);
             adt_free(out);
-            return 1;
+            return why->code;
         }
     for (int k = 0; k < out->nplaces; ++k)
         if (out->places[k].name < 0 || out->places[k].name >= out->nbuildings) {
-            snprintf(why, why_len, "building placement %d names building %d; the tile lists %d", k, out->places[k].name, out->nbuildings);
+            w_fail(why, W_ERR_CORRUPT, "building placement %d names building %d; the tile lists %d", k, out->places[k].name, out->nbuildings);
             adt_free(out);
-            return 1;
+            return why->code;
         }
     for (int i = 0; i < 256; ++i)
         for (int l = 0; l < out->chunks[i].nlayers; ++l)
             if (out->chunks[i].tex[l] < 0 || out->chunks[i].tex[l] >= out->ntextures) {
-                snprintf(why, why_len, "chunk %d layer %d names picture %d; the tile lists %d", i, l, out->chunks[i].tex[l], out->ntextures);
+                w_fail(why, W_ERR_CORRUPT, "chunk %d layer %d names picture %d; the tile lists %d", i, l, out->chunks[i].tex[l], out->ntextures);
                 adt_free(out);
-                return 1;
+                return why->code;
             }
     return 0;
 }
 /* {{{ adt_wdl_read */
-int adt_wdl_read(const unsigned char *s, size_t len, AdtWdl *out, char *why, int why_len)
+WErr adt_wdl_read(const unsigned char *s, size_t len, AdtWdl *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     size_t maof = 0;
     for (size_t at = 0; at + 8 <= len && at + 8 + u32(s, at + 4) <= len; at += 8 + u32(s, at + 4))
         if (is_tag(s, at, "MAOF")) { maof = at + 8; break; }
-    if (!maof || maof + 4096 * 4 > len) { snprintf(why, why_len, "no tile list (MAOF)"); return 1; }
+    if (!maof || maof + 4096 * 4 > len) { w_fail(why, W_ERR_CORRUPT, "no tile list (MAOF)"); return why->code; }
     for (int i = 0; i < 4096; ++i) {
         uint32_t o = u32(s, maof + (size_t)i * 4);
         if (!o || (size_t)o + 8 + 1090 > len || !is_tag(s, o, "MARE")) continue;

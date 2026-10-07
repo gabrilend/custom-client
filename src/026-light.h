@@ -50,6 +50,8 @@
 #ifndef EG_LIGHT_H
 #define EG_LIGHT_H
 
+#include "013-errors.h"
+
 #include "016-dbc.h"
 #include "015-mpq.h"
 
@@ -69,7 +71,7 @@ typedef struct {
     Dbc light, ints, floats, params, skyboxes;
 } LightTables;
 
-int  light_open(LightTables *t, MpqChain *chain, char *why, int why_len);
+WErr  light_open(LightTables *t, MpqChain *chain, WWhy *why);
 void light_close(LightTables *t);
 
 /* Which of a light's parameter sets is used (Light's fields 8 on). */

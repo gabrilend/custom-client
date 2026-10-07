@@ -13,15 +13,17 @@
 #ifndef EG_WATER_H
 #define EG_WATER_H
 
+#include "013-errors.h"
+
 #include "020-adt.h"
 #include "021-wmo.h"
 #include "026-light.h"
 #include "015-mpq.h"
 #include "raylib.h"
 
-/* Reads the liquid table; the chain must outlive the drawer. 0, or 1
+/* Reads the liquid table; the chain must outlive the drawer. W_OK, or a code
  * with `why`. */
-int  water_init(MpqChain *chain, char *why, int why_len);
+WErr  water_init(MpqChain *chain, WWhy *why);
 
 /* Adds a tile's water (tile = tx * 64 + ty), placed relative to the
  * drawing origin; drops it again (173s). */

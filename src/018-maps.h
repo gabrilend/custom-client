@@ -16,6 +16,8 @@
 #ifndef EG_MAPS_H
 #define EG_MAPS_H
 
+#include "013-errors.h"
+
 #include <stdint.h>
 
 #define MAPS_GRID_SIZE      533.33333f       /* yards per tile (SIZE_OF_GRIDS) */
@@ -43,7 +45,7 @@ typedef struct {
 #define MAPS_NO_TILE ((MapTile *)1)
 
 void     maps_tile_of(float x, float y, int *tx, int *ty);
-MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, char *why, int why_len);
+MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, WWhy *why);
 void     maps_free_tile(MapTile *t);
 int      maps_is_hole(const MapTile *t, int row, int col);
 /* Height at (x, y) inside tile t, and its rise per yard along world x and y. */

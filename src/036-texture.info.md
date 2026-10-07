@@ -20,8 +20,8 @@ words), 84 how long each is.
 
 ## What it offers
 
-- `int texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, char *why, int why_len);`
-  The picture in `s` (a whole .blp file) on the card. 0, or 1 with `why`.
+- `WErr texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, WWhy *why);`
+  The picture in `s` (a whole .blp file) on the card. W_OK, or a code with `why`.
 - `void texture_filtering(int mode);`
   Texture Filtering (173b6), set once at start (`textureFilteringMode`,
   the original's 0 to 5): 0 bilinear (smoothed within a copy, the nearest

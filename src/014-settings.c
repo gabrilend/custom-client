@@ -7,6 +7,7 @@
  * draw itself from these rows.
  */
 #include "014-settings.h"
+#include "013-errors.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -195,7 +196,7 @@ void settings_init(void)
 /* }}} */
 
 /* {{{ settings_set */
-int settings_set(const char *name, const char *value, char *why, int why_len)
+WErr settings_set(const char *name, const char *value, WWhy *why)
 {
     for (int i = 0; i < DECL_COUNT; ++i) {
         if (strcmp(DECLS[i].name, name)) continue;
@@ -203,16 +204,16 @@ int settings_set(const char *name, const char *value, char *why, int why_len)
         const char *no = accept(&DECLS[i], value, &next);
         if (no) {
             if (DECLS[i].kind == SETTING_SLIDER)
-                snprintf(why, why_len, "%s \"%s\": %s (%g to %g)", name, value, no, DECLS[i].min, DECLS[i].max);
+                w_fail(why, W_ERR_REFUSED, "%s \"%s\": %s (%g to %g)", name, value, no, DECLS[i].min, DECLS[i].max);
             else
-                snprintf(why, why_len, "%s \"%s\": %s", name, value, no);
-            return 1;
+                w_fail(why, W_ERR_REFUSED, "%s \"%s\": %s", name, value, no);
+            return why->code;
         }
         values[i] = next;
         return 0;
     }
-    snprintf(why, why_len, "no setting named %s", name);
-    return 1;
+    w_fail(why, W_ERR_REFUSED, "no setting named %s", name);
+    return why->code;
 }
 /* }}} */
 
@@ -226,7 +227,8 @@ int settings_load(const char *path, FILE *report)
         fprintf(report, "settings: no file at %s yet; every setting is at its default\n", path);
         return 0;
     }
-    char line[512], name[128], value[256], why[400];
+    char line[512], name[128], value[256];
+    WWhy why;
     int number = 0, skipped = 0;
     while (fgets(line, sizeof line, f)) {
         ++number;
@@ -239,8 +241,8 @@ int settings_load(const char *path, FILE *report)
             ++skipped;
             continue;
         }
-        if (settings_set(name, value, why, sizeof why)) {
-            fprintf(report, "settings: %s line %d: %s; skipped\n", path, number, why);
+        if (settings_set(name, value, &why)) {
+            fprintf(report, "settings: %s line %d: %s; skipped\n", path, number, why.text);
             ++skipped;
         }
     }
@@ -250,16 +252,16 @@ int settings_load(const char *path, FILE *report)
 /* }}} */
 
 /* {{{ settings_save */
-int settings_save(const char *path, char *why, int why_len)
+WErr settings_save(const char *path, WWhy *why)
 {
     FILE *f = fopen(path, "w");
-    if (!f) { snprintf(why, why_len, "can't write %s (does its folder exist?)", path); return 1; }
+    if (!f) { w_fail(why, W_ERR_IO, "can't write %s (does its folder exist?)", path); return why->code; }
     for (int i = 0; i < DECL_COUNT; ++i) {
         Setting def;
         accept(&DECLS[i], DECLS[i].def, &def);      /* accepted at init, so never refused here */
         if (strcmp(values[i].text, def.text)) fprintf(f, "SET %s \"%s\"\n", DECLS[i].name, values[i].text);
     }
-    if (fclose(f)) { snprintf(why, why_len, "writing %s failed", path); return 1; }
+    if (fclose(f)) { w_fail(why, W_ERR_IO, "writing %s failed", path); return why->code; }
     return 0;
 }
 /* }}} */

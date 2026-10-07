@@ -17,6 +17,6 @@ Tile header (MmapTileHeader, MapDefines.h; little-endian): 0 magic
 
 ## What it offers
 
-- `float navmesh_slope_read(const char *dir, int map_id, char *why, int why_len);`
+- `float navmesh_slope_read(const char *dir, int map_id, WWhy *why);`
   The walkable slope in degrees from map_id's first tile in dir; < 0 on
   failure, with the reason in `why`.

@@ -6,6 +6,7 @@
  * sending half (038-ground.c) so a second thread can do it ahead of her.
  */
 #include "033-ground-prep.h"
+#include "013-errors.h"
 #include "017-blp.h"
 
 #include <math.h>
@@ -14,7 +15,7 @@
 #include <string.h>
 
 /* {{{ ground_place_init */
-int ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, char *why, int why_len)
+WErr ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why)
 {
     memset(p, 0, sizeof *p);
     p->chain = chain;
@@ -26,25 +27,25 @@ int ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, Map
     size_t len;
     const char *from;
     unsigned char *wdt = mpq_chain_read(chain, path, &len, &from);
-    if (!wdt) { snprintf(why, why_len, "%s is in none of the client's archives", path); return 1; }
-    p->big_alpha = adt_wdt_big_alpha(wdt, len, why, why_len);
+    if (!wdt) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", path); return why->code; }
+    p->big_alpha = adt_wdt_big_alpha(wdt, len, why);
     free(wdt);
     return p->big_alpha < 0;
 }
 /* }}} */
 
 /* {{{ ground_prep_pixels */
-int ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, char *why, int why_len)
+WErr ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, WWhy *why)
 {
     size_t len;
     const char *from;
     unsigned char *s = mpq_chain_read(chain, name, &len, &from);
-    if (!s) { snprintf(why, why_len, "the ground picture %s is in none of the client's archives", name); return 1; }
+    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the ground picture %s is in none of the client's archives", name); return why->code; }
     BlpImage img;
-    char inner[300];
-    int bad = blp_decode(s, len, &img, inner, sizeof inner);
+    WWhy inner;
+    int bad = blp_decode(s, len, &img, &inner);
     free(s);
-    if (bad) { snprintf(why, why_len, "the ground picture %s: %s", name, inner); return 1; }
+    if (bad) { w_fail(why, inner.code, "the ground picture %s: %s", name, inner.text); return why->code; }
     px->rgba = img.rgba;                                 /* kept: blp_free would only free this */
     px->width = img.width;
     px->height = img.height;
@@ -132,31 +133,31 @@ static void chunk_points(const AdtChunk *c, const GroundPlace *p, GroundQuarter 
 /* }}} */
 
 /* {{{ ground_prep_tile */
-int ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, char *why, int why_len)
+WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, WWhy *why)
 {
     *out = NULL;
-    if (tx < 0 || tx > 63 || ty < 0 || ty > 63) return 1;
+    if (tx < 0 || tx > 63 || ty < 0 || ty > 63) return w_fail(why, W_ERR_NOT_FOUND, "tile (%d, %d) is off the map's 64 x 64 grid", tx, ty);
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", p->map_name, p->map_name, ty, tx);   /* west-east number first */
     size_t len;
     const char *from;
     unsigned char *s = mpq_chain_read(p->chain, path, &len, &from);
-    if (!s) return 1;
+    if (!s) return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the archives (open sea: no ground there)", path);
     GroundPrep *g = calloc(1, sizeof *g);
     g->tx = tx; g->ty = ty;
     g->adt = malloc(sizeof *g->adt);
-    char inner[400];
-    if (adt_read(s, len, p->big_alpha, g->adt, inner, sizeof inner)) {
-        snprintf(why, why_len, "%s (from %s): %s", path, from, inner);
+    WWhy inner;
+    if (adt_read(s, len, p->big_alpha, g->adt, &inner)) {
+        w_fail(why, inner.code, "%s (from %s): %s", path, from, inner.text);
         free(s); free(g->adt); free(g);
-        return -1;
+        return why->code;
     }
     free(s);
     const AdtTile *adt = g->adt;
     if (adt->ntextures > 256) {
-        snprintf(why, why_len, "%s lists %d ground pictures; at most 256 are expected", path, adt->ntextures);
+        w_fail(why, W_ERR_CORRUPT, "%s lists %d ground pictures; at most 256 are expected", path, adt->ntextures);
         ground_prep_free(g, 0);
-        return -1;
+        return why->code;
     }
     /* each chunk's four pictures (layers past nlayers repeat layer 0:
      * their strength is 0), checked against the tile's list */
@@ -165,9 +166,9 @@ int ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const 
         for (int l = 0; l < 4; ++l) {
             int t = c->tex[l < c->nlayers ? l : 0];
             if (t < 0 || t >= adt->ntextures) {
-                snprintf(why, why_len, "%s: chunk %d names picture %d of %d", path, k, t, adt->ntextures);
+                w_fail(why, W_ERR_CORRUPT, "%s: chunk %d names picture %d of %d", path, k, t, adt->ntextures);
                 ground_prep_free(g, 0);
-                return -1;
+                return why->code;
             }
             g->chunk_tex[k][l] = t;
             g->needed[t] = 1;
@@ -176,7 +177,7 @@ int ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const 
     /* the pictures not already on the card */
     for (int t = 0; t < adt->ntextures; ++t) {
         if (!g->needed[t] || (on_card && on_card(adt->textures[t]))) continue;
-        if (ground_prep_pixels(p->chain, adt->textures[t], &g->pixels[t], why, why_len)) { ground_prep_free(g, 0); return -1; }
+        if (ground_prep_pixels(p->chain, adt->textures[t], &g->pixels[t], why)) { ground_prep_free(g, 0); return why->code; }
     }
     /* each quarter: 64 chunks of 145 points (9,280, within the 16-bit
      * point numbers), 768 triangle corners a chunk at most */

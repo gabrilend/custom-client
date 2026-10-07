@@ -13,6 +13,8 @@
 #ifndef EG_CHARACTER_H
 #define EG_CHARACTER_H
 
+#include "013-errors.h"
+
 #include "017-blp.h"
 #include "022-m2.h"
 #include "015-mpq.h"
@@ -59,11 +61,11 @@ typedef struct {
  * warrior, 3 hunter, 11 druid ...) and sex, its items' looks put into
  * `items` by the kind of slot each fills. Slots it doesn't fill are left
  * as they were. Ranged weapons (bows, guns, thrown), ammunition, bags and
- * food have no slot here and are left out. 0, or -1 with `why` (no such
+ * food have no slot here and are left out. W_OK, or a code with `why` (no such
  * row). */
-int  character_start_outfit(MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], char *why, int why_len);
+WErr  character_start_outfit(MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], WWhy *why);
 
-int  character_build(MpqChain *archives, const CharacterLook *look, Character *out, char *why, int why_len);
+WErr  character_build(MpqChain *archives, const CharacterLook *look, Character *out, WWhy *why);
 void character_free(Character *c);
 
 #endif

@@ -35,6 +35,8 @@
 #ifndef EG_PARTICLES_H
 #define EG_PARTICLES_H
 
+#include "013-errors.h"
+
 #include "023-anim.h"
 
 #define PART_KEYS 8
@@ -59,8 +61,8 @@ typedef struct {
     uint32_t  rng;
 } EmitterRun;
 
-/* The model's emitters (from the model file kept in `a`). 0, or 1 with `why`. */
-int  particles_read(const Anim *a, Emitter **out, int *n, char *why, int why_len);
+/* The model's emitters (from the model file kept in `a`). W_OK, or a code with `why`. */
+WErr  particles_read(const Anim *a, Emitter **out, int *n, WWhy *why);
 
 /* One frame: ages and moves the living, then gives birth at the rate.
  * `world` is where the emitter's bone is in the world this frame (the

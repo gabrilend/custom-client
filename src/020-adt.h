@@ -114,6 +114,8 @@
 #ifndef EG_ADT_H
 #define EG_ADT_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -166,14 +168,14 @@ typedef struct {
 } AdtTile;
 
 /* Whether a map's blend maps are 8 bits a point, from its WDT file
- * (MPHD flags & 0x4). Returns 1 or 0, or -1 with `why` set when the WDT
+ * (MPHD flags & 0x4). Returns 1 or W_OK, or a code with `why` set when the WDT
  * can't be read. */
-int adt_wdt_big_alpha(const unsigned char *s, size_t len, char *why, int why_len);
+int adt_wdt_big_alpha(const unsigned char *s, size_t len, WWhy *why);
 
-/* Reads one ground file. 0 on success; otherwise `why` names what was
+/* Reads one ground file. W_OK; otherwise a code, and `why` names what was
  * wrong and where (block tag, chunk index). `out` is large (about 5 MB):
  * allocate it, don't put it on the stack. */
-int adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, char *why, int why_len);
+WErr adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, WWhy *why);
 void adt_free(AdtTile *t);
 
 /* A placement's turn, size and position as a 4 x 4 matrix, laid out as
@@ -208,7 +210,7 @@ typedef struct {
     uint16_t holes[4096][16];
     uint8_t  have[4096];
 } AdtWdl;
-int adt_wdl_read(const unsigned char *s, size_t len, AdtWdl *out, char *why, int why_len);
+WErr adt_wdl_read(const unsigned char *s, size_t len, AdtWdl *out, WWhy *why);
 
 /* MCVT index of corner (row 0-8, col 0-8) and centre (row 0-7, col 0-7). */
 static inline int adt_corner(int row, int col) { return row * 17 + col; }

@@ -20,10 +20,10 @@ first column).
 
 ## What it offers
 
-- `int horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, char *why, int why_len);`
+- `WErr horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, WWhy *why);`
   Reads the map's low-detail heights; the chain may be closed afterwards.
-  0, or 1 with `why` (a map with no .wdl draws no horizon: said, not an
-  error).
+  W_OK, or a code with `why` (W_ERR_NOT_FOUND: a map with no .wdl draws
+  no horizon; said, not a failure).
 - `void horizon_draw(int tx, int ty, int (*loaded)(int x, int y), Vector3 eye, const LightNow *light);`
   Draws every low-detail tile within reach of tile (tx, ty) for which
   `loaded(x, y)` says the full ground isn't there.

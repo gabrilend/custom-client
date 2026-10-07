@@ -15,8 +15,8 @@ slime are drawn as their pictures, unlit and solid.
 
 ## What it offers
 
-- `int water_init(MpqChain *chain, char *why, int why_len);`
-  Reads the liquid table; the chain must outlive the drawer. 0, or 1
+- `WErr water_init(MpqChain *chain, WWhy *why);`
+  Reads the liquid table; the chain must outlive the drawer. W_OK, or a code
   with `why`.
 - `void water_add_tile(const AdtTile *t, int tile, double ox, double oy);`
   Adds a tile's water (tile = tx * 64 + ty), placed relative to the

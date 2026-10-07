@@ -8,6 +8,7 @@
  * sends them.
  */
 #include "036-texture.h"
+#include "013-errors.h"
 #include "017-blp.h"
 
 #include <stdint.h>
@@ -82,7 +83,7 @@ static uint32_t u32(const unsigned char *s, size_t at) { return s[at] | s[at + 1
  * its stored length covers its blocks (a 4 x 4 block at least) and it
  * lies inside the file; the card is told the last copy given, so a short
  * chain still draws. Anything else: unpacked by 017-blp.c. */
-int texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, char *why, int why_len)
+WErr texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, WWhy *why)
 {
     if (len >= 148 && !memcmp(s, "BLP2", 4) && s[8] == 2) {
         int kind = s[10];
@@ -122,7 +123,7 @@ int texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, char *w
         }
     }
     BlpImage img;
-    if (blp_decode(s, len, &img, why, why_len)) return 1;
+    if (blp_decode(s, len, &img, why)) return why->code;
     Image im = { .data = img.rgba, .width = img.width, .height = img.height, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     Texture2D t = LoadTextureFromImage(im);
     bytes_sent += (size_t)img.width * img.height * 4;

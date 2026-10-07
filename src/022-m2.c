@@ -2,6 +2,7 @@
  * 022-m2.c (issue 173k) - see 022-m2.h. Ported from src/custom-client/lib/m2.lua.
  */
 #include "022-m2.h"
+#include "013-errors.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,20 +18,20 @@ static float f32(const unsigned char *s, size_t at) { float f; uint32_t v = u32(
 /* }}} */
 
 /* {{{ m2_read */
-int m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, size_t skin_len,
-            M2Model *out, char *why, int why_len)
+WErr m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, size_t skin_len,
+            M2Model *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
-    if (!m2 || m2_len < 160 || memcmp(m2, "MD20", 4) != 0) { snprintf(why, why_len, "not an M2 model (no MD20 mark)"); return -1; }
-    if (u32(m2, 4) != 264) { snprintf(why, why_len, "model version %u; this reader knows 264 (3.3.5a)", u32(m2, 4)); return -1; }
-    if (!skin || skin_len < 44 || memcmp(skin, "SKIN", 4) != 0) { snprintf(why, why_len, "the .skin file has no SKIN mark"); return -1; }
+    if (!m2 || m2_len < 160 || memcmp(m2, "MD20", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "not an M2 model (no MD20 mark)"); return why->code; }
+    if (u32(m2, 4) != 264) { w_fail(why, W_ERR_CORRUPT, "model version %u; this reader knows 264 (3.3.5a)", u32(m2, 4)); return why->code; }
+    if (!skin || skin_len < 44 || memcmp(skin, "SKIN", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "the .skin file has no SKIN mark"); return why->code; }
 
     /* every table must lie inside its file: doodads are read by the
      * thousand, and a short or odd file must fail by name, not crash */
     #define FITS(len, at, count, each, what) \
         if ((uint64_t)(at) + (uint64_t)(count) * (each) > (len)) { \
-            snprintf(why, why_len, "%s: %u entries at byte %u run past the file's end (%zu bytes)", what, (unsigned)(count), (unsigned)(at), (size_t)(len)); \
-            m2_free(out); return -1; }
+            w_fail(why, W_ERR_CORRUPT, "%s: %u entries at byte %u run past the file's end (%zu bytes)", what, (unsigned)(count), (unsigned)(at), (size_t)(len)); \
+            m2_free(out); return why->code; }
     FITS(m2_len, u32(m2, 64), u32(m2, 60), 48, "the model's points")
     FITS(m2_len, u32(m2, 84), u32(m2, 80), 16, "the model's pictures")
     FITS(m2_len, u32(m2, 116), u32(m2, 112), 4, "the model's materials")
@@ -127,16 +128,16 @@ int m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, s
 /* }}} */
 
 /* {{{ m2_collision */
-int m2_collision(const unsigned char *m2, size_t len, float **tris, int *ntri, char *why, int why_len)
+WErr m2_collision(const unsigned char *m2, size_t len, float **tris, int *ntri, WWhy *why)
 {
     *tris = NULL;
     *ntri = 0;
-    if (len < 232) { snprintf(why, why_len, "the model file is too short for its collision lists"); return 1; }
+    if (len < 232) { w_fail(why, W_ERR_CORRUPT, "the model file is too short for its collision lists"); return why->code; }
     uint32_t ni = u32(m2, 216), oi = u32(m2, 220), np = u32(m2, 224), op = u32(m2, 228);
     if (ni < 3 || np == 0) return 0;
     if ((uint64_t)oi + (uint64_t)ni * 2 > len || (uint64_t)op + (uint64_t)np * 12 > len) {
-        snprintf(why, why_len, "its collision lists (%u corners, %u points) run past the file's end", ni, np);
-        return 1;
+        w_fail(why, W_ERR_CORRUPT, "its collision lists (%u corners, %u points) run past the file's end", ni, np);
+        return why->code;
     }
     int n = (int)(ni / 3);
     float *out = malloc(sizeof(float) * 9 * (size_t)n);

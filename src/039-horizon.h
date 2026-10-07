@@ -18,6 +18,8 @@
 #ifndef EG_HORIZON_H
 #define EG_HORIZON_H
 
+#include "013-errors.h"
+
 #include "026-light.h"
 #include "015-mpq.h"
 #include "raylib.h"
@@ -25,9 +27,9 @@
 #define HORIZON_REACH 6               /* tiles round hers the horizon is drawn to */
 
 /* Reads the map's low-detail heights; the chain may be closed afterwards.
- * 0, or 1 with `why` (a map with no .wdl draws no horizon: said, not an
- * error). */
-int  horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, char *why, int why_len);
+ * W_OK, or a code with `why` (W_ERR_NOT_FOUND: a map with no .wdl draws
+ * no horizon; said, not a failure). */
+WErr  horizon_init(MpqChain *chain, const char *map_name, double ox, double oy, WWhy *why);
 
 /* Draws every low-detail tile within reach of tile (tx, ty) for which
  * `loaded(x, y)` says the full ground isn't there. */

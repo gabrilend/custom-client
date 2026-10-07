@@ -8,6 +8,7 @@
  * first, then see-through and glowing ones over them.
  */
 #include "042-doodads.h"
+#include "013-errors.h"
 #include "023-anim.h"
 #include "017-blp.h"
 #include "028-collide.h"
@@ -162,13 +163,13 @@ static Vector3   view_right = { 1, 0, 0 }, view_up = { 0, 0, 1 };   /* the camer
 /* }}} */
 
 /* {{{ doodads_init */
-int doodads_init(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, char *why, int why_len)
+WErr doodads_init(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, WWhy *why)
 {
     chain = c;
     solids = collide;
     liquids = liquid_world;
     shader = LoadShaderFromMemory(VS, FS);
-    if (!IsShaderReady(shader)) { snprintf(why, why_len, "the doodad shader didn't compile (see Raylib's messages above)"); return 1; }
+    if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the doodad shader didn't compile (see Raylib's messages above)"); return why->code; }
     shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(shader, "instanceTransform");
     loc_eye = GetShaderLocation(shader, "eye");
     loc_cutoff = GetShaderLocation(shader, "cutoff");
@@ -199,11 +200,11 @@ static int picture(const char *name)
     const char *from;
     unsigned char *s = mpq_chain_read(chain, name, &len, &from);
     if (!s) { fprintf(stderr, "doodads: the picture %s is in none of the client's archives; pieces using it are left out\n", name); return -1; }
-    char why[300];
+    WWhy why;
     Texture2D t;
-    int bad = texture_from_blp(s, len, &t, why, sizeof why);   /* sent compressed when stored so (173u) */
+    int bad = texture_from_blp(s, len, &t, &why);   /* sent compressed when stored so (173u) */
     free(s);
-    if (bad) { fprintf(stderr, "doodads: the picture %s: %s; pieces using it are left out\n", name, why); return -1; }
+    if (bad) { fprintf(stderr, "doodads: the picture %s: %s; pieces using it are left out\n", name, why.text); return -1; }
     if (npictures == pictures_cap) {
         pictures_cap = pictures_cap ? pictures_cap * 2 : 256;
         pictures = realloc(pictures, sizeof *pictures * pictures_cap);
@@ -240,21 +241,21 @@ static int load_model(const char *name)
     snprintf(path, sizeof path, "%s00.skin", base);
     unsigned char *skin = mpq_chain_read(chain, path, &slen, &from);
     M2Model mod;
-    char why[400];
+    WWhy why;
     if (!m2 || !skin) {
         fprintf(stderr, "doodads: %s: %s is in none of the client's archives; left out\n", name, !m2 ? "the .m2" : "its 00.skin");
         free(m2); free(skin);
         return nmodels++;
     }
-    int bad = m2_read(m2, mlen, skin, slen, &mod, why, sizeof why);
+    int bad = m2_read(m2, mlen, skin, slen, &mod, &why);
     free(skin);
-    if (bad) { free(m2); fprintf(stderr, "doodads: %s: %s; left out\n", name, why); return nmodels++; }
+    if (bad) { free(m2); fprintf(stderr, "doodads: %s: %s; left out\n", name, why.text); return nmodels++; }
 
     /* does it move while standing? (its stand animation, id 0, moving
      * any bone) If so it keeps its skeleton and is bent every frame. */
     Anim *an = calloc(1, sizeof *an);
     int moving = 0;
-    if (!anim_read(m2, mlen, an, why, sizeof why)) {
+    if (!anim_read(m2, mlen, an, &why)) {
         md->stand = anim_find(an, 0, 0);
         if (md->stand >= 0 && anim_needs_file(an, md->stand)) {
             snprintf(path, sizeof path, "%s%04d-%02d.anim", base, an->seqs[md->stand].id, an->seqs[md->stand].variation);
@@ -266,8 +267,8 @@ static int load_model(const char *name)
         moving = md->stand >= 0 && an->npoints == mod.nvertices && anim_moves(an, md->stand);
         /* its particle emitters, each with its picture (the model's own
          * picture slot, named in the file) */
-        if (particles_read(an, &md->emitters, &md->nemitters, why, sizeof why))
-            fprintf(stderr, "doodads: %s's particles: %s; it shows none\n", name, why);
+        if (particles_read(an, &md->emitters, &md->nemitters, &why))
+            fprintf(stderr, "doodads: %s's particles: %s; it shows none\n", name, why.text);
         if (md->nemitters) {
             md->emit_pic = malloc(sizeof(int) * md->nemitters);
             for (int i = 0; i < md->nemitters; ++i) {
@@ -279,10 +280,10 @@ static int load_model(const char *name)
             ++emitting_models;
         }
     } else {
-        fprintf(stderr, "doodads: %s's skeleton: %s; it stands still\n", name, why);
+        fprintf(stderr, "doodads: %s's skeleton: %s; it stands still\n", name, why.text);
     }
-    if (m2_collision(m2, mlen, &md->solid, &md->nsolid, why, sizeof why))
-        fprintf(stderr, "doodads: %s's solid shape: %s; it is walked through\n", name, why);
+    if (m2_collision(m2, mlen, &md->solid, &md->nsolid, &why))
+        fprintf(stderr, "doodads: %s's solid shape: %s; it is walked through\n", name, why.text);
     free(m2);
     md->moving = moving;
     for (uint32_t i = 0; i < mod.nvertices; ++i) {
@@ -382,12 +383,13 @@ static int load_building(const char *name)
 
     size_t len;
     const char *from;
-    char why[400], path[300];
+    char path[300];
+    WWhy why;
     unsigned char *s = mpq_chain_read(chain, name, &len, &from);
     if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; left out\n", name); return nbuildings++; }
-    int bad = wmo_read_root(s, len, &b->root, why, sizeof why);
+    int bad = wmo_read_root(s, len, &b->root, &why);
     free(s);
-    if (bad) { fprintf(stderr, "buildings: %s: %s; left out\n", name, why); return nbuildings++; }
+    if (bad) { fprintf(stderr, "buildings: %s: %s; left out\n", name, why.text); return nbuildings++; }
 
     char base[260];
     snprintf(base, sizeof base, "%s", name);
@@ -398,9 +400,9 @@ static int load_building(const char *name)
         s = mpq_chain_read(chain, path, &len, &from);
         if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; that part is left out\n", path); continue; }
         WmoGroup g;
-        bad = wmo_read_group(s, len, &g, why, sizeof why);
+        bad = wmo_read_group(s, len, &g, &why);
         free(s);
-        if (bad) { fprintf(stderr, "buildings: %s: %s; that part is left out\n", path, why); continue; }
+        if (bad) { fprintf(stderr, "buildings: %s: %s; that part is left out\n", path, why.text); continue; }
         /* how far it reaches from its middle (for the sight test, 173u) */
         for (uint32_t v = 0; v < g.nvertices; ++v) {
             float r = sqrtf(g.vertices[v].x * g.vertices[v].x + g.vertices[v].y * g.vertices[v].y + g.vertices[v].z * g.vertices[v].z);
@@ -561,9 +563,9 @@ static void realise(const TileRecord *r)
 /* }}} */
 
 /* {{{ doodads_add_tile */
-int doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, char *why, int why_len)
+WErr doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, WWhy *why)
 {
-    (void)why; (void)why_len;
+    (void)why;
     origin_x = ox; origin_y = oy;
     records = realloc(records, sizeof *records * (nrecords + 1));
     TileRecord *r = &records[nrecords++];

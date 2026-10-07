@@ -5,6 +5,7 @@
  * pictures per kind of water, and a shader that tints and fogs them.
  */
 #include "040-water.h"
+#include "013-errors.h"
 #include "017-blp.h"
 #include "016-dbc.h"
 #include "032-sight.h"
@@ -65,17 +66,17 @@ static int   loc_eye, loc_near, loc_deep, loc_opacity, loc_raw;
 /* }}} */
 
 /* {{{ water_init */
-int water_init(MpqChain *c, char *why, int why_len)
+WErr water_init(MpqChain *c, WWhy *why)
 {
     chain = c;
     size_t len;
     const char *from;
     table_bytes = mpq_chain_read(chain, "DBFilesClient\\LiquidType.dbc", &len, &from);
-    if (!table_bytes) { snprintf(why, why_len, "LiquidType.dbc is in none of the client's archives"); return 1; }
-    char inner[200];
-    if (dbc_open(&table, table_bytes, len, inner, sizeof inner)) { snprintf(why, why_len, "LiquidType.dbc: %s", inner); return 1; }
+    if (!table_bytes) { w_fail(why, W_ERR_NOT_FOUND, "LiquidType.dbc is in none of the client's archives"); return why->code; }
+    WWhy inner;
+    if (dbc_open(&table, table_bytes, len, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); return why->code; }
     shader = LoadShaderFromMemory(VS, FS);
-    if (!IsShaderReady(shader)) { snprintf(why, why_len, "the water shader didn't compile (see Raylib's messages above)"); return 1; }
+    if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the water shader didn't compile (see Raylib's messages above)"); return why->code; }
     loc_eye = GetShaderLocation(shader, "eye");
     loc_near = GetShaderLocation(shader, "tint_near");
     loc_deep = GetShaderLocation(shader, "tint_deep");
@@ -110,10 +111,10 @@ static int kind_of(int id)
         unsigned char *s = mpq_chain_read(chain, name, &len, &from);
         if (!s) break;
         BlpImage img;
-        char why[200];
-        int bad = blp_decode(s, len, &img, why, sizeof why);
+        WWhy why;
+        int bad = blp_decode(s, len, &img, &why);
         free(s);
-        if (bad) { fprintf(stderr, "water: %s: %s\n", name, why); break; }
+        if (bad) { fprintf(stderr, "water: %s: %s\n", name, why.text); break; }
         Image im = { .data = img.rgba, .width = img.width, .height = img.height, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
         k->frames[k->nframes] = LoadTextureFromImage(im);
         blp_free(&img);

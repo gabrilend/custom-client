@@ -15,8 +15,10 @@
 #ifndef EG_NAVMESH_SLOPE_H
 #define EG_NAVMESH_SLOPE_H
 
+#include "013-errors.h"
+
 /* The walkable slope in degrees from map_id's first tile in dir; < 0 on
  * failure, with the reason in `why`. */
-float navmesh_slope_read(const char *dir, int map_id, char *why, int why_len);
+float navmesh_slope_read(const char *dir, int map_id, WWhy *why);
 
 #endif

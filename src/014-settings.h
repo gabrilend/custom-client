@@ -23,6 +23,8 @@
 #ifndef EG_SETTINGS_H
 #define EG_SETTINGS_H
 
+#include "013-errors.h"
+
 #include <stdio.h>
 
 typedef enum {
@@ -65,10 +67,10 @@ const Setting *settings_find(const char *name);
 int settings_count(void);
 const Setting *settings_at(int i);
 
-/* Changes a setting. 0 on success; otherwise the value is refused, the
+/* Changes a setting. W_OK; otherwise W_ERR_REFUSED: the value is refused, the
  * setting is unchanged, and `why` says why (unknown name, out of range,
  * not one of the choices, not a resolution ...). */
-int settings_set(const char *name, const char *value, char *why, int why_len);
+WErr settings_set(const char *name, const char *value, WWhy *why);
 
 /* Reads the player's file. Each line that names an unknown setting,
  * holds a refused value, or isn't `SET name "value"` is written to
@@ -80,7 +82,7 @@ int settings_load(const char *path, FILE *report);
 
 /* Writes every setting that differs from its default to `path`. 0 on
  * success; otherwise `why` says why. */
-int settings_save(const char *path, char *why, int why_len);
+WErr settings_save(const char *path, WWhy *why);
 
 /* The value of a setting, by name. An unknown name is a mistake in the
  * code, not in the player's file: it stops the client with the name and

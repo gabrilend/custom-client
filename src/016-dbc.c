@@ -2,6 +2,7 @@
  * 016-dbc.c (issue 173k) - see 016-dbc.h.
  */
 #include "016-dbc.h"
+#include "013-errors.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -11,11 +12,11 @@ static uint32_t rd32(const unsigned char *s) { return (uint32_t)s[0] | ((uint32_
 /* }}} */
 
 /* {{{ dbc_open */
-int dbc_open(Dbc *d, const unsigned char *s, size_t len, char *why, int why_len)
+WErr dbc_open(Dbc *d, const unsigned char *s, size_t len, WWhy *why)
 {
     memset(d, 0, sizeof *d);
-    if (!s) { snprintf(why, why_len, "no data (the archives don't hold this table)"); return -1; }
-    if (len < 20 || memcmp(s, "WDBC", 4) != 0) { snprintf(why, why_len, "not a WDBC table"); return -1; }
+    if (!s) { w_fail(why, W_ERR_CORRUPT, "no data (the archives don't hold this table)"); return why->code; }
+    if (len < 20 || memcmp(s, "WDBC", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "not a WDBC table"); return why->code; }
     d->data = s;
     d->rows = rd32(s + 4); d->fields = rd32(s + 8); d->row_len = rd32(s + 12); d->text_len = rd32(s + 16);
     d->text = s + 20 + (size_t)d->rows * d->row_len;

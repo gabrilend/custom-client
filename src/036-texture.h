@@ -18,12 +18,14 @@
 #ifndef EG_TEXTURE_H
 #define EG_TEXTURE_H
 
+#include "013-errors.h"
+
 #include "raylib.h"
 
 #include <stddef.h>
 
-/* The picture in `s` (a whole .blp file) on the card. 0, or 1 with `why`. */
-int texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, char *why, int why_len);
+/* The picture in `s` (a whole .blp file) on the card. W_OK, or a code with `why`. */
+WErr texture_from_blp(const unsigned char *s, size_t len, Texture2D *out, WWhy *why);
 
 /* Texture Filtering (173b6), set once at start (`textureFilteringMode`,
  * the original's 0 to 5): 0 bilinear (smoothed within a copy, the nearest

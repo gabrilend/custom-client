@@ -15,6 +15,8 @@
 #ifndef EG_BLP_H
 #define EG_BLP_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -23,8 +25,8 @@ typedef struct {
     uint8_t *rgba;                /* width * height * 4 bytes, rows top to bottom */
 } BlpImage;
 
-/* 0 on success; the reason in `why` otherwise. */
-int  blp_decode(const unsigned char *s, size_t len, BlpImage *out, char *why, int why_len);
+/* W_OK, or a code with `why` (013-errors.h). */
+WErr  blp_decode(const unsigned char *s, size_t len, BlpImage *out, WWhy *why);
 void blp_free(BlpImage *img);
 
 #endif

@@ -11,6 +11,8 @@
 #ifndef EG_DBC_H
 #define EG_DBC_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -20,7 +22,7 @@ typedef struct {
     const unsigned char *text;
 } Dbc;
 
-int         dbc_open(Dbc *d, const unsigned char *s, size_t len, char *why, int why_len);
+WErr         dbc_open(Dbc *d, const unsigned char *s, size_t len, WWhy *why);
 uint32_t    dbc_u32(const Dbc *d, uint32_t row, uint32_t field);    /* field from 1, as the Lua */
 const char *dbc_text(const Dbc *d, uint32_t row, uint32_t field);
 

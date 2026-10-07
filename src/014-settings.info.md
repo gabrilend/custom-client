@@ -36,8 +36,8 @@ A Setting, field by field:
 - `int settings_count(void);`
   How many settings, and the i-th in declaration order (for the menu).
 - `const Setting *settings_at(int i);`
-- `int settings_set(const char *name, const char *value, char *why, int why_len);`
-  Changes a setting. 0 on success; otherwise the value is refused, the
+- `WErr settings_set(const char *name, const char *value, WWhy *why);`
+  Changes a setting. W_OK; otherwise W_ERR_REFUSED: the value is refused, the
   setting is unchanged, and `why` says why (unknown name, out of range,
   not one of the choices, not a resolution ...).
 - `int settings_load(const char *path, FILE *report);`
@@ -47,7 +47,7 @@ A Setting, field by field:
   starting with # are skipped quietly. A missing file is reported once
   and leaves every setting at its default. Returns the number of lines
   skipped for a problem.
-- `int settings_save(const char *path, char *why, int why_len);`
+- `WErr settings_save(const char *path, WWhy *why);`
   Writes every setting that differs from its default to `path`. 0 on
   success; otherwise `why` says why.
 - `double settings_num_at(const char *name, const char *file, int line);`

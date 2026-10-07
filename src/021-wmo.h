@@ -40,6 +40,8 @@
 #ifndef EG_WMO_H
 #define EG_WMO_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -88,8 +90,8 @@ typedef struct {
     WmoSet        *sets;         int nsets;
 } WmoRoot;
 
-int  wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, char *why, int why_len);
-int  wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, char *why, int why_len);
+WErr  wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, WWhy *why);
+WErr  wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, WWhy *why);
 /* A part's pool's kind, as a LiquidType.dbc id, by the rule the server's
  * map extractor uses (vmap4_extractor/wmo.cpp): the group's liquid field
  * read as an id when the root's flag 0x4 says so, otherwise as an older

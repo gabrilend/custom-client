@@ -5,6 +5,7 @@
  * one's colours and fog for the time of day, and blends them.
  */
 #include "026-light.h"
+#include "013-errors.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -13,7 +14,7 @@
 #include <string.h>
 
 /* {{{ light_open, light_close */
-int light_open(LightTables *t, MpqChain *chain, char *why, int why_len)
+WErr light_open(LightTables *t, MpqChain *chain, WWhy *why)
 {
     memset(t, 0, sizeof *t);
     static const char *const NAMES[5] = { "DBFilesClient\\Light.dbc", "DBFilesClient\\LightIntBand.dbc", "DBFilesClient\\LightFloatBand.dbc",
@@ -23,14 +24,14 @@ int light_open(LightTables *t, MpqChain *chain, char *why, int why_len)
         size_t len;
         const char *from;
         t->files[i] = mpq_chain_read(chain, NAMES[i], &len, &from);
-        char inner[200];
-        if (!t->files[i]) { snprintf(why, why_len, "%s is in none of the client's archives", NAMES[i]); light_close(t); return 1; }
-        if (dbc_open(dbcs[i], t->files[i], len, inner, sizeof inner)) { snprintf(why, why_len, "%s: %s", NAMES[i], inner); light_close(t); return 1; }
+        WWhy inner;
+        if (!t->files[i]) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", NAMES[i]); light_close(t); return why->code; }
+        if (dbc_open(dbcs[i], t->files[i], len, &inner)) { w_fail(why, inner.code, "%s: %s", NAMES[i], inner.text); light_close(t); return why->code; }
     }
     if (t->light.fields < 8 || t->ints.fields < 34 || t->floats.fields < 34) {
-        snprintf(why, why_len, "the light tables have %u, %u and %u fields; 3.3.5a's have 15, 34 and 34", t->light.fields, t->ints.fields, t->floats.fields);
+        w_fail(why, W_ERR_CORRUPT, "the light tables have %u, %u and %u fields; 3.3.5a's have 15, 34 and 34", t->light.fields, t->ints.fields, t->floats.fields);
         light_close(t);
-        return 1;
+        return why->code;
     }
     return 0;
 }

@@ -34,21 +34,22 @@ nothing else that is shared.
   smaller copies (each half the last, down to 1 x 1) for the card.
 - `type GroundPrep`
   A tile made ready to send.
-- `int ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, char *why, int why_len);`
-  Reads the map's WDT for its blend-map form and fills `p`. 0, or 1
+- `WErr ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);`
+  Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
   with `why`.
-- `int ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, char *why, int why_len);`
+- `WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, WWhy *why);`
   Prepares tile (tx, ty). `on_card`, when given, answers whether a
   picture (by archive name) is already on the card; those aren't
   unpacked (sending finds them there, or unpacks them itself if they
-  have gone since). 0 with `*out` (freed by ground_prep_free); 1 the
-  map has no ground file there (open sea); -1 an error, with `why`.
+  have gone since). W_OK with `*out` (freed by ground_prep_free);
+  W_ERR_NOT_FOUND when the map has no ground file there (open sea: not a
+  failure, nothing to draw); another code, with `why`, for a fault.
 - `void ground_prep_free(GroundPrep *g, int keep_adt);`
   Frees a prepared tile. `keep_adt`: 1 when the ground file was taken
   by the caller (it then frees it with adt_free and free).
-- `int ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, char *why, int why_len);`
+- `WErr ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, WWhy *why);`
   Unpacks one ground picture by archive name into `px`, with its smaller
-  copies. 0, or 1 with `why`.
+  copies. W_OK, or a code with `why`.
 - `void ground_prep_smaller(GroundPixels *px);`
   Makes a square picture's smaller copies (into px->smaller): each pixel
   the average of the four beneath it, as the card itself would make them.

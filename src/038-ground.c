@@ -5,6 +5,7 @@
  * pictures on the graphics card, and blends them as the original does.
  */
 #include "038-ground.h"
+#include "013-errors.h"
 #include "020-adt.h"
 #include "033-ground-prep.h"
 #include "032-sight.h"
@@ -123,11 +124,11 @@ static int       nblobs;
 /* }}} */
 
 /* {{{ ground_init */
-int ground_init(const GroundPlace *p, char *why, int why_len)
+WErr ground_init(const GroundPlace *p, WWhy *why)
 {
     place = *p;
     shader = LoadShaderFromMemory(VS, FS);
-    if (!IsShaderReady(shader)) { snprintf(why, why_len, "the ground shader didn't compile (see Raylib's messages above)"); return 1; }
+    if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the ground shader didn't compile (see Raylib's messages above)"); return why->code; }
     shader.locs[SHADER_LOC_MAP_ALBEDO] = GetShaderLocation(shader, "blend");   /* Raylib binds the material's first map to it */
     int unit = ARRAY_UNIT;
     SetShaderValue(shader, GetShaderLocation(shader, "layers"), &unit, SHADER_UNIFORM_INT);
@@ -169,17 +170,17 @@ int ground_on_card(const char *name)
  * 256 x 256 is resized to it (the two tiny ones seen are plain colours; a
  * larger one would lose detail, and is said). -1 with `why` when it can't
  * be read or the array is full. Main thread only (it sends). */
-static int picture(const char *name, GroundPixels *px, char *why, int why_len)
+static int picture(const char *name, GroundPixels *px, WWhy *why)
 {
     int free_slot = -1;
     for (int i = 0; i < LAYERS; ++i) {
         if (layer_of[i].name[0] && !strcmp(layer_of[i].name, name)) return i;
         if (!layer_of[i].name[0] && free_slot < 0) free_slot = i;
     }
-    if (free_slot < 0) { snprintf(why, why_len, "the ground's %d picture layers are all in use by loaded tiles", LAYERS); return -1; }
+    if (free_slot < 0) { w_fail(why, W_ERR_FULL, "the ground's %d picture layers are all in use by loaded tiles", LAYERS); return -1; }
     GroundPixels own = { 0 };
     if (!px->rgba) {                                     /* gone from the card since it was prepared */
-        if (ground_prep_pixels(place.chain, name, &own, why, why_len)) return -1;
+        if (ground_prep_pixels(place.chain, name, &own, why)) return -1;   /* a layer number function: below 0 a failure, `why` says it */
         px = &own;
     }
     GroundPixels sized = *px;                            /* the picture as sent: 256 x 256, with its smaller copies */
@@ -223,7 +224,7 @@ static void let_go(int layer)
 /* }}} */
 
 /* {{{ ground_load_tile */
-int ground_load_tile(GroundPrep *p, AdtTile **kept, char *why, int why_len)
+WErr ground_load_tile(GroundPrep *p, AdtTile **kept, WWhy *why)
 {
     *kept = NULL;
     const AdtTile *adt = p->adt;
@@ -231,12 +232,12 @@ int ground_load_tile(GroundPrep *p, AdtTile **kept, char *why, int why_len)
     GroundTile *g = calloc(1, sizeof *g);
     for (int t = 0; t < adt->ntextures; ++t) {
         if (!p->needed[t]) continue;
-        pic[t] = picture(adt->textures[t], &p->pixels[t], why, why_len);
-        if (pic[t] < 0) {                             /* `why` says which picture; everything this tile took is given back */
+        pic[t] = picture(adt->textures[t], &p->pixels[t], why);
+        if (pic[t] < 0) {                             /* `why->text` says which picture; everything this tile took is given back */
             for (int i = 0; i < g->nused; ++i) let_go(g->used[i]);
             free(g);
             ground_prep_free(p, 0);
-            return -1;
+            return why->code;
         }
         ++layer_of[pic[t]].refs;
         g->used[g->nused++] = pic[t];

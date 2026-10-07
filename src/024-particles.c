@@ -5,6 +5,7 @@
  * file, and each frame moves its particles and makes new ones.
  */
 #include "024-particles.h"
+#include "013-errors.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -47,16 +48,16 @@ static void block_at(const PartBlock *b, float t, int per, float *out, const flo
 /* }}} */
 
 /* {{{ particles_read */
-int particles_read(const Anim *a, Emitter **out, int *n, char *why, int why_len)
+WErr particles_read(const Anim *a, Emitter **out, int *n, WWhy *why)
 {
     *out = NULL;
     *n = 0;
     const unsigned char *s = a->m2;
     size_t len = a->m2_len;
-    if (len < 304) { snprintf(why, why_len, "the model file is too short for its emitter list"); return 1; }
+    if (len < 304) { w_fail(why, W_ERR_CORRUPT, "the model file is too short for its emitter list"); return why->code; }
     uint32_t count = u32(s, 296), at = u32(s, 300);
     if (count == 0) return 0;
-    if ((uint64_t)at + (uint64_t)count * 476 > len) { snprintf(why, why_len, "%u emitters at byte %u run past the file's end", count, at); return 1; }
+    if ((uint64_t)at + (uint64_t)count * 476 > len) { w_fail(why, W_ERR_CORRUPT, "%u emitters at byte %u run past the file's end", count, at); return why->code; }
     Emitter *list = calloc(count, sizeof *list);
     for (uint32_t i = 0; i < count; ++i) {
         size_t e = at + (size_t)i * 476;
@@ -90,9 +91,9 @@ int particles_read(const Anim *a, Emitter **out, int *n, char *why, int why_len)
         m->drag = f32(s, e + 372);
         m->enabled = anim_track_at(s, e + 456);
         if (m->bone >= a->nbones) {
-            snprintf(why, why_len, "emitter %u rides on bone %d; the model has %d", i, m->bone, a->nbones);
+            w_fail(why, W_ERR_CORRUPT, "emitter %u rides on bone %d; the model has %d", i, m->bone, a->nbones);
             free(list);
-            return 1;
+            return why->code;
         }
     }
     *out = list;

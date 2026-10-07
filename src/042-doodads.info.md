@@ -17,15 +17,15 @@ How a placement becomes a position and a turn is adt_place_matrix
 
 ## What it offers
 
-- `int doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, char *why, int why_len);`
+- `WErr doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, WWhy *why);`
   Readies the drawer; the chain must outlive it. Every copy placed also
   adds its model's solid shape to `collide` (173q; NULL: none), and every
   building placed its pools to `liquids` and to the water drawer (173r;
-  NULL: none). 0, or 1 with `why`.
-- `int doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, char *why, int why_len);`
+  NULL: none). W_OK, or a code with `why`.
+- `WErr doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, WWhy *why);`
   Adds a tile's doodads, placed relative to the drawing origin (ox, oy),
   loading any model not seen before. A model that can't be read is
-  reported once by name and left out; 0, or -1 with `why` for a fault
+  reported once by name and left out; W_OK, or a code with `why` for a fault
   that stops the client (the graphics card refusing a shader).
 - `void doodads_drop_tile(int tile);`
   Drops tile `tile` (tx * 64 + ty): its copies, their solid triangles,

@@ -10,6 +10,7 @@
  * ground (033-ground-prep.h) and keeps it until the main thread takes it.
  */
 #include "034-prefetch.h"
+#include "013-errors.h"
 #include "020-adt.h"
 #include "033-ground-prep.h"
 #include "022-m2.h"
@@ -60,7 +61,7 @@ static void read_tile(int i, GroundPrep **ground, int *state)
     int tx = i / 64, ty = i % 64;
     char path[300];
     size_t len;
-    char why[400];
+    WWhy why;
     AdtTile *t = NULL;
     *ground = NULL;
     *state = 0;
@@ -69,17 +70,17 @@ static void read_tile(int i, GroundPrep **ground, int *state)
     pthread_mutex_unlock(&lock_);
     if (prepare) {
         /* the ground prepared: its file read (and so kept) on the way */
-        int got = ground_prep_tile(place_, tx, ty, on_card_, ground, why, sizeof why);
-        if (got == 1) { *state = 2; return; }            /* open sea: no ground file */
-        if (got == 0) { *state = 1; t = (*ground)->adt; __atomic_add_fetch(&files_read_, 1, __ATOMIC_RELAXED); }
-        /* got -1: the main thread prepares it again when it loads it, and says what is wrong */
+        int got = ground_prep_tile(place_, tx, ty, on_card_, ground, &why);
+        if (got == W_ERR_NOT_FOUND) { *state = 2; return; }   /* open sea: no ground file */
+        if (got == W_OK) { *state = 1; t = (*ground)->adt; __atomic_add_fetch(&files_read_, 1, __ATOMIC_RELAXED); }
+        /* any other code: the main thread prepares it again when it loads it, and says what is wrong */
     }
     if (!t) {
         snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", map_, map_, ty, tx);
         unsigned char *s = touch(path, &len);
         if (!s) return;                                  /* open sea: no ground file */
         t = malloc(sizeof *t);
-        int bad = adt_read(s, len, 0, t, why, sizeof why);   /* the blend-map form doesn't matter for names */
+        int bad = adt_read(s, len, 0, t, &why);   /* the blend-map form doesn't matter for names */
         free(s);
         if (bad) { free(t); return; }                    /* the load itself will say what is wrong */
     }
@@ -97,7 +98,7 @@ static void read_tile(int i, GroundPrep **ground, int *state)
         snprintf(path, sizeof path, "%s00.skin", base);
         unsigned char *skin = touch(path, &sl);
         M2Model mod;
-        if (m2 && skin && !m2_read(m2, ml, skin, sl, &mod, why, sizeof why)) {
+        if (m2 && skin && !m2_read(m2, ml, skin, sl, &mod, &why)) {
             for (uint32_t x = 0; x < mod.ntextures; ++x) if (mod.textures[x].kind == 0 && mod.textures[x].file[0]) free(touch(mod.textures[x].file, &len));
             m2_free(&mod);
         }
@@ -108,7 +109,7 @@ static void read_tile(int i, GroundPrep **ground, int *state)
         size_t rl;
         unsigned char *r = touch(t->buildings[k], &rl);
         WmoRoot root;
-        if (r && !wmo_read_root(r, rl, &root, why, sizeof why)) {
+        if (r && !wmo_read_root(r, rl, &root, &why)) {
             char base[260];
             snprintf(base, sizeof base, "%s", t->buildings[k]);
             char *dot = strrchr(base, '.');

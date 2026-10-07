@@ -17,6 +17,8 @@
 #ifndef EG_MPQ_H
 #define EG_MPQ_H
 
+#include "013-errors.h"
+
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -50,15 +52,15 @@ typedef struct {
 } MpqChain;
 
 uint32_t mpq_hash(const char *text, int kind);
-/* 0 on success; the reason in `why` otherwise. */
-int      mpq_open(MpqArchive *a, const char *path, char *why, int why_len);
+/* W_OK, or a code with `why` (013-errors.h). */
+WErr      mpq_open(MpqArchive *a, const char *path, WWhy *why);
 /* A malloc'd copy of `name` and its size, or NULL when the archive has
  * none; on a format it can't read, NULL with `why` filled. */
-unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, char *why, int why_len);
+unsigned char *mpq_read(MpqArchive *a, const char *name, size_t *size, WWhy *why);
 void     mpq_close(MpqArchive *a);
 
 /* The client's archives under `data` (its Data folder) for `locale` ("enUS"). */
-int      mpq_chain_open(MpqChain *c, const char *data, const char *locale, char *why, int why_len);
+WErr      mpq_chain_open(MpqChain *c, const char *data, const char *locale, WWhy *why);
 /* The newest archive's copy, its size, and which archive (may be NULL).
  * Served from the chain's memory when it was unpacked lately. Safe to
  * call from more than one thread (the chain is locked while it reads). */

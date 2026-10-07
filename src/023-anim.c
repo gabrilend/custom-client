@@ -6,6 +6,7 @@
  * moments around it and blending between them.
  */
 #include "023-anim.h"
+#include "013-errors.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -23,12 +24,12 @@ AnimTrack anim_track_at(const unsigned char *s, size_t at)
 /* }}} */
 
 /* {{{ anim_read */
-int anim_read(const unsigned char *m2, size_t len, Anim *out, char *why, int why_len)
+WErr anim_read(const unsigned char *m2, size_t len, Anim *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
-    if (len < 160 || memcmp(m2, "MD20", 4) != 0) { snprintf(why, why_len, "not an M2 model"); return 1; }
+    if (len < 160 || memcmp(m2, "MD20", 4) != 0) { w_fail(why, W_ERR_CORRUPT, "not an M2 model"); return why->code; }
     #define FITS(at, count, each, what) \
-        if ((uint64_t)(at) + (uint64_t)(count) * (each) > len) { snprintf(why, why_len, "%s run past the file's end", what); anim_free(out); return 1; }
+        if ((uint64_t)(at) + (uint64_t)(count) * (each) > len) { w_fail(why, W_ERR_CORRUPT, "%s run past the file's end", what); anim_free(out); return why->code; }
     FITS(u32(m2, 24), u32(m2, 20), 4, "the global sequences")
     FITS(u32(m2, 32), u32(m2, 28), 64, "the animations")
     FITS(u32(m2, 48), u32(m2, 44), 88, "the bones")
@@ -65,7 +66,7 @@ int anim_read(const unsigned char *m2, size_t len, Anim *out, char *why, int why
         b->turn = anim_track_at(m2, e + 36);
         b->stretch = anim_track_at(m2, e + 56);
         for (int k = 0; k < 3; ++k) b->pivot[k] = f32(m2, e + 76 + k * 4);
-        if (b->parent >= i) { snprintf(why, why_len, "bone %d hangs from bone %d, which doesn't come before it", i, b->parent); anim_free(out); return 1; }
+        if (b->parent >= i) { w_fail(why, W_ERR_CORRUPT, "bone %d hangs from bone %d, which doesn't come before it", i, b->parent); anim_free(out); return why->code; }
     }
 
     out->npoints = u32(m2, 60);
@@ -77,9 +78,9 @@ int anim_read(const unsigned char *m2, size_t len, Anim *out, char *why, int why
             out->weights[i][k] = m2[e + 12 + k];
             out->bone_of[i][k] = m2[e + 16 + k];
             if (out->weights[i][k] && out->bone_of[i][k] >= out->nbones) {
-                snprintf(why, why_len, "point %u is tied to bone %d; the model has %d", i, out->bone_of[i][k], out->nbones);
+                w_fail(why, W_ERR_CORRUPT, "point %u is tied to bone %d; the model has %d", i, out->bone_of[i][k], out->nbones);
                 anim_free(out);
-                return 1;
+                return why->code;
             }
         }
     }

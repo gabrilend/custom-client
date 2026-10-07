@@ -41,6 +41,8 @@
 #ifndef EG_ANIM_H
 #define EG_ANIM_H
 
+#include "013-errors.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -75,7 +77,7 @@ typedef struct {
 } Anim;
 
 /* Reads the skeleton and animation list of a model file (copied). */
-int  anim_read(const unsigned char *m2, size_t len, Anim *out, char *why, int why_len);
+WErr  anim_read(const unsigned char *m2, size_t len, Anim *out, WWhy *why);
 void anim_free(Anim *a);
 
 /* The animation with this id and variation (following aliases), or -1. */
