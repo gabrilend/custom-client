@@ -19,6 +19,10 @@ custom-client/
 │   ├── 010-table-of-contents.md          # this file
 │   ├── 011-balance-updates.md            # append-only tweak log
 │   ├── 012-asset-replacement-and-provenance.md  # resolver, similarity scores, seal, lineage
+│   ├── 045-datapath.md                   # files → memory → card → screen, frame by frame (built)
+│   ├── 046-ingame-checks.md              # what the client guesses, for the owner to check in the original
+│   ├── 047-optimization-checklist.md     # the frame made fast, item by item, measured
+│   ├── 048-stock-options.md              # the original's whole settings menu (generated)
 │   └── HTML/                             # browsable doc bundle (TBD)
 │
 ├── issues/                               # tracked work, see naming below
@@ -50,6 +54,7 @@ For a new collaborator, read in this order:
 4. [docs/002-technology-stack.md](./002-technology-stack.md)
 5. [docs/009-roadmap.md](./009-roadmap.md)
 6. Then dive into whichever of `003`–`008` matches the area you'll work on.
+7. For the code as it is: [045](./045-datapath.md), then `src/` in number order (each file's `.info.md` first).
 
 ## Issue file naming
 
@@ -65,4 +70,4 @@ Sub-issues for a large piece of work append a letter: `105a-...`, `105b-...`.
 
 `.file-index-counter` holds the current highest index across **all** indexed
 files in the project (docs, source, tests, scripts). Reads before
-creation, writes after. Currently at **11** (docs/000 … docs/011).
+creation, writes after. Currently at **48**: docs 000 to 012, source 013 to 043, the test program 044, docs 045 to 048. Read it: `cat .file-index-counter`.

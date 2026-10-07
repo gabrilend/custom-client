@@ -1,0 +1,311 @@
+#!/usr/bin/env luajit
+-- generate-stock-options-catalog - writes the original 3.3.5a client's whole
+-- settings menu, every panel and every setting, as one reference page
+-- (wow-chat-2026 issue 173b, the client's options menu).
+--
+-- For a general audience: the client is meant to offer every setting
+-- the original game's Options menu offers (Video, Sound & Voice, Interface,
+-- Key Bindings). Rather than list them from memory, this opens the original
+-- client's archives, reads the files that build its own Options screens,
+-- and writes out every panel with each setting's English label, its kind
+-- (tick box, slider with its range, or drop-down with its choices), the
+-- setting's stored name in the original, and the original's own one-line
+-- explanation. Key bindings are listed by section the same way. The page
+-- is written fresh each run, so it is never edited by hand.
+--
+-- Usage: scripts/generate-stock-options-catalog [PROJECT_DIR] [CLIENT_DATA_DIR]
+--   defaults: /mnt/mtwo/games/azeroth-core/custom-client,
+--             /mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data
+--   writes:   PROJECT_DIR/docs/048-stock-options.md
+-- It reads the archives through the client's own reader library
+-- (scripts/libs/wreaders.lua over libwreaders.so: run scripts/build first).
+
+local DIR    = arg[1] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local CLIENT = arg[2] or "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data"
+local OUT    = DIR .. "/docs/048-stock-options.md"
+
+local Wreaders = dofile(DIR .. "/scripts/libs/wreaders.lua")
+
+-- {{{ the menu's shape
+-- The original's three settings windows, in its own order, and the panels
+-- in each. `table` is the stem of the panel's option list in FrameXML
+-- (ControlsPanelOptions, NamePanelOptions ...), `frame` the stem of its
+-- frame and drop-down names (InterfaceOptionsNamesPanel...), `label` the
+-- string the panel is titled by. The order is the order the stock
+-- Interface window lists its categories in, read from
+-- InterfaceOptionsPanels.xml (the frames are declared in that order).
+local MENU = {
+    { window = "VIDEOOPTIONS_MENU", prefix = "VideoOptions", panels = {
+        { table = "Resolution",  frame = "Resolution",  label = "RESOLUTION_LABEL"        },
+        { table = "Effects",     frame = "Effects",     label = "EFFECTS_LABEL"           },
+        { table = "VideoStereo", frame = "Stereo",      label = "STEREO_VIDEO_LABEL"      },
+    } },
+    { window = "SOUNDOPTIONS_MENU", prefix = "AudioOptions", panels = {
+        { table = "Sound",       frame = "Sound",       label = "SOUND_LABEL"             },
+        { table = "Voice",       frame = "Voice",       label = "VOICE_LABEL"             },
+    } },
+    { window = "UIOPTIONS_MENU", prefix = "InterfaceOptions", panels = {
+        { table = "Controls",    frame = "Controls",    label = "CONTROLS_LABEL"          },
+        { table = "Combat",      frame = "Combat",      label = "COMBAT_LABEL"            },
+        { table = "Display",     frame = "Display",     label = "DISPLAY_LABEL"           },
+        { table = "Objectives",  frame = "Objectives",  label = "OBJECTIVES_LABEL"        },
+        { table = "Social",      frame = "Social",      label = "SOCIAL_LABEL"            },
+        { table = "ActionBars",  frame = "ActionBars",  label = "ACTIONBARS_LABEL"        },
+        { table = "Name",        frame = "Names",       label = "NAMES_LABEL"             },
+        { table = "FCT",         frame = "CombatText",  label = "COMBATTEXT_LABEL"        },
+        { table = "StatusText",  frame = "StatusText",  label = "STATUSTEXT_LABEL"        },
+        { table = "UnitFrame",   frame = "UnitFrame",   label = "UNITFRAME_LABEL"         },
+        { table = "Buffs",       frame = "Buffs",       label = "BUFFOPTIONS_LABEL"       },
+        { table = "Battlenet",   frame = "Battlenet",   label = "BATTLENET_OPTIONS_LABEL" },
+        { table = "Camera",      frame = "Camera",      label = "CAMERA_LABEL"            },
+        { table = "Mouse",       frame = "Mouse",       label = "MOUSE_LABEL"             },
+        { table = "Features",    frame = "Features",    label = "FEATURES_LABEL"          },
+        { table = "Help",        frame = "Help",        label = "HELP_LABEL"              },
+        { table = "Languages",   frame = "Languages",   label = "LANGUAGES_LABEL"         },
+    } },
+}
+
+-- the FrameXML files read, all from the client's archives (the locale
+-- patches hold the newest copies; the chain searches newest first)
+local SOURCES = {
+    strings  = "Interface\\FrameXML\\GlobalStrings.lua",
+    bindings = "Interface\\FrameXML\\Bindings.xml",
+    code     = { "Interface\\FrameXML\\VideoOptionsPanels.lua",
+                 "Interface\\FrameXML\\AudioOptionsPanels.lua",
+                 "Interface\\FrameXML\\InterfaceOptionsPanels.lua" },
+}
+-- }}}
+
+-- {{{ local function clean
+-- Strips the game's inline markup from a string: |T...|t (an inline
+-- picture, e.g. the "new feature" star after some panel names), |cAARRGGBB
+-- and |r (colour on and off), and turns \n into a space.
+local function clean(s)
+    s = s:gsub("|T.-|t", ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    s = s:gsub("\\n", " "):gsub("\\\"", "\"")
+    return s
+end
+-- }}}
+
+-- {{{ local function read_strings
+-- GlobalStrings.lua is one assignment per line: NAME = "text";
+-- Returns { NAME = text } for every line of that shape.
+local function read_strings(text)
+    local t = {}
+    -- line by line: a pattern carrying both newlines would eat the next
+    -- line's leading one and skip every other line
+    for line in text:gmatch("[^\n]+") do
+        local name, value = line:match('^([%w_]+) = "(.*)";%s*$')
+        if name then t[name] = value end
+    end
+    return t
+end
+-- }}}
+
+-- {{{ local function read_options
+-- Each panel's settings are one Lua table in FrameXML:
+--   ControlsPanelOptions = {
+--       deselectOnClick = { text = "GAMEFIELD_DESELECT_TEXT" },
+--       mouseSpeed = { text = "MOUSE_SENSITIVITY", minValue = 0.5, maxValue = 1.5, valueStep = 0.05 },
+--   }
+-- A setting with minValue/maxValue is a slider; one without is a tick box.
+-- The key on the left is the setting's stored name in the original (its
+-- "CVar"), which is also the name in a stock Config.wtf.
+-- A range may be written with the file's own named numbers
+-- (`local OPTIONS_FARCLIP_MIN = 177;`, and a step of
+-- `(OPTIONS_FARCLIP_MAX - OPTIONS_FARCLIP_MIN)/10`): those names are
+-- replaced by their numbers and plain arithmetic is worked out. A range
+-- still holding a name after that is printed as written.
+-- Returns { [stem] = { {cvar, text, min, max, step, rest}, ... } } in file order.
+local function read_options(code)
+    local numbers = {}
+    for name, n in code:gmatch("\nlocal%s+([%w_]+)%s*=%s*(%-?[%d%.]+);") do numbers[name] = n end
+    local function value(s)
+        if not s then return nil end
+        s = s:gsub("%s+$", ""):gsub("[%a_][%w_]*", function(n) return numbers[n] end)
+        if s:match("^[%d%.%s%+%-%*/%(%)]+$") then
+            local n = loadstring("return " .. s)()
+            return (("%.4f"):format(n):gsub("%.?0+$", ""))
+        end
+        return s
+    end
+    local t = {}
+    for stem, body in code:gmatch("\n(%w+)PanelOptions = (%b{})") do
+        local list = {}
+        for cvar, entry in body:gmatch("\n%s*([%w_]+)%s*=%s*(%b{})") do
+            list[#list + 1] = {
+                cvar = cvar,
+                text = entry:match('text%s*=%s*"([^"]*)"'),
+                min  = value(entry:match("minValue%s*=%s*([^,}]+)")),
+                max  = value(entry:match("maxValue%s*=%s*([^,}]+)")),
+                step = value(entry:match("valueStep%s*=%s*([^,}]+)")),
+                restart = entry:match("gameRestart") and "restart" or entry:match("logout") and "logout" or nil,
+            }
+        end
+        t[stem] = list
+    end
+    return t
+end
+-- }}}
+
+-- {{{ local function read_dropdowns
+-- A drop-down is whatever the code hands to the original's drop-down
+-- builder: UIDropDownMenu_Initialize(self, <Name>_Initialize). Most names
+-- end in "DropDown"; some don't (the Social panel's ChatStyle), so the
+-- builder call, not the name, decides. <Name>_Initialize lists the choices:
+--   info.text = CAMERA_SMART;  ...  info.value = "1";
+-- and the stored setting is set in one of <Name>'s own handlers:
+--   self.cvar = "cameraSmoothStyle";
+-- Choices whose text is not a constant (resolutions, sound devices) are
+-- computed by the original at run time from the machine; they are
+-- reported as such rather than guessed.
+-- Returns { [dropdown name] = { cvar, choices = { {text, value} } } }.
+local function read_dropdowns(code)
+    local t = {}
+    for name in code:gmatch("UIDropDownMenu_Initialize%(%s*[%w_]+%s*,%s*([%w_]+)_Initialize%s*%)") do
+        t[name] = t[name] or { choices = {} }
+    end
+    for name, body in code:gmatch("\nfunction%s+([%w_]+)_Initialize%s*%b()(.-)\nend") do
+        if t[name] then
+            for text, value in body:gmatch("info%.text%s*=%s*([%w_]+);.-info%.value%s*=%s*\"?([%w_%.%-]+)\"?") do
+                t[name].choices[#t[name].choices + 1] = { text = text, value = value }
+            end
+        end
+    end
+    -- the stored name is set in whichever of the drop-down's own handlers
+    -- runs first (_OnLoad for most, _OnEvent for the camera's two)
+    for name, body in code:gmatch("\nfunction%s+([%w_]+)_On%w+%s*%b()(.-)\nend") do
+        if t[name] then
+            t[name].cvar = t[name].cvar or body:match('self%.cvar%s*=%s*"([^"]+)"')
+        end
+    end
+    return t
+end
+-- }}}
+
+-- {{{ local function read_bindings
+-- Bindings.xml lists every bindable action in order; an action carrying a
+-- header="X" attribute starts a new section titled BINDING_HEADER_X. Each
+-- action's label is BINDING_NAME_<name> in GlobalStrings. Default keys are
+-- not in these files (the original keeps them inside the program), so
+-- none are listed.
+local function read_bindings(xml)
+    local sections, current = {}, nil
+    for tag in xml:gmatch("<Binding%s[^>]*>") do
+        local name   = tag:match('name="([^"]+)"')
+        local header = tag:match('header="([^"]+)"')
+        if header then current = { header = header, names = {} }; sections[#sections + 1] = current end
+        if not current then error("Bindings.xml: action " .. name .. " comes before any section header") end
+        current.names[#current.names + 1] = name
+    end
+    return sections
+end
+-- }}}
+
+-- {{{ main
+local chain = Wreaders.chain(CLIENT, "enUS", DIR .. "/tmp/tmp/build")
+local function must(path)
+    local s, from = chain:read(path)
+    if not s then error("not in the client's archives (" .. CLIENT .. "): " .. path) end
+    return s, from
+end
+
+local strings_text, strings_from = must(SOURCES.strings)
+local S = read_strings(strings_text)
+local code = {}
+for i, path in ipairs(SOURCES.code) do code[i] = must(path) end
+code = table.concat(code, "\n")
+local options   = read_options(code)
+local dropdowns = read_dropdowns(code)
+local bindings  = read_bindings((must(SOURCES.bindings)))
+
+local function label(key) return key and S[key] and clean(S[key]) or nil end
+
+local out = {}
+local function w(s) out[#out + 1] = s end
+w("# The Original Client's Settings Menu")
+w("")
+w("*Written by `scripts/generate-stock-options-catalog` from the original 3.3.5a")
+w("client's own interface files (" .. strings_from:match("[^/]+/[^/]+$") .. " and its")
+w("siblings). Do not edit by hand: re-run the script.*")
+w("")
+w("Every setting the original client's Options menu offers, panel by panel,")
+w("the reference for the custom client's own menu (issue 173b and its")
+w("sub-issues). **Stored name** is the setting's name in the original (a")
+w("\"CVar\"; the same name a stock `WTF/Config.wtf` uses). **Kind** is a tick")
+w("box, a slider (with its range and step), or a drop-down (with its")
+w("choices and the value each stores). **Needs** marks the few the")
+w("original applies only after a restart or a logout.")
+w("")
+
+local used_dropdowns = {}
+for _, window in ipairs(MENU) do
+    w("## " .. label(window.window))
+    w("")
+    for _, panel in ipairs(window.panels) do
+        w("### " .. label(panel.label))
+        w("")
+        local list = options[panel.table]
+        if not list then error("no " .. panel.table .. "PanelOptions table in the FrameXML read") end
+        w("| Setting | Kind | Stored name | Needs | What the original says |")
+        w("|---|---|---|---|---|")
+        for _, o in ipairs(list) do
+            local kind = o.min and ("slider " .. o.min .. " to " .. o.max .. ", step " .. (o.step or "?")) or "tick box"
+            local text = label(o.text) or ("(no label; " .. (o.text == "" and "drawn by its panel" or tostring(o.text)) .. ")")
+            local tip  = label("OPTION_TOOLTIP_" .. (o.text or "")) or ""
+            w(("| %s | %s | `%s` | %s | %s |"):format(text, kind, o.cvar, o.restart or "", tip))
+        end
+        -- this panel's drop-downs, matched by their frame-name prefix
+        local prefix = window.prefix .. panel.frame .. "Panel"
+        local names = {}
+        for name in pairs(dropdowns) do
+            if name:sub(1, #prefix) == prefix then names[#names + 1] = name end
+        end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            used_dropdowns[name] = true
+            local d = dropdowns[name]
+            local choices = {}
+            for _, c in ipairs(d.choices) do
+                choices[#choices + 1] = (label(c.text) or c.text) .. " = `" .. c.value .. "`"
+            end
+            local shown = #choices > 0 and table.concat(choices, "; ") or "computed by the original at run time (from the machine or the account)"
+            w(("| %s | drop-down: %s | `%s` | | |"):format(name:sub(#prefix + 1):gsub("DropDown$", ""), shown, d.cvar or "none: set by a program call, not a stored name"))
+        end
+        w("")
+    end
+end
+
+w("## " .. label("KEY_BINDINGS"))
+w("")
+w("Every action the original lets a key be bound to, in its own sections and")
+w("order. The default key for each lives inside the original program, not")
+w("in these files, so none are listed here.")
+w("")
+local total = 0
+for _, section in ipairs(bindings) do
+    local heading = label("BINDING_HEADER_" .. section.header)
+    if heading and heading:match("%S") then w("### " .. heading); w("") end
+    local items = {}
+    for _, name in ipairs(section.names) do
+        items[#items + 1] = (label("BINDING_NAME_" .. name) or name) .. " (`" .. name .. "`)"
+    end
+    total = total + #items
+    w(table.concat(items, " · "))
+    w("")
+end
+w("(" .. total .. " bindable actions.)")
+w("")
+
+-- a drop-down that matched no panel means MENU's frame stems are wrong
+for name in pairs(dropdowns) do
+    if not used_dropdowns[name] then
+        io.stderr:write("generate-stock-options-catalog: drop-down " .. name .. " matched no panel in MENU\n")
+    end
+end
+
+local f = assert(io.open(OUT, "w"))
+f:write(table.concat(out, "\n"))
+f:close()
+print("generate-stock-options-catalog: wrote " .. OUT .. " (" .. total .. " key-binding actions)")
+-- }}}
