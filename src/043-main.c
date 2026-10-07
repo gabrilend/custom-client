@@ -366,6 +366,7 @@ static double walk_load_most_s, walk_load_total_s;   /* the same for loads after
 static int    walk_loads, started_walking;
 static double walk_ground_s, walk_doodads_s;            /* of the walking loads' time: the ground's, the doodads' (173u) */
 static int    read_ahead = 1;                            /* --no-read-ahead: off, to measure what it saves */
+static Prefetch *pf;                                     /* the reader-ahead (034-prefetch.h) */
 static void refresh_tiles(void)
 {
     const int TILE_REACH = tile_reach();
@@ -382,7 +383,7 @@ static void refresh_tiles(void)
              * there first (then only sent to the card here), else prepared
              * here (the start's tiles, a jump, or the helper turned off) */
             GroundPrep *prep;
-            int taken = prefetch_take_ground(x, y, &prep);   /* 0 prepared, 1 no ground file there, 2 not prepared */
+            int taken = prefetch_take_ground(pf, x, y, &prep);   /* 0 prepared, 1 no ground file there, 2 not prepared */
             WErr got = taken == 0 ? W_OK : taken == 1 ? W_ERR_NOT_FOUND
                      : ground_prep_tile(&ground_place, x, y, ground_on_card, &prep, &why);
             if (got == W_OK) got = ground_load_tile(prep, &adt, &why);
@@ -410,8 +411,8 @@ static void refresh_tiles(void)
      * it finds its files unpacked (173u) */
     for (int dx = -TILE_REACH - 1; dx <= TILE_REACH + 1; ++dx)
         for (int dy = -TILE_REACH - 1; dy <= TILE_REACH + 1; ++dy)
-            if (abs(dx) == TILE_REACH + 1 || abs(dy) == TILE_REACH + 1) prefetch_tile(tx + dx, ty + dy);
-    prefetch_keep_near(tx, ty, TILE_REACH + 1);          /* preparations she turned away from are let go */
+            if (abs(dx) == TILE_REACH + 1 || abs(dy) == TILE_REACH + 1) prefetch_tile(pf, tx + dx, ty + dy);
+    prefetch_keep_near(pf, tx, ty, TILE_REACH + 1);          /* preparations she turned away from are let go */
     /* dropping (173s): tiles more than a tile beyond the loaded square go,
      * with all they brought; the margin keeps a walk back and forth over
      * an edge from loading and dropping the same tile again and again */
@@ -567,10 +568,9 @@ int main(int argc, char **argv)
     if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || ground_init(&ground_place, &why)) {
         fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1;
     }
-    if (read_ahead) {                                    /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
-        prefetch_start(&chain, map_name);
-        prefetch_prepare_ground(&ground_place, ground_on_card);
-    }
+    /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
+    pf = prefetch_start(&chain, map_name, read_ahead);
+    prefetch_prepare_ground(pf, &ground_place, ground_on_card);
     solids = collide_new(ox, oy);
     waters = liquid_new();
     if (doodads_init(&chain, solids, waters, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
@@ -861,7 +861,7 @@ int main(int argc, char **argv)
             int dm2, dc2, ds2, dmov2, demit2;
             doodads_counts(&dm2, &dc2, &ds2, &dmov2, &demit2);
             int ahead_tiles, ahead_files, grounds_made, grounds_taken;
-            prefetch_counts(&ahead_tiles, &ahead_files, &grounds_made, &grounds_taken);
+            prefetch_counts(pf, &ahead_tiles, &ahead_files, &grounds_made, &grounds_taken);
             printf("unpacking files from the archives: %.0f ms over the run, both threads (%llu read, %llu from memory); read ahead: %d tiles, %d files\n",
                    chain.unpack_s * 1000, (unsigned long long)chain.misses, (unsigned long long)chain.hits, ahead_tiles, ahead_files);
             printf("ground prepared ahead: %d tiles, %d of them loaded\n", grounds_made, grounds_taken);
@@ -921,7 +921,7 @@ int main(int argc, char **argv)
     free(standing);
     free(built_of);
     creatures_free(&spawns);
-    prefetch_stop();
+    prefetch_free(pf);
     mpq_chain_close(&chain);
     maps_world_free(&world);
     return 0;

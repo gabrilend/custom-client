@@ -633,18 +633,18 @@ int main(int argc, char **argv)
         MpqChain rc;
         if (mpq_chain_open(&rc, client, "enUS", &why)) check(0, why.text);
         else {
-            prefetch_start(&rc, "Kalimdor");
-            prefetch_tile(26, 32);
-            prefetch_tile(26, 32);                        /* asked twice: read once */
-            prefetch_wait();
+            Prefetch *reader = prefetch_start(&rc, "Kalimdor", 1);
+            prefetch_tile(reader, 26, 32);
+            prefetch_tile(reader, 26, 32);                        /* asked twice: read once */
+            prefetch_wait(reader);
             int pt, pf, gm, gt;
-            prefetch_counts(&pt, &pf, &gm, &gt);
+            prefetch_counts(reader, &pt, &pf, &gm, &gt);
             uint64_t hits = rc.hits;
             size_t al;
             unsigned char *adt_s = mpq_chain_read(&rc, "World\\Maps\\Kalimdor\\Kalimdor_32_26.adt", &al, NULL);
             snprintf(line, sizeof line, "the helper read 1 tile (%d) and its files (%d); its ground file comes from memory afterwards", pt, pf);
             check(pt == 1 && pf > 100 && adt_s && rc.hits == hits + 1, line);
-            check(gm == 0 && prefetch_take_ground(26, 32, &(GroundPrep *){ 0 }) == 2, "without being told to, it prepares no ground");
+            check(gm == 0 && prefetch_take_ground(reader, 26, 32, &(GroundPrep *){ 0 }) == 2, "without being told to, it prepares no ground");
             free(adt_s);
 
             /* preparing the ground (173u): the helper's preparation of a
@@ -673,11 +673,11 @@ int main(int argc, char **argv)
             GroundPlace gp;
             if (ground_place_init(&gp, &rc, "Kalimdor", &gw, 2700, -400, &why)) check(0, why.text);
             else {
-                prefetch_prepare_ground(&gp, test_on_card);
-                prefetch_tile(26, 31);
-                prefetch_wait();
+                prefetch_prepare_ground(reader, &gp, test_on_card);
+                prefetch_tile(reader, 26, 31);
+                prefetch_wait(reader);
                 GroundPrep *ahead = NULL, *here = NULL;
-                int took = prefetch_take_ground(26, 31, &ahead);
+                int took = prefetch_take_ground(reader, 26, 31, &ahead);
                 int made = ground_prep_tile(&gp, 26, 31, test_on_card, &here, &why);
                 check(took == 0 && made == 0, "the helper prepared the tile's ground, and the main thread can too");
                 if (took == 0 && made == 0) {
@@ -700,17 +700,17 @@ int main(int argc, char **argv)
                     check(same && quarters == 4, line);
                     snprintf(line, sizeof line, "pictures on the card left packed (%d), the rest unpacked (%d)", skipped, unpacked);
                     check(skipped > 0 && unpacked > 0, line);
-                    prefetch_counts(&pt, &pf, &gm, &gt);
-                    check(gm == 1 && gt == 1 && prefetch_take_ground(26, 31, &(GroundPrep *){ 0 }) == 2, "taken once: a second take finds none");
+                    prefetch_counts(reader, &pt, &pf, &gm, &gt);
+                    check(gm == 1 && gt == 1 && prefetch_take_ground(reader, 26, 31, &(GroundPrep *){ 0 }) == 2, "taken once: a second take finds none");
                     ground_prep_free(ahead, 0);
                     ground_prep_free(here, 0);
                 }
-                prefetch_tile(30, 31);
-                prefetch_wait();
-                prefetch_keep_near(26, 31, 2);                /* (30, 31) is 4 tiles off */
-                check(prefetch_take_ground(30, 31, &(GroundPrep *){ 0 }) == 2, "a preparation she turned away from is let go");
+                prefetch_tile(reader, 30, 31);
+                prefetch_wait(reader);
+                prefetch_keep_near(reader, 26, 31, 2);                /* (30, 31) is 4 tiles off */
+                check(prefetch_take_ground(reader, 30, 31, &(GroundPrep *){ 0 }) == 2, "a preparation she turned away from is let go");
             }
-            prefetch_stop();
+            prefetch_free(reader);
             maps_world_free(&gw);
             mpq_chain_close(&rc);
         }
