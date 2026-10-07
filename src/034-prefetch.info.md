@@ -30,7 +30,7 @@ memory and the server's heights (each locked) and its own keeping
   prepared. The chain must outlive it; freed with prefetch_free.
 - `Prefetch *prefetch_start(MpqChain *chain, const char *map_name, int read_ahead);`
 - `void prefetch_free(Prefetch *pf);`
-- `void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(const char *name));`
+- `void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(void *ctx, const char *name), void *ctx);`
   From now on, each tile read ahead has its ground prepared too, at
   `place` (which must outlive the helper); `on_card` (any thread) says
   which pictures are on the card already, so they aren't unpacked.

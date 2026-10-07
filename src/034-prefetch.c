@@ -41,7 +41,8 @@ struct Prefetch {
     int             busy, stopping;
     int             tiles_done, files_read, grounds_made, grounds_taken;
     const GroundPlace *place;
-    int           (*on_card)(const char *name);
+    int           (*on_card)(void *ctx, const char *name);
+    void           *on_card_ctx;
     GroundPrep     *ready[64 * 64];
     unsigned char   ground_state[64 * 64], skip[64 * 64];
     int             working_on;
@@ -75,7 +76,7 @@ static void read_tile(Prefetch *pf, int i, GroundPrep **ground, int *state)
     pthread_mutex_unlock(&pf->lock);
     if (prepare) {
         /* the ground prepared: its file read (and so kept) on the way */
-        int got = ground_prep_tile(pf->place, tx, ty, pf->on_card, ground, &why);
+        int got = ground_prep_tile(pf->place, tx, ty, pf->on_card, pf->on_card_ctx, ground, &why);
         if (got == W_ERR_NOT_FOUND) { *state = 2; return; }   /* open sea: no ground file */
         if (got == W_OK) { *state = 1; t = (*ground)->adt; __atomic_add_fetch(&pf->files_read, 1, __ATOMIC_RELAXED); }
         /* any other code: the main thread prepares it again when it loads it, and says what is wrong */
@@ -182,11 +183,12 @@ Prefetch *prefetch_start(MpqChain *chain, const char *map_name, int read_ahead)
     else fprintf(stderr, "prefetch: WARNING: the helper thread couldn't start; tiles load without reading ahead\n");
     return pf;
 }
-void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(const char *name))
+void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(void *ctx, const char *name), void *ctx)
 {
     pthread_mutex_lock(&pf->lock);
     pf->place = place;
     pf->on_card = on_card;
+    pf->on_card_ctx = ctx;
     pthread_mutex_unlock(&pf->lock);
 }
 void prefetch_tile(Prefetch *pf, int tx, int ty)

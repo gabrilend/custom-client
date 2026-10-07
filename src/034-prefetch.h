@@ -35,7 +35,7 @@ void      prefetch_free(Prefetch *pf);
 /* From now on, each tile read ahead has its ground prepared too, at
  * `place` (which must outlive the helper); `on_card` (any thread) says
  * which pictures are on the card already, so they aren't unpacked. */
-void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(const char *name));
+void prefetch_prepare_ground(Prefetch *pf, const GroundPlace *place, int (*on_card)(void *ctx, const char *name), void *ctx);
 
 /* Asks for tile (tx, ty) to be read ahead (once; repeats are ignored). */
 void prefetch_tile(Prefetch *pf, int tx, int ty);

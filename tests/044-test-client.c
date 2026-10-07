@@ -59,7 +59,7 @@ static void check(int ok, const char *what)
 static int near(double a, double b, double tol) { return fabs(a - b) <= tol; }
 /* a stand-in for the card's pictures (173u): an arbitrary half of them,
  * those with an odd-length name, count as sent already */
-static int test_on_card(const char *name) { return strlen(name) % 2; }
+static int test_on_card(void *ctx, const char *name) { (void)ctx; return strlen(name) % 2; }
 /* }}} */
 
 /* {{{ made-up grounds: height, then rise per yard along x and y, as the map gives */
@@ -673,12 +673,12 @@ int main(int argc, char **argv)
             GroundPlace gp;
             if (ground_place_init(&gp, &rc, "Kalimdor", &gw, 2700, -400, &why)) check(0, why.text);
             else {
-                prefetch_prepare_ground(reader, &gp, test_on_card);
+                prefetch_prepare_ground(reader, &gp, test_on_card, NULL);
                 prefetch_tile(reader, 26, 31);
                 prefetch_wait(reader);
                 GroundPrep *ahead = NULL, *here = NULL;
                 int took = prefetch_take_ground(reader, 26, 31, &ahead);
-                int made = ground_prep_tile(&gp, 26, 31, test_on_card, &here, &why);
+                int made = ground_prep_tile(&gp, 26, 31, test_on_card, NULL, &here, &why);
                 check(took == 0 && made == 0, "the helper prepared the tile's ground, and the main thread can too");
                 if (took == 0 && made == 0) {
                     int same = 1, quarters = 0, unpacked = 0, skipped = 0;
@@ -693,7 +693,7 @@ int main(int argc, char **argv)
                     same = same && !memcmp(ahead->blend, here->blend, 1024 * 1024 * 4);
                     for (int t = 0; t < ahead->adt->ntextures; ++t) {
                         if (!ahead->needed[t]) continue;
-                        if (test_on_card(ahead->adt->textures[t])) skipped += !ahead->pixels[t].rgba;
+                        if (test_on_card(NULL, ahead->adt->textures[t])) skipped += !ahead->pixels[t].rgba;
                         else unpacked += ahead->pixels[t].rgba && ahead->pixels[t].width > 0;
                     }
                     snprintf(line, sizeof line, "both the same: points, light, triangles, blend picture (%d quarters drawn)", quarters);

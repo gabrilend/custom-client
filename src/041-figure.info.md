@@ -27,14 +27,22 @@ Where a figure's pictures come from:
 ## What it offers
 
 - `type FigurePiece`
+- `typedef struct Figures Figures;`
+  A figure maker (the handle: docs/001, "Handles"): the archives figures
+  are read from, and the pictures already sent to the card, shared by
+  every figure it makes (a picture is read and sent once; eleven
+  sentinels share one set of hair). Its pictures last until figures_free,
+  so the figures it made must be freed first.
+- `Figures *figures_new(MpqChain *chain);`
+- `void figures_free(Figures *fs);`
 - `type FigureItem`
   an item hung on the figure (173p): its own figure, the bone it hangs
   from and where on it (the model's attachment point), and its place in
   the wearer's model space this frame (figure_bend)
 - `type Figure`
-- `WErr figure_from_character(Figure *f, MpqChain *chain, const CharacterLook *look, WWhy *why);`
-- `WErr figure_from_display(Figure *f, MpqChain *chain, int display_id, WWhy *why);`
-- `WErr figure_from_item(Figure *f, MpqChain *chain, const char *model, const char *picture, WWhy *why);`
+- `WErr figure_from_character(Figures *fs, Figure *f, const CharacterLook *look, WWhy *why);`
+- `WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why);`
+- `WErr figure_from_item(Figures *fs, Figure *f, const char *model, const char *picture, WWhy *why);`
   An item's model (a helm, a shoulder, a weapon), its pictures named
   inside it or the item's own picture (kind 2); hung on a character
   figure by figure_from_character (173p).

@@ -37,9 +37,10 @@ nothing else that is shared.
 - `WErr ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);`
   Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
   with `why`.
-- `WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, WWhy *why);`
+- `WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void *ctx, const char *name), void *ctx, GroundPrep **out, WWhy *why);`
   Prepares tile (tx, ty). `on_card`, when given, answers whether a
-  picture (by archive name) is already on the card; those aren't
+  picture (by archive name) is already on the card (asked with `ctx`:
+  the ground it is asking about); those aren't
   unpacked (sending finds them there, or unpacks them itself if they
   have gone since). W_OK with `*out` (freed by ground_prep_free);
   W_ERR_NOT_FOUND when the map has no ground file there (open sea: not a

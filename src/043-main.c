@@ -194,6 +194,8 @@ static struct { double x, y, z; float facing; MovesState moves; int cycle; float
 
 /* {{{ the world and the camera */
 static MapWorld world;
+static Ground *ground;                                   /* the painted ground (038-ground.h) */
+static Figures *figures;                                 /* the figure maker (041-figure.h) */
 static MpqChain chain;                                   /* the original client's archives, open for the whole run */
 static GroundPlace ground_place;                         /* where tiles' ground is prepared, on either thread (173u) */
 static char   tile_state[64 * 64];                      /* 0 not loaded, 1 painted, 2 no ground file (open sea) */
@@ -250,7 +252,7 @@ static int build_creature(int k)
     Standing *st = &standing[nstanding];
     WWhy why;
     double t0 = GetTime();
-    int failed = figure_from_display(&st->fig, &chain, sp->display, &why);
+    int failed = figure_from_display(figures, &st->fig, sp->display, &why);
     creature_build_s += GetTime() - t0;
     if (failed) {
         fprintf(stderr, "creatures: %s (%s and any others with its look are left out)\n", why.text, sp->name);
@@ -387,8 +389,8 @@ static void refresh_tiles(void)
             GroundPrep *prep;
             int taken = prefetch_take_ground(pf, x, y, &prep);   /* 0 prepared, 1 no ground file there, 2 not prepared */
             WErr got = taken == 0 ? W_OK : taken == 1 ? W_ERR_NOT_FOUND
-                     : ground_prep_tile(&ground_place, x, y, ground_on_card, &prep, &why);
-            if (got == W_OK) got = ground_load_tile(prep, &adt, &why);
+                     : ground_prep_tile(&ground_place, x, y, ground_on_card, ground, &prep, &why);
+            if (got == W_OK) got = ground_load_tile(ground, prep, &adt, &why);
             /* no ground file there (open sea) is a tile with nothing to draw;
              * anything else stops the client */
             if (got != W_OK && got != W_ERR_NOT_FOUND) { fprintf(stderr, "painting tile (%d, %d): %s (%s)\n", x, y, why.text, w_err_name(got)); exit(1); }
@@ -423,7 +425,7 @@ static void refresh_tiles(void)
             if (!tile_state[x * 64 + y] || (abs(x - tx) <= TILE_REACH + 1 && abs(y - ty) <= TILE_REACH + 1)) continue;
             drop_creatures(x * 64 + y);
             if (tile_state[x * 64 + y] == 1) {
-                ground_drop_tile(x, y);
+                ground_drop_tile(ground, x, y);
                 water_drop_tile(water, x * 64 + y);
                 liquid_drop_tile(waters, x, y);
                 doodads_drop_tile(x * 64 + y);
@@ -526,9 +528,10 @@ int main(int argc, char **argv)
     model_sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(model_sh, "bones");   /* 041-figure.c puts each figure's bone picture in that material slot */
     if (mpq_chain_open(&chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
+    figures = figures_new(&chain);                      /* makes her, the bystanders and the creatures (041-figure.h) */
     if (character_start_outfit(&chain, LOOK.race, HER_CLASS, LOOK.sex, LOOK.items, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     for (int k = 0; k < SLOT_COUNT; ++k) if (WEAR_OVER[k]) LOOK.items[k] = WEAR_OVER[k];
-    if (figure_from_character(&her, &chain, &LOOK, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (figure_from_character(figures, &her, &LOOK, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     static const int NEEDED[] = { MOVE_STAND, MOVE_RUN, MOVE_WALK, MOVE_WALK_BACK, MOVE_SHUFFLE_LEFT, MOVE_SHUFFLE_RIGHT, MOVE_JUMP_START, MOVE_JUMP, MOVE_JUMP_END, MOVE_FALL };
     for (unsigned i = 0; i < sizeof NEEDED / sizeof NEEDED[0]; ++i)
         if (anim_find(&her.anim, NEEDED[i], 0) < 0) fprintf(stderr, "her animations: her model has no animation %d; she stands instead\n", NEEDED[i]);
@@ -541,8 +544,8 @@ int main(int argc, char **argv)
             fprintf(stderr, "bystander %d left out: %s\n", i, why.text);
             continue;
         }
-        int bad = BYSTANDERS[i].race ? figure_from_character(f, &chain, &look, &why)
-                                     : figure_from_display(f, &chain, BYSTANDERS[i].display, &why);
+        int bad = BYSTANDERS[i].race ? figure_from_character(figures, f, &look, &why)
+                                     : figure_from_display(figures, f, BYSTANDERS[i].display, &why);
         if (bad) { fprintf(stderr, "bystander %d left out: %s\n", i, why.text); continue; }
         double fx = cos(START_O), fy = sin(START_O);
         other_at[nothers].x = start_x + fx * BYSTANDERS[i].ahead - fy * BYSTANDERS[i].left;
@@ -567,12 +570,12 @@ int main(int argc, char **argv)
         free(mt);
         if (!found) { fprintf(stderr, "no map %d in Map.dbc\n", map_id); CloseWindow(); return 1; }
     }
-    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || ground_init(&ground_place, &why)) {
+    if (ground_place_init(&ground_place, &chain, map_name, &world, ox, oy, &why) || !(ground = ground_new(&ground_place, &why))) {
         fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1;
     }
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
     pf = prefetch_start(&chain, map_name, read_ahead);
-    prefetch_prepare_ground(pf, &ground_place, ground_on_card);
+    prefetch_prepare_ground(pf, &ground_place, ground_on_card, ground);
     solids = collide_new(ox, oy);
     waters = liquid_new();
     water = water_new(&chain, &why);
@@ -821,14 +824,14 @@ int main(int argc, char **argv)
             maps_tile_of((float)elf.x, (float)elf.y, &htx, &hty);
             TIMED(PH_SKY, horizon_draw(horizon, htx, hty, tile_state, eye, &light));   /* low-detail tiles beyond the loaded ones (173s) */
         }
-        ground_blob(at.x, at.y, (float)elf.z, 1.3f);     /* her shadow, a little wider than her shoulders */
+        ground_blob(ground, at.x, at.y, (float)elf.z, 1.3f);     /* her shadow, a little wider than her shoulders */
         for (int i = 0; i < nothers; ++i)                /* theirs, sized by their display's scale */
-            ground_blob((float)(other_at[i].x - ox), (float)(other_at[i].y - oy), (float)other_at[i].z, 1.3f * others[i].scale);
+            ground_blob(ground, (float)(other_at[i].x - ox), (float)(other_at[i].y - oy), (float)other_at[i].z, 1.3f * others[i].scale);
         for (int i = 0; i < nstanding; ++i) {            /* the world's creatures' (173t) */
             const Spawn *sp = &spawns.spawns[standing[i].spawn];
-            ground_blob((float)(sp->x - ox), (float)(sp->y - oy), (float)sp->z, 1.3f * standing[i].fig.scale);
+            ground_blob(ground, (float)(sp->x - ox), (float)(sp->y - oy), (float)sp->z, 1.3f * standing[i].fig.scale);
         }
-        TIMED(PH_GROUND, ground_draw(eye, &light); rlDrawRenderBatchActive());
+        TIMED(PH_GROUND, ground_draw(ground, eye, &light); rlDrawRenderBatchActive());
         TIMED(PH_DOODADS_DRAW, doodads_draw(eye, &light); rlDrawRenderBatchActive());
         TIMED(PH_WATER, water_draw(water, eye, &light, clock_ms / 1000.0); rlDrawRenderBatchActive());   /* see-through, after the solid world */
         double figures_t0 = GetTime();
@@ -875,7 +878,7 @@ int main(int argc, char **argv)
             printf("tiles: %d loaded, %d dropped over the run; now %d placed, %d solid triangles\n", tiles_loaded, tiles_dropped, dc2, collide_count(solids));
             printf("frames took %.1f ms each on average, over %d (drawing, bending and all)\n", (GetTime() - loop_start) * 1000.0 / frames, frames);
             for (int ph = 0; ph < PH_COUNT; ++ph) printf("  %5.2f ms a frame: %s\n", phase_s[ph] * 1000.0 / frames, PHASE_NAME[ph]);
-            printf("the ground sent %.1f draw orders a frame, the doodads %.1f (173u)\n", (double)ground_orders_last() / frames, (double)doodads_orders_last() / frames);
+            printf("the ground sent %.1f draw orders a frame, the doodads %.1f (173u)\n", (double)ground_orders_last(ground) / frames, (double)doodads_orders_last() / frames);
             size_t tex_sent, tex_unpacked;
             texture_bytes(&tex_sent, &tex_unpacked);
             printf("model pictures on the card: %.1f MB (%.1f MB if unpacked; 173u)\n", tex_sent / 1048576.0, tex_unpacked / 1048576.0);

@@ -133,7 +133,7 @@ static void chunk_points(const AdtChunk *c, const GroundPlace *p, GroundQuarter 
 /* }}} */
 
 /* {{{ ground_prep_tile */
-WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const char *name), GroundPrep **out, WWhy *why)
+WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void *ctx, const char *name), void *ctx, GroundPrep **out, WWhy *why)
 {
     *out = NULL;
     if (tx < 0 || tx > 63 || ty < 0 || ty > 63) return w_fail(why, W_ERR_NOT_FOUND, "tile (%d, %d) is off the map's 64 x 64 grid", tx, ty);
@@ -176,7 +176,7 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(const
     }
     /* the pictures not already on the card */
     for (int t = 0; t < adt->ntextures; ++t) {
-        if (!g->needed[t] || (on_card && on_card(adt->textures[t]))) continue;
+        if (!g->needed[t] || (on_card && on_card(ctx, adt->textures[t]))) continue;
         if (ground_prep_pixels(p->chain, adt->textures[t], &g->pixels[t], why)) { ground_prep_free(g, 0); return why->code; }
     }
     /* each quarter: 64 chunks of 145 points (9,280, within the 16-bit

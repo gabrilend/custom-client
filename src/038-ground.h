@@ -31,34 +31,36 @@
  * archives, the map, its blend-map form, the server's heights, the
  * drawing origin); what it points to must outlive the painter. W_OK, or a code
  * with `why`. */
-WErr  ground_init(const GroundPlace *place, WWhy *why);
+typedef struct Ground Ground;
+Ground *ground_new(const GroundPlace *place, WWhy *why);
+void    ground_free(Ground *g);
 
 /* Whether a ground picture (by archive name) is on the card now. Safe on
  * any thread: given to ground_prep_tile so pictures already sent aren't
  * unpacked again. */
-int  ground_on_card(const char *name);
+int  ground_on_card(void *ground, const char *name);
 
 /* Sends a prepared tile (ground_prep_tile, on either thread) to the card
  * and draws it from then on; the preparation is used up (freed). The
  * ground file read is handed back in `*kept` (for the water, doodads and
  * buildings on it); the caller frees it with adt_free and free.
  * W_OK, or a code with `why` (a picture couldn't be had). Main thread only. */
-WErr  ground_load_tile(GroundPrep *prepared, AdtTile **kept, WWhy *why);
+WErr  ground_load_tile(Ground *g, GroundPrep *prepared, AdtTile **kept, WWhy *why);
 
 /* Drops tile (tx, ty): its meshes and blend pictures (its ground pictures
  * stay loaded, shared and cached; 173s). */
-void ground_drop_tile(int tx, int ty);
+void ground_drop_tile(Ground *g, int tx, int ty);
 
 /* A soft round shadow on the ground under a character this frame:
  * centre (relative to the drawing origin) and radius in yards. Up to 8
  * a frame; the list empties after each ground_draw. */
-void ground_blob(float x, float y, float z, float radius);
+void ground_blob(Ground *g, float x, float y, float z, float radius);
 
 /* Draws every loaded tile. `eye` is the camera's position (for the fog). */
-void ground_draw(Vector3 eye, const LightNow *light);
+void ground_draw(Ground *g, Vector3 eye, const LightNow *light);
 
 /* How many draw orders the ground sent since last asked (for the picture
  * report; 173u). */
-int  ground_orders_last(void);
+int  ground_orders_last(Ground *g);
 
 #endif
