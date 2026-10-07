@@ -105,7 +105,8 @@ static const SettingDecl DECLS[] = {
 };
 #define DECL_COUNT ((int)(sizeof DECLS / sizeof DECLS[0]))
 
-static Setting values[DECL_COUNT];
+/* a store: every setting's value, in the declarations' order */
+struct Settings { Setting values[DECL_COUNT]; };
 /* }}} */
 
 /* {{{ check_resolution: WIDTHxHEIGHT, from 640x480 to 7680x4320 */
@@ -126,14 +127,14 @@ static const char *check_resolution(const char *value)
  * A walk down the table by name. The table is small (tens of rows, a few
  * hundred when every panel is built), and a few lookups a frame cost
  * nothing next to drawing; a hash can replace the walk if that changes. */
-const Setting *settings_find(const char *name)
+const Setting *settings_find(const Settings *st, const char *name)
 {
     for (int i = 0; i < DECL_COUNT; ++i)
-        if (!strcmp(DECLS[i].name, name)) return &values[i];
+        if (!strcmp(DECLS[i].name, name)) return &st->values[i];
     return NULL;
 }
 int settings_count(void) { return DECL_COUNT; }
-const Setting *settings_at(int i) { return (i >= 0 && i < DECL_COUNT) ? &values[i] : NULL; }
+const Setting *settings_at(const Settings *st, int i) { return (i >= 0 && i < DECL_COUNT) ? &st->values[i] : NULL; }
 /* }}} */
 
 /* {{{ static accept: a value held to its declaration
@@ -179,24 +180,27 @@ static const char *accept(const SettingDecl *d, const char *value, Setting *out)
 }
 /* }}} */
 
-/* {{{ settings_init
+/* {{{ settings_new, settings_free
  * A default that its own declaration refuses is a mistake in the table:
  * the client stops and names it. */
-void settings_init(void)
+void settings_free(Settings *st) { free(st); }
+Settings *settings_new(void)
 {
+    Settings *st = calloc(1, sizeof *st);
     for (int i = 0; i < DECL_COUNT; ++i) {
-        const char *why = accept(&DECLS[i], DECLS[i].def, &values[i]);
+        const char *why = accept(&DECLS[i], DECLS[i].def, &st->values[i]);
         if (why) {
             fprintf(stderr, "014-settings.c: the default \"%s\" of %s is refused by its own declaration: %s\n",
                     DECLS[i].def, DECLS[i].name, why);
             exit(1);
         }
     }
+    return st;
 }
 /* }}} */
 
 /* {{{ settings_set */
-WErr settings_set(const char *name, const char *value, WWhy *why)
+WErr settings_set(Settings *st, const char *name, const char *value, WWhy *why)
 {
     for (int i = 0; i < DECL_COUNT; ++i) {
         if (strcmp(DECLS[i].name, name)) continue;
@@ -209,7 +213,7 @@ WErr settings_set(const char *name, const char *value, WWhy *why)
                 w_fail(why, W_ERR_REFUSED, "%s \"%s\": %s", name, value, no);
             return why->code;
         }
-        values[i] = next;
+        st->values[i] = next;
         return 0;
     }
     w_fail(why, W_ERR_REFUSED, "no setting named %s", name);
@@ -220,7 +224,7 @@ WErr settings_set(const char *name, const char *value, WWhy *why)
 /* {{{ settings_load
  * Each line is SET name "value", as the original's Config.wtf writes it.
  * The quotes are required; a value can't hold a quote. */
-int settings_load(const char *path, FILE *report)
+int settings_load(Settings *st, const char *path, FILE *report)
 {
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -241,7 +245,7 @@ int settings_load(const char *path, FILE *report)
             ++skipped;
             continue;
         }
-        if (settings_set(name, value, &why)) {
+        if (settings_set(st, name, value, &why)) {
             fprintf(report, "settings: %s line %d: %s; skipped\n", path, number, why.text);
             ++skipped;
         }
@@ -252,14 +256,14 @@ int settings_load(const char *path, FILE *report)
 /* }}} */
 
 /* {{{ settings_save */
-WErr settings_save(const char *path, WWhy *why)
+WErr settings_save(const Settings *st, const char *path, WWhy *why)
 {
     FILE *f = fopen(path, "w");
     if (!f) { w_fail(why, W_ERR_IO, "can't write %s (does its folder exist?)", path); return why->code; }
     for (int i = 0; i < DECL_COUNT; ++i) {
         Setting def;
         accept(&DECLS[i], DECLS[i].def, &def);      /* accepted at init, so never refused here */
-        if (strcmp(values[i].text, def.text)) fprintf(f, "SET %s \"%s\"\n", DECLS[i].name, values[i].text);
+        if (strcmp(st->values[i].text, def.text)) fprintf(f, "SET %s \"%s\"\n", DECLS[i].name, st->values[i].text);
     }
     if (fclose(f)) { w_fail(why, W_ERR_IO, "writing %s failed", path); return why->code; }
     return 0;
@@ -267,15 +271,15 @@ WErr settings_save(const char *path, WWhy *why)
 /* }}} */
 
 /* {{{ settings_num_at, settings_text_at */
-static const Setting *must(const char *name, const char *file, int line)
+static const Setting *must(const Settings *st, const char *name, const char *file, int line)
 {
-    const Setting *s = settings_find(name);
+    const Setting *s = settings_find(st, name);
     if (!s) {
         fprintf(stderr, "%s:%d asks for a setting named %s, which 014-settings.c doesn't declare\n", file, line, name);
         exit(1);
     }
     return s;
 }
-double settings_num_at(const char *name, const char *file, int line) { return must(name, file, line)->num; }
-const char *settings_text_at(const char *name, const char *file, int line) { return must(name, file, line)->text; }
+double settings_num_at(const Settings *st, const char *name, const char *file, int line) { return must(st, name, file, line)->num; }
+const char *settings_text_at(const Settings *st, const char *name, const char *file, int line) { return must(st, name, file, line)->text; }
 /* }}} */

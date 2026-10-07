@@ -148,7 +148,7 @@ static void check_vmap_placements(const char *dir, const AdtTile *t, int *pairs,
     uint32_t seen[8192];
     int nseen = 0;
     for (int order = 0; order < 2; ++order) {
-        char path[700];
+    char path[700];
         snprintf(path, sizeof path, "%s/assets/server-data/vmaps/001_%02d_%02d.vmtile", dir, order ? 26 : 32, order ? 32 : 26);
         FILE *f = fopen(path, "rb");
         if (!f) continue;
@@ -224,6 +224,7 @@ int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/mtwo/games/azeroth-core/wow-chat-2026";
     const char *client = argc > 2 ? argv[2] : "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data";
+    Settings *st = settings_new();                        /* the tests' settings store (014-settings.h), renewed where a test needs defaults */
     char path[700], line[300];
     WWhy why;
 
@@ -772,35 +773,40 @@ int main(int argc, char **argv)
         Dbc d;
         check(dbc_open(&d, (const unsigned char *)"not a table at all, just words", 30, &r) == W_ERR_CORRUPT,
               "bytes that aren't a table: W_ERR_CORRUPT");
-        settings_init();
-        check(settings_set("cameraYawMoveSpeed", "5000", &r) == W_ERR_REFUSED && settings_set("noSuchSetting", "1", &r) == W_ERR_REFUSED,
+        settings_free(st); st = settings_new();
+        check(settings_set(st, "cameraYawMoveSpeed", "5000", &r) == W_ERR_REFUSED && settings_set(st, "noSuchSetting", "1", &r) == W_ERR_REFUSED,
               "a setting out of its range, or with no such name: W_ERR_REFUSED");
+        Settings *other = settings_new();               /* a second store (docs/001, "Handles"): a profile per server */
+        settings_set(other, "cameraYawMoveSpeed", "90", &r);
+        check(settings_num(other, "cameraYawMoveSpeed") == 90 && settings_num(st, "cameraYawMoveSpeed") == 180,
+              "two settings stores live side by side, each with its own values");
+        settings_free(other);
     }
     /* }}} */
 
     /* {{{ the settings store (173b1) */
     printf("the settings store\n");
-    settings_init();
-    check(settings_num("cameraYawMoveSpeed") == 180 && !strcmp(settings_text("gxResolution"), "1280x720"),
+    settings_free(st); st = settings_new();
+    check(settings_num(st, "cameraYawMoveSpeed") == 180 && !strcmp(settings_text(st, "gxResolution"), "1280x720"),
           "every setting starts at its default (mouse look 180, window 1280x720)");
-    check(settings_find("noSuchSetting") == NULL, "an unknown name finds nothing (code asking for it by settings_num stops the client)");
+    check(settings_find(st, "noSuchSetting") == NULL, "an unknown name finds nothing (code asking for it by settings_num stops the client)");
     {
         /* the Resolution panel's tick boxes (173b5): windowed, vsync on,
          * not maximized, resizable; the window's kind is read at start */
-        const Setting *w = settings_find("gxWindow"), *mx = settings_find("gxMaximize"), *vs = settings_find("gxVSync"), *rl = settings_find("windowResizeLock");
+        const Setting *w = settings_find(st, "gxWindow"), *mx = settings_find(st, "gxMaximize"), *vs = settings_find(st, "gxVSync"), *rl = settings_find(st, "windowResizeLock");
         check(w && mx && vs && rl && w->num == 1 && mx->num == 0 && vs->num == 1 && rl->num == 0
               && w->decl->restart && mx->decl->restart && !vs->decl->restart && !rl->decl->restart,
               "the window settings start windowed, vsync on, unmaximized and resizable; windowed and maximized need a restart");
     }
-    check(settings_set("cameraYawMoveSpeed", "300", &why) && strstr(why.text, "out of its range") && settings_num("cameraYawMoveSpeed") == 180,
+    check(settings_set(st, "cameraYawMoveSpeed", "300", &why) && strstr(why.text, "out of its range") && settings_num(st, "cameraYawMoveSpeed") == 180,
           "a slider refuses a value past its range, says so, and keeps its value");
-    check(settings_set("gxResolution", "wide", &why) && settings_set("gxResolution", "9000x1000", &why),
+    check(settings_set(st, "gxResolution", "wide", &why) && settings_set(st, "gxResolution", "9000x1000", &why),
           "the resolution refuses words and sizes past 7680x4320");
-    check(!settings_set("gxResolution", "5120x1440", &why) && !settings_set("cameraYawMoveSpeed", "250.0", &why)
-          && settings_num("cameraYawMoveSpeed") == 250 && !strcmp(settings_text("cameraYawMoveSpeed"), "250"),
+    check(!settings_set(st, "gxResolution", "5120x1440", &why) && !settings_set(st, "cameraYawMoveSpeed", "250.0", &why)
+          && settings_num(st, "cameraYawMoveSpeed") == 250 && !strcmp(settings_text(st, "cameraYawMoveSpeed"), "250"),
           "an ultrawide resolution and a slider value are accepted, the number kept in one written form");
     snprintf(path, sizeof path, "%s/tmp/shared-memory/test-settings.wtf", dir);
-    check(!settings_save(path, &why), "the changes are saved");
+    check(!settings_save(st, path, &why), "the changes are saved");
     FILE *saved = fopen(path, "r");
     char text[400] = "";
     size_t got = saved ? fread(text, 1, sizeof text - 1, saved) : 0;
@@ -808,13 +814,13 @@ int main(int argc, char **argv)
     if (saved) fclose(saved);
     check(!strcmp(text, "SET gxResolution \"5120x1440\"\nSET cameraYawMoveSpeed \"250\"\n"),
           "the file holds only the two changed settings, as SET name \"value\" lines");
-    settings_init();
+    settings_free(st); st = settings_new();
     char *log = NULL;
     size_t log_len = 0;
     FILE *report = open_memstream(&log, &log_len);
-    int skipped = settings_load(path, report);
+    int skipped = settings_load(st, path, report);
     fclose(report);
-    check(skipped == 0 && log_len == 0 && settings_num("cameraYawMoveSpeed") == 250 && !strcmp(settings_text("gxResolution"), "5120x1440"),
+    check(skipped == 0 && log_len == 0 && settings_num(st, "cameraYawMoveSpeed") == 250 && !strcmp(settings_text(st, "gxResolution"), "5120x1440"),
           "loading it back gives the same values, with nothing to report");
     free(log);
     FILE *bad = fopen(path, "w");
@@ -822,24 +828,24 @@ int main(int argc, char **argv)
         fputs("# a comment\n\nSET cameraDistanceMaxFactor \"1.5\"\nSET nonsense \"1\"\nSET cameraYawMoveSpeed \"20\"\njunk\n", bad);
         fclose(bad);
     }
-    settings_init();
+    settings_free(st); st = settings_new();
     log = NULL;
     report = open_memstream(&log, &log_len);
-    skipped = settings_load(path, report);
+    skipped = settings_load(st, path, report);
     fclose(report);
-    check(skipped == 3 && settings_num("cameraDistanceMaxFactor") == 1.5 && settings_num("cameraYawMoveSpeed") == 180,
+    check(skipped == 3 && settings_num(st, "cameraDistanceMaxFactor") == 1.5 && settings_num(st, "cameraYawMoveSpeed") == 180,
           "a hand-edited file: the good line is taken, three bad lines are skipped");
     check(log && strstr(log, "line 4: no setting named nonsense") && strstr(log, "line 5: cameraYawMoveSpeed \"20\": out of its range (90 to 270)")
           && strstr(log, "line 6: not SET name"),
           "each bad line is reported with its line number and why.text");
     free(log);
     remove(path);
-    settings_init();
+    settings_free(st); st = settings_new();
     log = NULL;
     report = open_memstream(&log, &log_len);
-    skipped = settings_load(path, report);
+    skipped = settings_load(st, path, report);
     fclose(report);
-    check(skipped == 0 && log && strstr(log, "no file at") && settings_num("cameraDistanceMaxFactor") == 2,
+    check(skipped == 0 && log && strstr(log, "no file at") && settings_num(st, "cameraDistanceMaxFactor") == 2,
           "no file yet: said once, every setting at its default");
     free(log);
     /* }}} */
@@ -1427,7 +1433,7 @@ light_done:
     /* {{{ the camera (173m) */
     printf("the camera\n");
     {
-        settings_init();
+        settings_free(st); st = settings_new();
         const double deg = 3.14159265358979323846 / 180;
         const float px90 = (float)(90 * deg / 0.006);          /* pixels of drag for 90 degrees at the default speed */
         FollowCamInput idle = { .dt = 0.01f }, held_l = { .left = 1, .dt = 0.01f };
@@ -1435,7 +1441,7 @@ light_done:
         double facing;
 
         /* left drag 90 degrees, then a quarter second of running in style 1 */
-        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f };
+        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f, .settings = st };
         facing = 0;
         FollowCamInput drag = { .left = 1, .dx = -px90, .dy = 50, .dt = 0.01f };
         camera_drag(&cam, &drag, 0, &facing);
@@ -1465,38 +1471,38 @@ light_done:
         check(near(cam.yaw, 351.8 * deg, 1e-4), "from 350 degrees it swings on round through 360, the shorter way");
 
         /* style 4: the pitch returns too */
-        check(!settings_set("cameraSmoothStyle", "4", &why), "the style can be changed to 4 (only when moving)");
-        cam = (FollowCam){ .yaw = (float)(30 * deg), .pitch = 1.0f, .dist = 12, .rest_pitch = 0.35f };
+        check(!settings_set(st, "cameraSmoothStyle", "4", &why), "the style can be changed to 4 (only when moving)");
+        cam = (FollowCam){ .yaw = (float)(30 * deg), .pitch = 1.0f, .dist = 12, .rest_pitch = 0.35f, .settings = st };
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 0, 1e-5) && near(cam.pitch, 0.35, 1e-5), "style 4, running: heading and pitch both return to rest");
 
         /* style 2: also while standing; style 0: never */
-        settings_set("cameraSmoothStyle", "2", &why);
+        settings_set(st, "cameraSmoothStyle", "2", &why);
         cam.yaw = (float)(30 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 0, facing);
         check(near(cam.yaw, 0, 1e-5), "style 2, standing still: still swings back behind her");
-        settings_set("cameraSmoothStyle", "0", &why);
+        settings_set(st, "cameraSmoothStyle", "0", &why);
         cam.yaw = (float)(30 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 30 * deg, 1e-6), "style 0, running: never moves on its own");
-        check(settings_set("cameraSmoothStyle", "3", &why) != 0, "a style the table doesn't have is refused by the store");
+        check(settings_set(st, "cameraSmoothStyle", "3", &why) != 0, "a style the table doesn't have is refused by the store");
 
         /* Follow Terrain: off, nothing; on, climbing tilts the camera up */
-        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f };
+        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f, .settings = st };
         camera_tilt(&cam, &idle, 1, 0.5f);
         check(cam.pitch == 0.35f, "Follow Terrain off (the default): a slope doesn't tilt the camera");
-        settings_set("cameraTerrainTilt", "1", &why);
+        settings_set(st, "cameraTerrainTilt", "1", &why);
         for (int i = 0; i < 100; ++i) camera_tilt(&cam, &idle, 1, 0.5f);
         snprintf(line, sizeof line, "Follow Terrain on: running up a 1-in-2 slope, the camera tilts up to rest less the slope's angle (pitch %.3f, %.3f expected)", cam.pitch, 0.35 - atan(0.5));
         check(near(cam.pitch, 0.35 - atan(0.5), 1e-4), line);
-        settings_set("cameraTerrainTilt", "0", &why);
+        settings_set(st, "cameraTerrainTilt", "0", &why);
         /* follow speed */
-        settings_set("cameraSmoothStyle", "1", &why);
-        settings_set("cameraYawSmoothSpeed", "90", &why);
+        settings_set(st, "cameraSmoothStyle", "1", &why);
+        settings_set(st, "cameraYawSmoothSpeed", "90", &why);
         cam.yaw = (float)(90 * deg);
         for (int i = 0; i < 100; ++i) camera_follow(&cam, &idle, 0, 1, facing);
         check(near(cam.yaw, 0, 1e-4), "Auto Follow Speed 90: a full second to swing back 90 degrees");
-        settings_set("cameraYawSmoothSpeed", "180", &why);
+        settings_set(st, "cameraYawSmoothSpeed", "180", &why);
 
         /* the keys turn the camera with her, unless the left button holds it */
         cam.yaw = 0;
@@ -1506,7 +1512,7 @@ light_done:
         check(near(cam.yaw, 0.5, 1e-6), "but not while the left button holds the camera");
 
         /* the right button */
-        cam = (FollowCam){ .yaw = (float)(90 * deg), .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f };
+        cam = (FollowCam){ .yaw = (float)(90 * deg), .pitch = 0.35f, .dist = 12, .rest_pitch = 0.35f, .settings = st };
         facing = 0;
         FollowCamInput press_r = { .right = 1, .dt = 0.01f };
         camera_drag(&cam, &press_r, 0, &facing);
@@ -1520,17 +1526,17 @@ light_done:
         FollowCamInput down = { .left = 1, .dy = 10, .dt = 0.01f };
         camera_drag(&cam, &down, 0, &facing);
         check(near(cam.pitch, 0.35 + 0.06, 1e-5), "dragging down 10 pixels raises the camera 0.06 radians");
-        settings_set("mouseInvertPitch", "1", &why);
+        settings_set(st, "mouseInvertPitch", "1", &why);
         camera_drag(&cam, &down, 0, &facing);
         check(near(cam.pitch, 0.35, 1e-5), "with Invert Mouse, the same drag lowers it");
-        settings_set("cameraYawMoveSpeed", "90", &why);
+        settings_set(st, "cameraYawMoveSpeed", "90", &why);
         cam.yaw = 0;
         camera_drag(&cam, &(FollowCamInput){ .left = 1, .dx = -px90, .dt = 0.01f }, 0, &facing);
         check(near(cam.yaw, 45 * deg, 1e-4), "Mouse Look Speed 90: the same drag turns half as far");
-        settings_init();
+        settings_free(st); st = settings_new();
 
         /* first person and Head Bob (173m) */
-        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 2.2f, .rest_pitch = 0.35f };
+        cam = (FollowCam){ .yaw = 0, .pitch = 0.35f, .dist = 2.2f, .rest_pitch = 0.35f, .settings = st };
         camera_zoom(&cam, 1, 40);
         check(near(cam.dist, CAMERA_ZOOM_MIN, 1e-6), "zooming in from 2.2 yards stops at the nearest, 2 yards");
         camera_zoom(&cam, 1, 40);
@@ -1546,14 +1552,14 @@ light_done:
         camera_zoom(&cam, 0, 20);
         check(near(cam.dist, 20, 1e-6), "a lowered zoom limit pulls the camera in at once");
         float phase = 0;
-        check(camera_bob(&phase, CAMERA_BOB_STEP / 2, 0.05f) == 0, "Head Bob off (the default): the view doesn't move");
-        settings_set("cameraBobbing", "1", &why);
+        check(camera_bob(st, &phase, CAMERA_BOB_STEP / 2, 0.05f) == 0, "Head Bob off (the default): the view doesn't move");
+        settings_set(st, "cameraBobbing", "1", &why);
         phase = 0;
-        check(near(camera_bob(&phase, CAMERA_BOB_STEP / 2, 0.05f), CAMERA_BOB_HEIGHT, 1e-5), "Head Bob on: mid-step the view is lifted its full height");
+        check(near(camera_bob(st, &phase, CAMERA_BOB_STEP / 2, 0.05f), CAMERA_BOB_HEIGHT, 1e-5), "Head Bob on: mid-step the view is lifted its full height");
         float lift = 1;
-        for (int i = 0; i < 100; ++i) lift = camera_bob(&phase, 0, 0.05f);
+        for (int i = 0; i < 100; ++i) lift = camera_bob(st, &phase, 0, 0.05f);
         check(near(lift, 0, 1e-5) && near(phase, CAMERA_BOB_STEP, 1e-4), "standing still, the view settles at the next foot-down and stays");
-        settings_init();
+        settings_free(st); st = settings_new();
     }
     /* }}} */
 

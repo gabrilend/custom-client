@@ -46,8 +46,8 @@ void camera_drag(FollowCam *c, const FollowCamInput *in, int was_right, double *
     if (in->right && !was_right) *facing = fmod(fmod((double)c->yaw, 2 * PI_D) + 2 * PI_D, 2 * PI_D);
     if (!in->left && !in->right) return;
 
-    float rate   = CAMERA_DRAG_RATE * (float)settings_num("cameraYawMoveSpeed") / 180.0f;
-    float invert = settings_num("mouseInvertPitch") != 0 ? -1.0f : 1.0f;
+    float rate   = CAMERA_DRAG_RATE * (float)settings_num(c->settings, "cameraYawMoveSpeed") / 180.0f;
+    float invert = settings_num(c->settings, "mouseInvertPitch") != 0 ? -1.0f : 1.0f;
     c->yaw   -= in->dx * rate;
     c->pitch += in->dy * rate * invert;            /* dragging down raises the camera, as in the original */
     keep_pitch(c);
@@ -97,9 +97,9 @@ static float step_toward(float at, float to, float most)
 /* {{{ camera_tilt */
 void camera_tilt(FollowCam *c, const FollowCamInput *in, int moving, float slope)
 {
-    if (settings_num("cameraTerrainTilt") == 0 || !moving || in->left || in->right) return;
+    if (settings_num(c->settings, "cameraTerrainTilt") == 0 || !moving || in->left || in->right) return;
     float target = c->rest_pitch - atanf(slope);
-    float most = (float)settings_num("cameraYawSmoothSpeed") * PI_F / 180.0f * in->dt;
+    float most = (float)settings_num(c->settings, "cameraYawSmoothSpeed") * PI_F / 180.0f * in->dt;
     c->pitch = step_toward(c->pitch, target, most);
     keep_pitch(c);
 }
@@ -124,7 +124,7 @@ void camera_zoom(FollowCam *c, float wheel, float zoom_max)
  * The lift is |sin| of the phase over one step: 0 at each foot-down, the
  * full height mid-step. Standing, the phase runs on to the next whole step
  * (lift 0) and stops there. */
-float camera_bob(float *phase, float moved, float dt)
+float camera_bob(const Settings *st, float *phase, float moved, float dt)
 {
     if (moved > 0) *phase += moved;
     else {
@@ -132,7 +132,7 @@ float camera_bob(float *phase, float moved, float dt)
         *phase = fminf(*phase + 2.0f * dt, next);
     }
     *phase = fmodf(*phase, CAMERA_BOB_STEP * 1000);   /* kept small, so the float holds its precision */
-    if (settings_num("cameraBobbing") == 0) return 0;
+    if (settings_num(st, "cameraBobbing") == 0) return 0;
     return CAMERA_BOB_HEIGHT * fabsf(sinf(PI_F * *phase / CAMERA_BOB_STEP));
 }
 /* }}} */
@@ -145,7 +145,7 @@ void camera_follow(FollowCam *c, const FollowCamInput *in, double turned, int mo
 
     /* the style's row; the store only accepts the table's values, so a
      * miss means the store's choices and this table disagree */
-    const char *chosen = settings_text("cameraSmoothStyle");
+    const char *chosen = settings_text(c->settings, "cameraSmoothStyle");
     int row = 0;
     while (row < STYLE_COUNT && strcmp(STYLES[row].value, chosen)) ++row;
     if (row == STYLE_COUNT) {
@@ -154,7 +154,7 @@ void camera_follow(FollowCam *c, const FollowCamInput *in, double turned, int mo
     }
 
     int   drift = STYLES[row].drift(moving);
-    float most  = (float)settings_num("cameraYawSmoothSpeed") * PI_F / 180.0f * in->dt;   /* degrees a second */
+    float most  = (float)settings_num(c->settings, "cameraYawSmoothSpeed") * PI_F / 180.0f * in->dt;   /* degrees a second */
     if (drift & DRIFT_YAW)   c->yaw   = step_toward(c->yaw, (float)facing, most);
     if (drift & DRIFT_PITCH) c->pitch = step_toward(c->pitch, c->rest_pitch, most);
 }

@@ -200,6 +200,7 @@ static char   tile_state[64 * 64];                      /* 0 not loaded, 1 paint
 static int    tiles_loaded, tiles_dropped;               /* for the picture report */
 static double ox, oy;                                    /* the drawing origin, near the start */
 static Mover  elf;
+static Settings *settings;                               /* the player's settings (014-settings.h) */
 static FollowCam view = { .yaw = (float)START_O, .pitch = 0.35f, .dist = 12.0f, .rest_pitch = 0.35f };   /* 031-camera.h */
 static int    cam_held;                                  /* --front: the camera keeps its own heading */
 static float  bob_phase;                                 /* Head Bob's place in her step, yards (camera_bob) */
@@ -356,7 +357,7 @@ static int wall_at(void *ctx, double x0, double y0, double x1, double y1, double
  * 173b6), 1 to 3 (3 x 3 up to 7 x 7) */
 static int tile_reach(void)
 {
-    int r = (int)ceil(settings_num("farclip") / 533.33333);
+    int r = (int)ceil(settings_num(settings, "farclip") / 533.33333);
     return r < 1 ? 1 : r > 3 ? 3 : r;
 }
 static int tile_loaded(int x, int y) { return tile_state[x * 64 + y] == 1; }   /* for the horizon (173s) */
@@ -483,11 +484,12 @@ int main(int argc, char **argv)
 
     /* the settings: defaults, then the player's file; a line it refuses is
      * named on the terminal and skipped (173b1) */
-    settings_init();
-    if (settings_file) settings_load(settings_file, stderr);
+    settings = settings_new();
+    view.settings = settings;                           /* the camera follows these (031-camera.h) */
+    if (settings_file) settings_load(settings, settings_file, stderr);
     else fprintf(stderr, "settings: no --settings file given; every setting is at its default\n");
     int win_w, win_h;
-    settings_resolution(settings_text("gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
+    settings_resolution(settings_text(settings, "gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
 
     WWhy why;
     maps_world_init(&world, maps, map_id);
@@ -510,12 +512,12 @@ int main(int argc, char **argv)
     /* the window as the Resolution panel says (173b5): fullscreen at the
      * resolution unless windowed; maximized means also borderless; vsync
      * and resizing as set (both also follow later changes, below) */
-    int vsync_on = settings_num("gxVSync") != 0, resize_locked = settings_num("windowResizeLock") != 0;
-    int windowed = settings_num("gxWindow") != 0, maximized = windowed && settings_num("gxMaximize") != 0;
+    int vsync_on = settings_num(settings, "gxVSync") != 0, resize_locked = settings_num(settings, "windowResizeLock") != 0;
+    int windowed = settings_num(settings, "gxWindow") != 0, maximized = windowed && settings_num(settings, "gxMaximize") != 0;
     SetConfigFlags((vsync_on ? FLAG_VSYNC_HINT : 0) | (resize_locked ? 0 : FLAG_WINDOW_RESIZABLE)
                    | (windowed ? 0 : FLAG_FULLSCREEN_MODE) | (maximized ? FLAG_WINDOW_MAXIMIZED | FLAG_WINDOW_UNDECORATED : 0));
     InitWindow(win_w, win_h, "Everland Ghostsong");
-    texture_filtering((int)settings_num("textureFilteringMode"));   /* before any picture is sent (173b6) */
+    texture_filtering((int)settings_num(settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = LoadShaderFromMemory(FIGURE_VS, MODEL_FS);
     model_sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(model_sh, "bones");   /* 041-figure.c puts each figure's bone picture in that material slot */
@@ -614,11 +616,11 @@ int main(int argc, char **argv)
         if (IsKeyPressed(KEY_ESCAPE)) break;            /* the owner, 2026-10-06: Escape quits until there are menus (173b2) */
         /* Vertical Sync and Disable Resize, live (173b5): a change to
          * either (from the menu, when it exists) takes effect at once */
-        if ((settings_num("gxVSync") != 0) != vsync_on) {
+        if ((settings_num(settings, "gxVSync") != 0) != vsync_on) {
             vsync_on = !vsync_on;
             if (vsync_on) SetWindowState(FLAG_VSYNC_HINT); else ClearWindowState(FLAG_VSYNC_HINT);
         }
-        if ((settings_num("windowResizeLock") != 0) != resize_locked) {
+        if ((settings_num(settings, "windowResizeLock") != 0) != resize_locked) {
             resize_locked = !resize_locked;
             if (resize_locked) ClearWindowState(FLAG_WINDOW_RESIZABLE); else SetWindowState(FLAG_WINDOW_RESIZABLE);
         }
@@ -637,7 +639,7 @@ int main(int argc, char **argv)
         FollowCamInput mouse = { .left = drag_l, .right = drag_r, .dx = d.x, .dy = d.y, .dt = dt };
         camera_drag(&view, &mouse, was_r, &elf.o);
         float wheel = GetMouseWheelMove();
-        float zoom_max = ZOOM_BASE * (float)settings_num("cameraDistanceMaxFactor");
+        float zoom_max = ZOOM_BASE * (float)settings_num(settings, "cameraDistanceMaxFactor");
         camera_zoom(&view, wheel, zoom_max);            /* in past the nearest is first person (173m) */
         if (IsKeyPressed(KEY_KP_DIVIDE)) walking = !walking;   /* the stock game's run/walk toggle key (173i) */
         MoverInput in = {
@@ -704,7 +706,7 @@ int main(int argc, char **argv)
         double creature_t0 = GetTime();
         {
             int posed = 0;
-            float reach2 = fminf((float)settings_num("farclip"), CREATURE_SEEN_REACH);
+            float reach2 = fminf((float)settings_num(settings, "farclip"), CREATURE_SEEN_REACH);
             reach2 *= reach2;
             for (int i = 0; i < nstanding; ++i) {
                 const Spawn *sp = &spawns.spawns[standing[i].spawn];
@@ -738,7 +740,7 @@ int main(int argc, char **argv)
         Vector3 look = at;                               /* where the camera points */
         {
             float stepped = elf.grounded && !elf.swimming ? (float)hypot(elf.x - before_x, elf.y - before_y) : 0;
-            float lift = camera_bob(&bob_phase, stepped, dt);   /* runs in third person too, so the phase carries over */
+            float lift = camera_bob(settings, &bob_phase, stepped, dt);   /* runs in third person too, so the phase carries over */
             if (first_person) {
                 eye = (Vector3){ at.x, at.y, (float)elf.z + ELF_HEIGHT * EYE_SHARE + lift };
                 look = (Vector3){ eye.x + cosf(view.yaw) * cosf(view.pitch), eye.y + sinf(view.yaw) * cosf(view.pitch), eye.z - sinf(view.pitch) };
@@ -758,7 +760,7 @@ int main(int argc, char **argv)
                  * the ground and looks up at her; off: it stops lowering, the
                  * pitch held where the camera meets the ground (173m) */
                 eye.z = floor_z + 0.6f;
-                if (settings_num("cameraPivot") == 0 && view.dist > 0.1f) {
+                if (settings_num(settings, "cameraPivot") == 0 && view.dist > 0.1f) {
                     float s = (eye.z - at.z) / view.dist;
                     float hold = asinf(s < -1 ? -1 : s > 1 ? 1 : s);
                     if (view.pitch < hold) view.pitch = hold;
@@ -767,7 +769,7 @@ int main(int argc, char **argv)
             /* Water Collision (173m): the camera stays on her side of the
              * water's surface: above it while her head is above, below while
              * under */
-            if (settings_num("cameraWaterCollision") != 0) {
+            if (settings_num(settings, "cameraWaterCollision") != 0) {
                 int wk = 0;
                 float surface = liquid_surface(waters, eye.x + ox, eye.y + oy, &wk);
                 float head = at.z;
@@ -778,7 +780,7 @@ int main(int argc, char **argv)
             }
         }
         Camera3D cam = { .position = eye, .target = look, .up = { 0, 0, 1 }, .fovy = 60, .projection = CAMERA_PERSPECTIVE };
-        TIMED(PH_DOODADS_ANIMATE, doodads_animate((uint32_t)clock_ms, dt, eye, look, (float)settings_num("particleDensity")));   /* moving doodads, and particles near the camera */
+        TIMED(PH_DOODADS_ANIMATE, doodads_animate((uint32_t)clock_ms, dt, eye, look, (float)settings_num(settings, "particleDensity")));   /* moving doodads, and particles near the camera */
         SetShaderValue(model_sh, eye_m, &eye, SHADER_UNIFORM_VEC3);
         /* }}} */
 
@@ -794,7 +796,7 @@ int main(int argc, char **argv)
         int under = eye_surface > -10000 && eye.z < eye_surface;
         int lit = light_at(&lights, map_id, (float)elf.x, (float)elf.y, (float)elf.z, hours, under ? LIGHT_UNDERWATER : LIGHT_CLEAR, &light);
         /* the fog ends by the view distance at the latest (173b6) */
-        float farclip = (float)settings_num("farclip");
+        float farclip = (float)settings_num(settings, "farclip");
         if (light.fog_end > farclip) { light.fog_start *= farclip / light.fog_end; light.fog_end = farclip; }
         if (lit != light_id) { light_id = lit; printf("light: now light %d\n", lit); }
         sky_light_shader(model_sh, &light);
@@ -806,7 +808,7 @@ int main(int argc, char **argv)
          * projection is loaded directly) */
         rlMatrixMode(RL_PROJECTION);
         rlLoadIdentity();
-        rlMultMatrixf(MatrixToFloat(MatrixPerspective(60 * DEG2RAD, (double)GetScreenWidth() / GetScreenHeight(), 0.3, fmax(settings_num("farclip") * 1.25 + 100, (HORIZON_REACH + 1) * 533.33))));   /* out to the far horizon (173s) */
+        rlMultMatrixf(MatrixToFloat(MatrixPerspective(60 * DEG2RAD, (double)GetScreenWidth() / GetScreenHeight(), 0.3, fmax(settings_num(settings, "farclip") * 1.25 + 100, (HORIZON_REACH + 1) * 533.33))));   /* out to the far horizon (173s) */
         rlMatrixMode(RL_MODELVIEW);
         rlDisableBackfaceCulling();
         TIMED(PH_SKY, sky_draw(eye, &light); rlDrawRenderBatchActive());   /* first, behind everything */
@@ -835,7 +837,7 @@ int main(int argc, char **argv)
         int creatures_drawn = 0;
         for (int i = 0; i < nstanding; ++i) {            /* the world's creatures (173t): within sight, and not behind the camera */
             const Spawn *sp = &spawns.spawns[standing[i].spawn];
-            double dx = sp->x - elf.x, dy = sp->y - elf.y, far = fmin(settings_num("farclip"), CREATURE_SEEN_REACH);
+            double dx = sp->x - elf.x, dy = sp->y - elf.y, far = fmin(settings_num(settings, "farclip"), CREATURE_SEEN_REACH);
             if (dx * dx + dy * dy > far * far) continue;
             Vector3 to = { (float)(sp->x - ox) - eye.x, (float)(sp->y - oy) - eye.y, (float)sp->z - eye.z }, ahead = Vector3Subtract(look, eye);
             if (Vector3DotProduct(to, Vector3Normalize(ahead)) < -4.0f * standing[i].fig.scale) continue;   /* wholly behind: 4 yards covers the biggest townsfolk */
@@ -899,13 +901,13 @@ int main(int argc, char **argv)
     if (!shot && windowed && !maximized && !IsWindowMaximized()) {
         char size[32];
         snprintf(size, sizeof size, "%dx%d", GetScreenWidth(), GetScreenHeight());
-        if (!strcmp(size, settings_text("gxResolution"))) {
+        if (!strcmp(size, settings_text(settings, "gxResolution"))) {
             /* not resized: nothing to keep */
-        } else if (settings_set("gxResolution", size, &why)) {
+        } else if (settings_set(settings, "gxResolution", size, &why)) {
             fprintf(stderr, "settings: the window's size isn't kept: %s\n", why.text);   /* smaller than 640x480 */
         } else {
             if (!settings_file) printf("settings: the window is now %s, but no --settings file was given to keep it in\n", size);
-            else if (settings_save(settings_file, &why)) fprintf(stderr, "settings: the window's size %s could not be saved: %s\n", size, why.text);
+            else if (settings_save(settings, settings_file, &why)) fprintf(stderr, "settings: the window's size %s could not be saved: %s\n", size, why.text);
             else printf("settings: the window's size %s saved to %s\n", size, settings_file);
         }
     }

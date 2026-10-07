@@ -29,31 +29,35 @@ A Setting, field by field:
 - `type SettingChoice`
 - `type SettingDecl`
 - `type Setting`
-- `void settings_init(void);`
-  Puts every setting at its default. Called once at start, before load.
-- `const Setting *settings_find(const char *name);`
+- `typedef struct Settings Settings;`
+  A store of settings (the handle: docs/001, "Handles"), every setting at
+  its default; freed with settings_free. More than one may live at once
+  (a profile per server, a test's own).
+- `Settings *settings_new(void);`
+- `void settings_free(Settings *st);`
+- `const Setting *settings_find(const Settings *st, const char *name);`
   The setting by name, or NULL when there is none.
 - `int settings_count(void);`
   How many settings, and the i-th in declaration order (for the menu).
-- `const Setting *settings_at(int i);`
-- `WErr settings_set(const char *name, const char *value, WWhy *why);`
+- `const Setting *settings_at(const Settings *st, int i);`
+- `WErr settings_set(Settings *st, const char *name, const char *value, WWhy *why);`
   Changes a setting. W_OK; otherwise W_ERR_REFUSED: the value is refused, the
   setting is unchanged, and `why` says why (unknown name, out of range,
   not one of the choices, not a resolution ...).
-- `int settings_load(const char *path, FILE *report);`
+- `int settings_load(Settings *st, const char *path, FILE *report);`
   Reads the player's file. Each line that names an unknown setting,
   holds a refused value, or isn't `SET name "value"` is written to
   `report` with its line number and skipped. Blank lines and lines
   starting with # are skipped quietly. A missing file is reported once
   and leaves every setting at its default. Returns the number of lines
   skipped for a problem.
-- `WErr settings_save(const char *path, WWhy *why);`
-  Writes every setting that differs from its default to `path`. 0 on
-  success; otherwise `why` says why.
-- `double settings_num_at(const char *name, const char *file, int line);`
+- `WErr settings_save(const Settings *st, const char *path, WWhy *why);`
+  Writes every setting that differs from its default to `path`. W_OK, or
+  W_ERR_IO with `why`.
+- `double settings_num_at(const Settings *st, const char *name, const char *file, int line);`
   The value of a setting, by name. An unknown name is a mistake in the
   code, not in the player's file: it stops the client with the name and
   the file and line asking for it.
-- `const char *settings_text_at(const char *name, const char *file, int line);`
+- `const char *settings_text_at(const Settings *st, const char *name, const char *file, int line);`
 - `int settings_resolution(const char *value, int *width, int *height);`
   gxResolution's value split into width and height; 0 on success.

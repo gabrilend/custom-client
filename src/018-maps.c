@@ -52,7 +52,7 @@ MapTile *maps_load_tile(const char *dir, int map_id, int tx, int ty, WWhy *why)
     char path[640];
     snprintf(path, sizeof path, "%s/%03d%02d%02d.map", dir, map_id, tx, ty);
     FILE *f = fopen(path, "rb");
-    if (!f) { w_fail(why, W_ERR_CORRUPT, "no tile file %s", path); return NULL; }
+    if (!f) { w_fail(why, W_ERR_NOT_FOUND, "no tile file %s", path); return NULL; }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -179,27 +179,30 @@ void maps_world_init(MapWorld *w, const char *dir, int map_id)
     memset(w, 0, sizeof *w);
     snprintf(w->dir, sizeof w->dir, "%s", dir);
     w->map_id = map_id;
+    pthread_mutex_init(&w->lock, NULL);
 }
 /* Two threads ask (the main one, and the reading-ahead one preparing
  * ground: 173u). A tile once in its slot never changes or goes until
  * maps_world_free, so a filled slot is read without the lock; an empty
  * one is filled under it, checked again inside so it loads only once. */
-static pthread_mutex_t world_lock = PTHREAD_MUTEX_INITIALIZER;
 MapTile *maps_world_tile(MapWorld *w, int tx, int ty)
 {
     if (tx < 0 || tx >= 64 || ty < 0 || ty >= 64) return NULL;
     MapTile **slot = &w->tiles[tx * 64 + ty];
     MapTile *t = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
     if (!t) {
-        pthread_mutex_lock(&world_lock);
+        pthread_mutex_lock(&w->lock);
         t = *slot;
         if (!t) {
             WWhy why;
             t = maps_load_tile(w->dir, w->map_id, tx, ty, &why);
-            if (!t) t = MAPS_NO_TILE;                    /* none there: asked once, remembered */
+            /* none there (open sea, the map's edge): asked once, remembered,
+             * quietly; a file there but broken is said, then remembered as none */
+            if (!t && why.code != W_ERR_NOT_FOUND) fprintf(stderr, "maps: %s; the tile counts as having no ground\n", why.text);
+            if (!t) t = MAPS_NO_TILE;
             __atomic_store_n(slot, t, __ATOMIC_RELEASE);
         }
-        pthread_mutex_unlock(&world_lock);
+        pthread_mutex_unlock(&w->lock);
     }
     return t == MAPS_NO_TILE ? NULL : t;
 }
@@ -214,5 +217,6 @@ float maps_world_height(MapWorld *w, float x, float y, float *gx, float *gy)
 void maps_world_free(MapWorld *w)
 {
     for (int i = 0; i < 64 * 64; ++i) maps_free_tile(w->tiles[i]);
+    pthread_mutex_destroy(&w->lock);
 }
 /* }}} */

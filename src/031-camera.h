@@ -35,6 +35,8 @@
 #ifndef EG_CAMERA_H
 #define EG_CAMERA_H
 
+#include "014-settings.h"
+
 #define CAMERA_PITCH_MIN  (-0.4f)
 #define CAMERA_PITCH_MAX  1.45f
 #define CAMERA_DRAG_RATE  0.006f      /* radians a pixel at a cameraYawMoveSpeed of 180 */
@@ -45,6 +47,8 @@
 typedef struct {
     float yaw, pitch, dist;
     float rest_pitch;
+    const Settings *settings;         /* the settings it follows (mouse speed, following style, Head Bob ...);
+                                       * the caller's, which must outlive the camera */
 } FollowCam;
 
 typedef struct {
@@ -92,8 +96,8 @@ void camera_zoom(FollowCam *c, float wheel, float zoom_max);
  * ground this frame; the lift is CAMERA_BOB_HEIGHT times the rise of one
  * step every CAMERA_BOB_STEP yards. Standing still (moved 0), the phase
  * runs on to the next foot-down at 2 yards a second, so the view settles
- * rather than freezing mid-step. 0 when the setting is off. */
-float camera_bob(float *phase, float moved, float dt);
+ * rather than freezing mid-step. 0 when the setting is off (in `st`). */
+float camera_bob(const Settings *st, float *phase, float moved, float dt);
 
 /* The angle from `from` to `to` the shorter way round, in -pi to pi. */
 float camera_turn_between(float from, float to);

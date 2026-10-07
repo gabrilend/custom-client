@@ -21,12 +21,13 @@
 
 /* {{{ the scrambling table
  * 1280 words made by a fixed recipe every MPQ reader builds: five rows of
- * 256 (index slot, two name checks, file key, decryption). */
+ * 256 (index slot, two name checks, file key, decryption). Not state: a
+ * constant, worked out once on first use (by whichever thread asks first,
+ * the others waiting) and never changed after, so every chain shares it. */
 static uint32_t CRYPT[1280];
-static int crypt_ready;
-static void crypt_init(void)
+static pthread_once_t crypt_once = PTHREAD_ONCE_INIT;
+static void crypt_make(void)
 {
-    if (crypt_ready) return;
     uint32_t seed = 0x00100001;
     for (int i1 = 0; i1 < 256; ++i1) {
         int i2 = i1;
@@ -39,8 +40,8 @@ static void crypt_init(void)
             i2 += 256;
         }
     }
-    crypt_ready = 1;
 }
+static void crypt_init(void) { pthread_once(&crypt_once, crypt_make); }
 /* }}} */
 
 /* {{{ mpq_hash

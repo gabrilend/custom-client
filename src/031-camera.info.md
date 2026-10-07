@@ -68,13 +68,13 @@ A FollowCamInput, field by field (all for this frame only):
   nearest. Called every frame (wheel 0 too) so a lowered limit pulls the
   camera in at once. Leaving first person also brings a pitch looking up
   back within the third-person range.
-- `float camera_bob(float *phase, float moved, float dt);`
+- `float camera_bob(const Settings *st, float *phase, float moved, float dt);`
   Head Bob (cameraBobbing, 173m): how far (yards, up) the first-person
   view is lifted this frame. `phase` (yards, kept by the caller between
   frames, start 0) runs on by `moved`, how far she travelled along the
   ground this frame; the lift is CAMERA_BOB_HEIGHT times the rise of one
   step every CAMERA_BOB_STEP yards. Standing still (moved 0), the phase
   runs on to the next foot-down at 2 yards a second, so the view settles
-  rather than freezing mid-step. 0 when the setting is off.
+  rather than freezing mid-step. 0 when the setting is off (in `st`).
 - `float camera_turn_between(float from, float to);`
   The angle from `from` to `to` the shorter way round, in -pi to pi.

@@ -18,6 +18,7 @@
 
 #include "013-errors.h"
 
+#include <pthread.h>
 #include <stdint.h>
 
 #define MAPS_GRID_SIZE      533.33333f       /* yards per tile (SIZE_OF_GRIDS) */
@@ -40,6 +41,7 @@ typedef struct {
     char      dir[512];
     int       map_id;
     MapTile  *tiles[64 * 64];     /* NULL: not tried; MAPS_NO_TILE: tried, none */
+    pthread_mutex_t lock;         /* held while a tile is loaded into its slot: two threads ask (173u) */
 } MapWorld;
 
 #define MAPS_NO_TILE ((MapTile *)1)
