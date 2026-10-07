@@ -877,6 +877,16 @@ static void run_particles(DoodadModel *md, uint32_t ms, float dt, Vector3 eye, f
         for (int k = 0; k < md->nemitters; ++k) {
             EmitterRun *run = &md->runs[c * md->nemitters + k];
             if (!near_eye) { run->n = 0; continue; }       /* far copies hold none */
+            /* seeded by where the copy stands and which emitter it is, so the
+             * same copy throws the same sparks every run, whatever order the
+             * tiles loaded in (a memory address would differ run to run) */
+            if (!run->rng) {
+                uint32_t bits[3];
+                memcpy(bits, at + 12, sizeof bits);
+                uint32_t h = 2166136261u;
+                for (int q = 0; q < 3; ++q) h = (h ^ bits[q]) * 16777619u;
+                run->rng = (h ^ (uint32_t)(k + 1) * 2654435761u) | 1;
+            }
             /* the emitter's bone in the world: the copy's place times the bone's pose */
             const float *b = md->poses[md->emitters[k].bone];
             float w[16];

@@ -1346,6 +1346,13 @@ anim_done:
             snprintf(line, sizeof line, "at density 0.3, %d sparks live after 10 s (about 6: rate x life x 0.3)", thin.n);
             check(thin.n >= 3 && thin.n <= 9, line);
             particles_free_run(&thin);
+            /* a run repeats exactly: the same seed, the same sparks (a test
+             * scene's pictures and logs depend on it) */
+            EmitterRun r1 = { .rng = 12345 }, r2 = { .rng = 12345 };
+            for (int t = 0; t < 100; ++t) { particles_step(&a, &em[0], &r1, w, st, (uint32_t)(t * 10), 0.01f, 1); particles_step(&a, &em[0], &r2, w, st, (uint32_t)(t * 10), 0.01f, 1); }
+            check(r1.n == r2.n && r1.n > 0 && !memcmp(r1.ps, r2.ps, sizeof *r1.ps * (size_t)r1.n), "the same seed throws the same sparks");
+            particles_free_run(&r1);
+            particles_free_run(&r2);
             particles_free_run(&run);
             free(em);
             anim_free(&a);

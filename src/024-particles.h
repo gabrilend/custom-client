@@ -58,7 +58,7 @@ typedef struct { float p[3], v[3]; float age, life, vary; int cell; } Particle;
 typedef struct {
     Particle *ps;  int n, cap;
     float     carry;                  /* part of a particle owed from last frame */
-    uint32_t  rng;
+    uint32_t  rng;                    /* its random numbers' state: the caller seeds it (by which emitter on which copy), so a run repeats exactly; 0: a fixed seed */
 } EmitterRun;
 
 /* The model's emitters (from the model file kept in `a`). W_OK, or a code with `why`. */

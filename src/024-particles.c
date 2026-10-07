@@ -112,7 +112,7 @@ static float track(const Anim *a, const AnimTrack *tr, int seq, uint32_t ms, flo
 }
 void particles_step(const Anim *a, const Emitter *e, EmitterRun *run, const float w[16], int seq, uint32_t ms, float dt, float density)
 {
-    if (!run->rng) run->rng = 0x9e3779b9u ^ (uint32_t)(uintptr_t)run;
+    if (!run->rng) run->rng = 0x9e3779b9u;           /* unseeded by the caller: one fixed seed (never a memory address: a run must repeat exactly) */
     float gravity = track(a, &e->gravity, seq, ms, 0), drag = e->drag;
     /* the living: age, fall, slow, move; the dead are dropped */
     int keep = 0;
