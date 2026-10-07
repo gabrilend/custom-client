@@ -22,6 +22,7 @@
 #define EG_SKY_H
 
 #include "026-light.h"
+#include "042-doodads.h"
 #include "raylib.h"
 
 /* A sky (the handle: docs/001, "Handles"): the dome made and sent once.
@@ -34,6 +35,6 @@ void sky_free(Sky *sk);
  * fog_col (vec3) and fog_range (vec2: where the fog starts and ends,
  * yards). Every world shader (ground, doodads, figures) declares them. */
 void sky_light_shader(Shader sh, const LightNow *light);
-void sky_draw(Sky *sk, Vector3 eye, const LightNow *light);
+void sky_draw(Sky *sk, Doodads *dd, Vector3 eye, const LightNow *light);   /* the skybox the light names is drawn by `dd` */
 
 #endif

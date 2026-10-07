@@ -140,80 +140,130 @@ typedef struct {
 } DoodadModel;
 #define PARTICLE_REACH 150.0f         /* yards: copies further from the camera run no particles */
 
-static MpqChain *chain;
-static CollideWorld *solids;          /* where placed copies' solid shapes go (doodads_init) */
-static DoodadModel    *models;   static int nmodels, models_cap;
-static struct { char name[260]; Texture2D tex; } *pictures;
-static int       npictures, pictures_cap;
 /* buildings: the model entry holding its pieces, and its root (for the
  * furnishings, placed when the building is) */
 typedef struct { WmoPool pool; int kind; } BuildingPool;   /* a part's pool and its LiquidType id (173r) */
 typedef struct { int model; WmoRoot root; BuildingPool *pools; int npools; } Building;
-static LiquidWorld *liquids;          /* where placed buildings' pools go (doodads_init) */
-static Water       *pools;            /* where placed buildings' pools are drawn (doodads_init) */
-static double origin_x, origin_y;     /* the drawing origin, from doodads_add_tile (pools are filed in world coordinates) */
-static Building *buildings; static int nbuildings, buildings_cap;
-static int       skipped_pieces, moving_models, emitting_models;
-static int       doodad_orders;       /* draw orders sent since last asked (for the picture report, 173u) */
-static Shader    shader;
-static Material  material;
-static int       loc_eye, loc_cutoff, loc_unlit, loc_indoor, loc_layers, loc_combine, loc_set0, loc_set1, loc_move0, loc_move1, loc_tint, loc_skinned, loc_per_copy;
-static uint32_t  clock_ms;            /* the world's animation clock (doodads_animate) */
-static int       skybox = -1;         /* the model drawn round the camera (doodads_skybox), -1 none */
-static Vector3   view_right = { 1, 0, 0 }, view_up = { 0, 0, 1 };   /* the camera's, for particles (doodads_animate) */
+/* placements by tile (173s): see "placements by tile" below */
+typedef struct { uint32_t uid; int building, which, set; Matrix at; } Placement;
+typedef struct { int tile; Placement *p; int n; } TileRecord;
+typedef struct { uint32_t uid; int building, tile; } Seen;
+
+/* a doodads drawer (the handle: 042-doodads.h): every model and building
+ * read, their copies, the placements by tile, and the shader */
+struct Doodads {
+    MpqChain     *chain;
+    CollideWorld *solids;             /* where placed copies' solid shapes go */
+    LiquidWorld  *liquids;            /* where placed buildings' pools go (for the mover) */
+    Water        *pools;              /* where placed buildings' pools are drawn */
+    DoodadModel  *models;     int nmodels, models_cap;
+    struct { char name[260]; Texture2D tex; } *pictures;
+    int           npictures, pictures_cap;
+    Building     *buildings;  int nbuildings, buildings_cap;
+    double        origin_x, origin_y; /* the drawing origin, from doodads_add_tile (pools are filed in world coordinates) */
+    int           skipped_pieces, moving_models, emitting_models;
+    int           doodad_orders;      /* draw orders sent since last asked (for the picture report, 173u) */
+    Shader        shader;
+    Material      material;
+    int           loc_eye, loc_cutoff, loc_unlit, loc_indoor, loc_layers, loc_combine, loc_set0, loc_set1, loc_move0, loc_move1, loc_tint, loc_skinned, loc_per_copy;
+    uint32_t      clock_ms;           /* the world's animation clock (doodads_animate) */
+    int           skybox;             /* the model drawn round the camera (doodads_skybox), -1 none */
+    Vector3       view_right, view_up;   /* the camera's, for particles (doodads_animate) */
+    TileRecord   *records;    int nrecords;
+    Seen         *seen_list;  int nseen_list, seen_list_cap;
+    int          *seen_index; int seen_index_cap;   /* a power of two, at least twice nseen_list */
+};
 /* }}} */
 
-/* {{{ doodads_init */
-WErr doodads_init(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
+/* {{{ doodads_new */
+/* {{{ doodads_free: everything the drawer read and made */
+void doodads_free(Doodads *dd)
 {
-    chain = c;
-    solids = collide;
-    liquids = liquid_world;
-    pools = water;
-    shader = LoadShaderFromMemory(VS, FS);
-    if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the doodad shader didn't compile (see Raylib's messages above)"); return why->code; }
-    shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(shader, "instanceTransform");
-    loc_eye = GetShaderLocation(shader, "eye");
-    loc_cutoff = GetShaderLocation(shader, "cutoff");
-    loc_unlit = GetShaderLocation(shader, "unlit");
-    loc_indoor = GetShaderLocation(shader, "indoor");
-    loc_layers = GetShaderLocation(shader, "layers");
-    loc_combine = GetShaderLocation(shader, "combine");
-    loc_set0 = GetShaderLocation(shader, "set0");
-    loc_set1 = GetShaderLocation(shader, "set1");
-    loc_move0 = GetShaderLocation(shader, "move0");
-    loc_move1 = GetShaderLocation(shader, "move1");
-    loc_tint = GetShaderLocation(shader, "tint");
-    loc_skinned = GetShaderLocation(shader, "skinned");
-    loc_per_copy = GetShaderLocation(shader, "per_copy");
-    shader.locs[SHADER_LOC_MAP_NORMAL] = GetShaderLocation(shader, "bones");   /* use_bones puts the model's bone picture in that slot */
-    shader.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(shader, "texture1");   /* the second layer's slot */
-    material = LoadMaterialDefault();
-    material.shader = shader;
-    return 0;
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
+        for (int k = 0; k < md->npieces; ++k) UnloadMesh(md->pieces[k].mesh);
+        free(md->pieces);
+        free(md->copies); free(md->copy_tile);
+        if (md->anim) { anim_free(md->anim); free(md->anim); }
+        free(md->poses);
+        if (md->bones.id) UnloadTexture(md->bones);
+        free(md->bone_data);
+        for (int k = 0; k < md->nruns; ++k) particles_free_run(&md->runs[k]);
+        free(md->runs); free(md->emitters); free(md->emit_pic);
+        free(md->solid);
+        free(md->vis); free(md->vis_idx);
+    }
+    free(dd->models);
+    for (int i = 0; i < dd->npictures; ++i) UnloadTexture(dd->pictures[i].tex);
+    free(dd->pictures);
+    for (int i = 0; i < dd->nbuildings; ++i) {
+        Building *b = &dd->buildings[i];
+        wmo_free_root(&b->root);
+        for (int k = 0; k < b->npools; ++k) { free(b->pools[k].pool.height); free(b->pools[k].pool.cell); }
+        free(b->pools);
+    }
+    free(dd->buildings);
+    for (int i = 0; i < dd->nrecords; ++i) free(dd->records[i].p);
+    free(dd->records); free(dd->seen_list); free(dd->seen_index);
+    if (IsShaderReady(dd->shader)) UnloadShader(dd->shader);
+    free(dd);
+}
+/* }}} */
+
+Doodads *doodads_new(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
+{
+    Doodads *dd = calloc(1, sizeof *dd);
+    dd->skybox = -1;
+    dd->view_right = (Vector3){ 1, 0, 0 };
+    dd->view_up = (Vector3){ 0, 0, 1 };
+    dd->chain = c;
+    dd->solids = collide;
+    dd->liquids = liquid_world;
+    dd->pools = water;
+    dd->shader = LoadShaderFromMemory(VS, FS);
+    if (!IsShaderReady(dd->shader)) { w_fail(why, W_ERR_GPU, "the doodad shader didn't compile (see Raylib's messages above)"); doodads_free(dd); return NULL; }
+    dd->shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(dd->shader, "instanceTransform");
+    dd->loc_eye = GetShaderLocation(dd->shader, "eye");
+    dd->loc_cutoff = GetShaderLocation(dd->shader, "cutoff");
+    dd->loc_unlit = GetShaderLocation(dd->shader, "unlit");
+    dd->loc_indoor = GetShaderLocation(dd->shader, "indoor");
+    dd->loc_layers = GetShaderLocation(dd->shader, "layers");
+    dd->loc_combine = GetShaderLocation(dd->shader, "combine");
+    dd->loc_set0 = GetShaderLocation(dd->shader, "set0");
+    dd->loc_set1 = GetShaderLocation(dd->shader, "set1");
+    dd->loc_move0 = GetShaderLocation(dd->shader, "move0");
+    dd->loc_move1 = GetShaderLocation(dd->shader, "move1");
+    dd->loc_tint = GetShaderLocation(dd->shader, "tint");
+    dd->loc_skinned = GetShaderLocation(dd->shader, "skinned");
+    dd->loc_per_copy = GetShaderLocation(dd->shader, "per_copy");
+    dd->shader.locs[SHADER_LOC_MAP_NORMAL] = GetShaderLocation(dd->shader, "bones");   /* use_bones puts the model's bone picture in that slot */
+    dd->shader.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(dd->shader, "texture1");   /* the second layer's slot */
+    dd->material = LoadMaterialDefault();
+    dd->material.shader = dd->shader;
+    return dd;
 }
 /* }}} */
 
 /* {{{ static picture: a picture by archive name, loaded once; -1 if unreadable */
-static int picture(const char *name)
+static int picture(Doodads *dd, const char *name)
 {
-    for (int i = 0; i < npictures; ++i) if (!strcasecmp(pictures[i].name, name)) return i;
+    for (int i = 0; i < dd->npictures; ++i) if (!strcasecmp(dd->pictures[i].name, name)) return i;
     size_t len;
     const char *from;
-    unsigned char *s = mpq_chain_read(chain, name, &len, &from);
+    unsigned char *s = mpq_chain_read(dd->chain, name, &len, &from);
     if (!s) { fprintf(stderr, "doodads: the picture %s is in none of the client's archives; pieces using it are left out\n", name); return -1; }
     WWhy why;
     Texture2D t;
     int bad = texture_from_blp(s, len, &t, &why);   /* sent compressed when stored so (173u) */
     free(s);
     if (bad) { fprintf(stderr, "doodads: the picture %s: %s; pieces using it are left out\n", name, why.text); return -1; }
-    if (npictures == pictures_cap) {
-        pictures_cap = pictures_cap ? pictures_cap * 2 : 256;
-        pictures = realloc(pictures, sizeof *pictures * pictures_cap);
+    if (dd->npictures == dd->pictures_cap) {
+        dd->pictures_cap = dd->pictures_cap ? dd->pictures_cap * 2 : 256;
+        dd->pictures = realloc(dd->pictures, sizeof *dd->pictures * dd->pictures_cap);
     }
-    snprintf(pictures[npictures].name, sizeof pictures[npictures].name, "%s", name);
-    pictures[npictures].tex = t;
-    return npictures++;
+    snprintf(dd->pictures[dd->npictures].name, sizeof dd->pictures[dd->npictures].name, "%s", name);
+    dd->pictures[dd->npictures].tex = t;
+    return dd->npictures++;
 }
 /* }}} */
 
@@ -221,14 +271,14 @@ static int picture(const char *name)
  * The ground files name models with .mdx or .m2; the file in the archives
  * is always .m2, with its first view in <name>00.skin. A model that can't
  * be read is kept with no pieces (so it is reported once, not per copy). */
-static int load_model(const char *name)
+static int load_model(Doodads *dd, const char *name)
 {
-    for (int i = 0; i < nmodels; ++i) if (!strcasecmp(models[i].name, name)) return i;
-    if (nmodels == models_cap) {
-        models_cap = models_cap ? models_cap * 2 : 256;
-        models = realloc(models, sizeof *models * models_cap);
+    for (int i = 0; i < dd->nmodels; ++i) if (!strcasecmp(dd->models[i].name, name)) return i;
+    if (dd->nmodels == dd->models_cap) {
+        dd->models_cap = dd->models_cap ? dd->models_cap * 2 : 256;
+        dd->models = realloc(dd->models, sizeof *dd->models * dd->models_cap);
     }
-    DoodadModel *md = &models[nmodels];
+    DoodadModel *md = &dd->models[dd->nmodels];
     memset(md, 0, sizeof *md);
     snprintf(md->name, sizeof md->name, "%s", name);
 
@@ -239,19 +289,19 @@ static int load_model(const char *name)
     size_t mlen, slen;
     const char *from;
     snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(chain, path, &mlen, &from);
+    unsigned char *m2 = mpq_chain_read(dd->chain, path, &mlen, &from);
     snprintf(path, sizeof path, "%s00.skin", base);
-    unsigned char *skin = mpq_chain_read(chain, path, &slen, &from);
+    unsigned char *skin = mpq_chain_read(dd->chain, path, &slen, &from);
     M2Model mod;
     WWhy why;
     if (!m2 || !skin) {
         fprintf(stderr, "doodads: %s: %s is in none of the client's archives; left out\n", name, !m2 ? "the .m2" : "its 00.skin");
         free(m2); free(skin);
-        return nmodels++;
+        return dd->nmodels++;
     }
     int bad = m2_read(m2, mlen, skin, slen, &mod, &why);
     free(skin);
-    if (bad) { free(m2); fprintf(stderr, "doodads: %s: %s; left out\n", name, why.text); return nmodels++; }
+    if (bad) { free(m2); fprintf(stderr, "doodads: %s: %s; left out\n", name, why.text); return dd->nmodels++; }
 
     /* does it move while standing? (its stand animation, id 0, moving
      * any bone) If so it keeps its skeleton and is bent every frame. */
@@ -262,7 +312,7 @@ static int load_model(const char *name)
         if (md->stand >= 0 && anim_needs_file(an, md->stand)) {
             snprintf(path, sizeof path, "%s%04d-%02d.anim", base, an->seqs[md->stand].id, an->seqs[md->stand].variation);
             size_t alen;
-            unsigned char *af = mpq_chain_read(chain, path, &alen, &from);
+            unsigned char *af = mpq_chain_read(dd->chain, path, &alen, &from);
             if (af) anim_attach_file(an, md->stand, af, alen);
             else fprintf(stderr, "doodads: %s is in none of the archives; %s stands still\n", path, name);
         }
@@ -276,10 +326,10 @@ static int load_model(const char *name)
             for (int i = 0; i < md->nemitters; ++i) {
                 int slot = md->emitters[i].slot;
                 md->emit_pic[i] = (slot < (int)mod.ntextures && mod.textures[slot].kind == 0 && mod.textures[slot].file[0])
-                                  ? picture(mod.textures[slot].file) : -1;
+                                  ? picture(dd, mod.textures[slot].file) : -1;
                 if (md->emit_pic[i] < 0) fprintf(stderr, "doodads: %s's emitter %d has no picture it can use; it shows none\n", name, i);
             }
-            ++emitting_models;
+            ++dd->emitting_models;
         }
     } else {
         fprintf(stderr, "doodads: %s's skeleton: %s; it stands still\n", name, why.text);
@@ -302,7 +352,7 @@ static int load_model(const char *name)
         md->anim = an;
         md->poses = malloc(sizeof *md->poses * (an->nbones ? an->nbones : 1));
     }
-    if (moving) ++moving_models;
+    if (moving) ++dd->moving_models;
     if (!md->anim) {
         anim_free(an);
         free(an);
@@ -312,10 +362,10 @@ static int load_model(const char *name)
     for (uint32_t u = 0; u < mod.nunits; ++u) {
         M2Unit un = mod.units[u];
         if (un.piece >= mod.npieces || un.texture >= mod.ntextures) continue;
-        if (mod.textures[un.texture].kind != 0) { ++skipped_pieces; continue; }   /* picture chosen at run time */
-        int pic = picture(mod.textures[un.texture].file);
+        if (mod.textures[un.texture].kind != 0) { ++dd->skipped_pieces; continue; }   /* picture chosen at run time */
+        int pic = picture(dd, mod.textures[un.texture].file);
         int layers = un.layers > 1 && un.tex[1] >= 0 && mod.textures[un.tex[1]].kind == 0 && mod.textures[un.tex[1]].file[0] ? 2 : 1;
-        int pic2 = layers > 1 ? picture(mod.textures[un.tex[1]].file) : -1;
+        int pic2 = layers > 1 ? picture(dd, mod.textures[un.tex[1]].file) : -1;
         if (layers > 1 && pic2 < 0) layers = 1;
         if (pic < 0) continue;
         M2Piece p = mod.pieces[un.piece];
@@ -356,7 +406,7 @@ static int load_model(const char *name)
                                                    un.colour, un.fade };
     }
     m2_free(&mod);
-    return nmodels++;
+    return dd->nmodels++;
 }
 /* }}} */
 
@@ -365,21 +415,21 @@ static int load_model(const char *name)
  * copies draw like any doodad's. A group or picture that can't be read is
  * reported and left out; a root that can't be read leaves the building
  * out (reported once). */
-static int load_building(const char *name)
+static int load_building(Doodads *dd, const char *name)
 {
-    for (int i = 0; i < nbuildings; ++i) if (!strcasecmp(models[buildings[i].model].name, name)) return i;
-    if (nbuildings == buildings_cap) {
-        buildings_cap = buildings_cap ? buildings_cap * 2 : 64;
-        buildings = realloc(buildings, sizeof *buildings * buildings_cap);
+    for (int i = 0; i < dd->nbuildings; ++i) if (!strcasecmp(dd->models[dd->buildings[i].model].name, name)) return i;
+    if (dd->nbuildings == dd->buildings_cap) {
+        dd->buildings_cap = dd->buildings_cap ? dd->buildings_cap * 2 : 64;
+        dd->buildings = realloc(dd->buildings, sizeof *dd->buildings * dd->buildings_cap);
     }
-    if (nmodels == models_cap) {
-        models_cap = models_cap ? models_cap * 2 : 256;
-        models = realloc(models, sizeof *models * models_cap);
+    if (dd->nmodels == dd->models_cap) {
+        dd->models_cap = dd->models_cap ? dd->models_cap * 2 : 256;
+        dd->models = realloc(dd->models, sizeof *dd->models * dd->models_cap);
     }
-    Building *b = &buildings[nbuildings];
+    Building *b = &dd->buildings[dd->nbuildings];
     memset(b, 0, sizeof *b);
-    b->model = nmodels;
-    DoodadModel *md = &models[nmodels++];
+    b->model = dd->nmodels;
+    DoodadModel *md = &dd->models[dd->nmodels++];
     memset(md, 0, sizeof *md);
     snprintf(md->name, sizeof md->name, "%s", name);
 
@@ -387,11 +437,11 @@ static int load_building(const char *name)
     const char *from;
     char path[300];
     WWhy why;
-    unsigned char *s = mpq_chain_read(chain, name, &len, &from);
-    if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; left out\n", name); return nbuildings++; }
+    unsigned char *s = mpq_chain_read(dd->chain, name, &len, &from);
+    if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; left out\n", name); return dd->nbuildings++; }
     int bad = wmo_read_root(s, len, &b->root, &why);
     free(s);
-    if (bad) { fprintf(stderr, "buildings: %s: %s; left out\n", name, why.text); return nbuildings++; }
+    if (bad) { fprintf(stderr, "buildings: %s: %s; left out\n", name, why.text); return dd->nbuildings++; }
 
     char base[260];
     snprintf(base, sizeof base, "%s", name);
@@ -399,7 +449,7 @@ static int load_building(const char *name)
     if (dot) *dot = '\0';
     for (int gi = 0; gi < b->root.ngroups; ++gi) {
         snprintf(path, sizeof path, "%s_%03d.wmo", base, gi);
-        s = mpq_chain_read(chain, path, &len, &from);
+        s = mpq_chain_read(dd->chain, path, &len, &from);
         if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; that part is left out\n", path); continue; }
         WmoGroup g;
         bad = wmo_read_group(s, len, &g, &why);
@@ -427,7 +477,7 @@ static int load_building(const char *name)
             WmoBatch bt = g.batches[k];
             if (bt.material >= b->root.nmaterials || bt.count == 0) continue;
             WmoMaterial mat = b->root.materials[bt.material];
-            int pic = picture(mat.picture);
+            int pic = picture(dd, mat.picture);
             if (pic < 0) continue;
             Mesh m = { 0 };
             m.vertexCount = (int)bt.count;
@@ -459,7 +509,7 @@ static int load_building(const char *name)
         }
         wmo_free_group(&g);
     }
-    return nbuildings++;
+    return dd->nbuildings++;
 }
 /* }}} */
 
@@ -472,45 +522,39 @@ static int load_building(const char *name)
  * shared doodad stays while either of its tiles is loaded.
  * A Placement: uid, building (0 doodad, 1 building), which (model or
  * building number), at (where), set (a building's furnishing set). */
-typedef struct { uint32_t uid; int building, which, set; Matrix at; } Placement;
-typedef struct { int tile; Placement *p; int n; } TileRecord;
-static TileRecord *records;  static int nrecords;
-typedef struct { uint32_t uid; int building, tile; } Seen;
-static Seen *seen_list;      static int nseen_list, seen_list_cap;
 /* seen_index: where each placement sits in seen_list, by its uid and kind
  * (a hash table, open addressing; slots hold a position + 1, 0 empty),
  * so "placed already?" is a lookup, not a search through every
  * placement seen (about 7,000 round Astranaar: up to 10 ms a tile load
  * as a search, measured 2026-10-07; 173u). Rebuilt whole when it grows
  * and when a tile is dropped (rare). */
-static int *seen_index;      static int seen_index_cap;   /* a power of two, at least twice nseen_list */
-static unsigned seen_slot(uint32_t uid, int building) { return (uid * 2654435761u ^ (unsigned)building * 0x9E3779B9u) & (unsigned)(seen_index_cap - 1); }
-static int seen_find(uint32_t uid, int building)
+static unsigned seen_slot(Doodads *dd, uint32_t uid, int building) { return (uid * 2654435761u ^ (unsigned)building * 0x9E3779B9u) & (unsigned)(dd->seen_index_cap - 1); }
+static int seen_find(Doodads *dd, uint32_t uid, int building)
 {
-    if (!seen_index_cap) return -1;
-    for (unsigned s = seen_slot(uid, building); seen_index[s]; s = (s + 1) & (unsigned)(seen_index_cap - 1)) {
-        const Seen *e = &seen_list[seen_index[s] - 1];
-        if (e->uid == uid && e->building == building) return seen_index[s] - 1;
+    if (!dd->seen_index_cap) return -1;
+    for (unsigned s = seen_slot(dd, uid, building); dd->seen_index[s]; s = (s + 1) & (unsigned)(dd->seen_index_cap - 1)) {
+        const Seen *e = &dd->seen_list[dd->seen_index[s] - 1];
+        if (e->uid == uid && e->building == building) return dd->seen_index[s] - 1;
     }
     return -1;
 }
-static void seen_reindex(void)
+static void seen_reindex(Doodads *dd)
 {
-    while (seen_index_cap < (nseen_list + 1) * 2) seen_index_cap = seen_index_cap ? seen_index_cap * 2 : 8192;
-    seen_index = realloc(seen_index, sizeof *seen_index * (size_t)seen_index_cap);
-    memset(seen_index, 0, sizeof *seen_index * (size_t)seen_index_cap);
-    for (int i = 0; i < nseen_list; ++i) {
-        unsigned s = seen_slot(seen_list[i].uid, seen_list[i].building);
-        while (seen_index[s]) s = (s + 1) & (unsigned)(seen_index_cap - 1);
-        seen_index[s] = i + 1;
+    while (dd->seen_index_cap < (dd->nseen_list + 1) * 2) dd->seen_index_cap = dd->seen_index_cap ? dd->seen_index_cap * 2 : 8192;
+    dd->seen_index = realloc(dd->seen_index, sizeof *dd->seen_index * (size_t)dd->seen_index_cap);
+    memset(dd->seen_index, 0, sizeof *dd->seen_index * (size_t)dd->seen_index_cap);
+    for (int i = 0; i < dd->nseen_list; ++i) {
+        unsigned s = seen_slot(dd, dd->seen_list[i].uid, dd->seen_list[i].building);
+        while (dd->seen_index[s]) s = (s + 1) & (unsigned)(dd->seen_index_cap - 1);
+        dd->seen_index[s] = i + 1;
     }
 }
 /* }}} */
 
 /* {{{ static add_copy: one more place for model `which`, brought by `tile` */
-static void add_copy(int which, Matrix at, int tile)
+static void add_copy(Doodads *dd, int which, Matrix at, int tile)
 {
-    DoodadModel *md = &models[which];
+    DoodadModel *md = &dd->models[which];
     if (md->ncopies == md->cap) {
         md->cap = md->cap ? md->cap * 2 : 16;
         md->copies = realloc(md->copies, sizeof *md->copies * md->cap);
@@ -518,34 +562,34 @@ static void add_copy(int which, Matrix at, int tile)
     }
     md->copy_tile[md->ncopies] = tile;
     md->copies[md->ncopies++] = at;
-    if (solids && md->nsolid) collide_add(solids, md->solid, md->nsolid, MatrixToFloatV(at).v, tile);
+    if (dd->solids && md->nsolid) collide_add(dd->solids, md->solid, md->nsolid, MatrixToFloatV(at).v, tile);
 }
 /* }}} */
 
 /* {{{ static realise: a tile's placements not yet placed by another tile */
-static void realise(const TileRecord *r)
+static void realise(Doodads *dd, const TileRecord *r)
 {
     for (int k = 0; k < r->n; ++k) {
         const Placement *p = &r->p[k];
-        if (seen_find(p->uid, p->building) >= 0) continue;   /* another tile placed it already */
-        if (nseen_list == seen_list_cap) { seen_list_cap = seen_list_cap ? seen_list_cap * 2 : 4096; seen_list = realloc(seen_list, sizeof *seen_list * seen_list_cap); }
-        seen_list[nseen_list++] = (Seen){ p->uid, p->building, r->tile };
-        if (seen_index_cap < nseen_list * 2) seen_reindex();
+        if (seen_find(dd, p->uid, p->building) >= 0) continue;   /* another tile placed it already */
+        if (dd->nseen_list == dd->seen_list_cap) { dd->seen_list_cap = dd->seen_list_cap ? dd->seen_list_cap * 2 : 4096; dd->seen_list = realloc(dd->seen_list, sizeof *dd->seen_list * dd->seen_list_cap); }
+        dd->seen_list[dd->nseen_list++] = (Seen){ p->uid, p->building, r->tile };
+        if (dd->seen_index_cap < dd->nseen_list * 2) seen_reindex(dd);
         else {
-            unsigned s = seen_slot(p->uid, p->building);
-            while (seen_index[s]) s = (s + 1) & (unsigned)(seen_index_cap - 1);
-            seen_index[s] = nseen_list;
+            unsigned s = seen_slot(dd, p->uid, p->building);
+            while (dd->seen_index[s]) s = (s + 1) & (unsigned)(dd->seen_index_cap - 1);
+            dd->seen_index[s] = dd->nseen_list;
         }
-        if (!p->building) { add_copy(p->which, p->at, r->tile); continue; }
+        if (!p->building) { add_copy(dd, p->which, p->at, r->tile); continue; }
         /* a building, and the furnishings of the set it asks for (set 0
          * holds what every placement shows, so it is always added) */
-        Building *b = &buildings[p->which];
-        add_copy(b->model, p->at, r->tile);
+        Building *b = &dd->buildings[p->which];
+        add_copy(dd, b->model, p->at, r->tile);
         float m[16];
         memcpy(m, MatrixToFloatV(p->at).v, sizeof m);
-        for (int k2 = 0; liquids && k2 < b->npools; ++k2) {   /* its pools (173r) */
-            water_add_pool(pools, r->tile, m, &b->pools[k2].pool, b->pools[k2].kind);
-            liquid_add_pool(liquids, r->tile, m, origin_x, origin_y, &b->pools[k2].pool, b->pools[k2].kind);
+        for (int k2 = 0; dd->liquids && k2 < b->npools; ++k2) {   /* its pools (173r) */
+            water_add_pool(dd->pools, r->tile, m, &b->pools[k2].pool, b->pools[k2].kind);
+            liquid_add_pool(dd->liquids, r->tile, m, dd->origin_x, dd->origin_y, &b->pools[k2].pool, b->pools[k2].kind);
         }
         for (int si = 0; si < b->root.nsets; ++si) {
             if (si != 0 && si != p->set) continue;
@@ -555,9 +599,9 @@ static void realise(const TileRecord *r)
                 if (!f.model[0]) continue;
                 float fm[16];
                 adt_inside_matrix(m, f.pos, f.quat, f.scale, fm);
-                int which = load_model(f.model);
-                b = &buildings[p->which];                       /* (load_model never moves buildings, but stay safe) */
-                add_copy(which, (Matrix){ fm[0], fm[4], fm[8], fm[12], fm[1], fm[5], fm[9], fm[13], fm[2], fm[6], fm[10], fm[14], fm[3], fm[7], fm[11], fm[15] }, r->tile);
+                int which = load_model(dd, f.model);
+                b = &dd->buildings[p->which];                       /* (load_model never moves buildings, but stay safe) */
+                add_copy(dd, which, (Matrix){ fm[0], fm[4], fm[8], fm[12], fm[1], fm[5], fm[9], fm[13], fm[2], fm[6], fm[10], fm[14], fm[3], fm[7], fm[11], fm[15] }, r->tile);
             }
         }
     }
@@ -565,12 +609,12 @@ static void realise(const TileRecord *r)
 /* }}} */
 
 /* {{{ doodads_add_tile */
-WErr doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, WWhy *why)
+WErr doodads_add_tile(Doodads *dd, const AdtTile *t, int tile, double ox, double oy, WWhy *why)
 {
     (void)why;
-    origin_x = ox; origin_y = oy;
-    records = realloc(records, sizeof *records * (nrecords + 1));
-    TileRecord *r = &records[nrecords++];
+    dd->origin_x = ox; dd->origin_y = oy;
+    dd->records = realloc(dd->records, sizeof *dd->records * (dd->nrecords + 1));
+    TileRecord *r = &dd->records[dd->nrecords++];
     r->tile = tile;
     r->n = 0;
     r->p = malloc(sizeof *r->p * (size_t)(t->ndoodads + t->nplaces + 1));
@@ -578,17 +622,17 @@ WErr doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, WWhy *wh
         const AdtPlace *p = &t->doodads[k];
         float m[16];
         adt_place_matrix(p, ox, oy, m);
-        int which = load_model(t->models[p->name]);
+        int which = load_model(dd, t->models[p->name]);
         r->p[r->n++] = (Placement){ p->uid, 0, which, 0, { m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15] } };
     }
     for (int k = 0; k < t->nplaces; ++k) {
         const AdtPlace *p = &t->places[k];
         float m[16];
         adt_place_matrix(p, ox, oy, m);
-        int bi = load_building(t->buildings[p->name]);
+        int bi = load_building(dd, t->buildings[p->name]);
         r->p[r->n++] = (Placement){ p->uid, 1, bi, p->doodad_set, { m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15] } };
     }
-    realise(r);
+    realise(dd, r);
     return 0;
 }
 /* }}} */
@@ -597,10 +641,10 @@ WErr doodads_add_tile(const AdtTile *t, int tile, double ox, double oy, WWhy *wh
  * Every model's copies from this tile go (with their particle runs and
  * their own meshes, for camera-facing models), its solid triangles go, its
  * record goes; then the remaining tiles realise what only it had placed. */
-void doodads_drop_tile(int tile)
+void doodads_drop_tile(Doodads *dd, int tile)
 {
-    for (int i = 0; i < nmodels; ++i) {
-        DoodadModel *md = &models[i];
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
         int kept = 0, gone = 0;
         /* particle runs exist for a leading run of copies only (made as
          * needed); the kept copies among those stay a leading run */
@@ -626,22 +670,22 @@ void doodads_drop_tile(int tile)
         md->ncopies = kept;
         md->nruns = kept_runs * md->nemitters;
     }
-    if (solids) collide_drop_tile(solids, tile);
+    if (dd->solids) collide_drop_tile(dd->solids, tile);
     int k2 = 0;
-    for (int i = 0; i < nseen_list; ++i) if (seen_list[i].tile != tile) seen_list[k2++] = seen_list[i];
-    nseen_list = k2;
-    seen_reindex();                                      /* positions moved */
-    for (int i = 0; i < nrecords; ++i)
-        if (records[i].tile == tile) { free(records[i].p); records[i] = records[--nrecords]; break; }
-    for (int i = 0; i < nrecords; ++i) realise(&records[i]);
+    for (int i = 0; i < dd->nseen_list; ++i) if (dd->seen_list[i].tile != tile) dd->seen_list[k2++] = dd->seen_list[i];
+    dd->nseen_list = k2;
+    seen_reindex(dd);                                      /* positions moved */
+    for (int i = 0; i < dd->nrecords; ++i)
+        if (dd->records[i].tile == tile) { free(dd->records[i].p); dd->records[i] = dd->records[--dd->nrecords]; break; }
+    for (int i = 0; i < dd->nrecords; ++i) realise(dd, &dd->records[i]);
 }
 /* }}} */
 
 /* {{{ static piece_tint: a piece's animated colour and opacity now, on the
  * model's stand animation (023-anim.h's anim_unit_tint) */
-static void piece_tint(const DoodadModel *md, const DoodadPiece *p, float rgba[4])
+static void piece_tint(Doodads *dd, const DoodadModel *md, const DoodadPiece *p, float rgba[4])
 {
-    anim_unit_tint(md->anim, p->colour, p->fade, md->stand, clock_ms, clock_ms, rgba);
+    anim_unit_tint(md->anim, p->colour, p->fade, md->stand, dd->clock_ms, dd->clock_ms, rgba);
 }
 /* }}} */
 
@@ -659,26 +703,26 @@ static void bone_rows(DoodadModel *md, int rows)
     SetTextureFilter(md->bones, TEXTURE_FILTER_POINT);
     md->bone_rows = rows;
 }
-static void pose_copies(DoodadModel *md, Vector3 eye);   /* below, with the animating */
+static void pose_copies(Doodads *dd, DoodadModel *md, Vector3 eye);   /* below, with the animating */
 /* static use_bones: the shader told whether this model is bent, and how */
-static void use_bones(const DoodadModel *md)
+static void use_bones(Doodads *dd, const DoodadModel *md)
 {
     int skinned = md->bones.id && (md->moving || md->billboard), per_copy = md->billboard;
-    SetShaderValue(shader, loc_skinned, &skinned, SHADER_UNIFORM_INT);
-    SetShaderValue(shader, loc_per_copy, &per_copy, SHADER_UNIFORM_INT);
-    material.maps[MATERIAL_MAP_NORMAL].texture = skinned ? md->bones : (Texture2D){ 0 };
+    SetShaderValue(dd->shader, dd->loc_skinned, &skinned, SHADER_UNIFORM_INT);
+    SetShaderValue(dd->shader, dd->loc_per_copy, &per_copy, SHADER_UNIFORM_INT);
+    dd->material.maps[MATERIAL_MAP_NORMAL].texture = skinned ? md->bones : (Texture2D){ 0 };
 }
 /* }}} */
 
 /* {{{ doodads_draw
  * Two passes: blend 0 and 1 (solid, cut-out) writing depth; then 2-6
  * (see-through, added, multiplied) over them without writing depth. */
-static void draw_pass(int see_through)
+static void draw_pass(Doodads *dd, int see_through)
 {
-    for (int i = 0; i < nmodels; ++i) {
-        DoodadModel *md = &models[i];
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
         if (!md->nvis) continue;                          /* none in sight (or none placed) */
-        use_bones(md);
+        use_bones(dd, md);
         for (int k = 0; k < md->npieces; ++k) {
             DoodadPiece *p = &md->pieces[k];
             if ((p->blend >= 2) != see_through) continue;
@@ -687,25 +731,25 @@ static void draw_pass(int see_through)
             /* its layers, their picture animations and its tint, now */
             float move0[4] = { 0, 0, 1, 1 }, move1[4] = { 0, 0, 1, 1 }, tint[4] = { 1, 1, 1, 1 };
             if (md->anim) {
-                anim_uv(md->anim, p->uvanim[0], md->stand, clock_ms, clock_ms, move0);
-                anim_uv(md->anim, p->uvanim[1], md->stand, clock_ms, clock_ms, move1);
-                piece_tint(md, p, tint);
+                anim_uv(md->anim, p->uvanim[0], md->stand, dd->clock_ms, dd->clock_ms, move0);
+                anim_uv(md->anim, p->uvanim[1], md->stand, dd->clock_ms, dd->clock_ms, move1);
+                piece_tint(dd, md, p, tint);
             }
-            SetShaderValue(shader, loc_layers, &p->layers, SHADER_UNIFORM_INT);
-            SetShaderValue(shader, loc_combine, &p->combine, SHADER_UNIFORM_INT);
-            SetShaderValue(shader, loc_set0, &p->set[0], SHADER_UNIFORM_INT);
-            SetShaderValue(shader, loc_set1, &p->set[1], SHADER_UNIFORM_INT);
-            SetShaderValue(shader, loc_move0, move0, SHADER_UNIFORM_VEC4);
-            SetShaderValue(shader, loc_move1, move1, SHADER_UNIFORM_VEC4);
-            SetShaderValue(shader, loc_tint, tint, SHADER_UNIFORM_VEC4);
-            material.maps[MATERIAL_MAP_METALNESS].texture = p->picture2 >= 0 ? pictures[p->picture2].tex : pictures[p->picture].tex;
-            SetShaderValue(shader, loc_indoor, &indoor, SHADER_UNIFORM_FLOAT);
-            SetShaderValue(shader, loc_cutoff, &cutoff, SHADER_UNIFORM_FLOAT);
-            SetShaderValue(shader, loc_unlit, &unlit, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(dd->shader, dd->loc_layers, &p->layers, SHADER_UNIFORM_INT);
+            SetShaderValue(dd->shader, dd->loc_combine, &p->combine, SHADER_UNIFORM_INT);
+            SetShaderValue(dd->shader, dd->loc_set0, &p->set[0], SHADER_UNIFORM_INT);
+            SetShaderValue(dd->shader, dd->loc_set1, &p->set[1], SHADER_UNIFORM_INT);
+            SetShaderValue(dd->shader, dd->loc_move0, move0, SHADER_UNIFORM_VEC4);
+            SetShaderValue(dd->shader, dd->loc_move1, move1, SHADER_UNIFORM_VEC4);
+            SetShaderValue(dd->shader, dd->loc_tint, tint, SHADER_UNIFORM_VEC4);
+            dd->material.maps[MATERIAL_MAP_METALNESS].texture = p->picture2 >= 0 ? dd->pictures[p->picture2].tex : dd->pictures[p->picture].tex;
+            SetShaderValue(dd->shader, dd->loc_indoor, &indoor, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(dd->shader, dd->loc_cutoff, &cutoff, SHADER_UNIFORM_FLOAT);
+            SetShaderValue(dd->shader, dd->loc_unlit, &unlit, SHADER_UNIFORM_FLOAT);
             if (see_through) BeginBlendMode(p->blend == 2 ? BLEND_ALPHA : p->blend >= 5 ? BLEND_MULTIPLIED : BLEND_ADDITIVE);
-            material.maps[MATERIAL_MAP_DIFFUSE].texture = pictures[p->picture].tex;
-            DrawMeshInstanced(p->mesh, material, md->vis, md->nvis);   /* every copy in sight in one order (camera-facing ones too: their rows) */
-            ++doodad_orders;
+            dd->material.maps[MATERIAL_MAP_DIFFUSE].texture = dd->pictures[p->picture].tex;
+            DrawMeshInstanced(p->mesh, dd->material, md->vis, md->nvis);   /* every copy in sight in one order (camera-facing ones too: their rows) */
+            ++dd->doodad_orders;
             if (see_through) EndBlendMode();
         }
     }
@@ -718,17 +762,17 @@ static void draw_pass(int see_through)
  * fog's start and end, a see-through particle's colour goes to the fog's,
  * and an added-light one's goes to nothing (adding the fog's colour would
  * light the fog up instead of hiding the spark) */
-static void draw_particles(Vector3 right, Vector3 up, Vector3 eye, const LightNow *light)
+static void draw_particles(Doodads *dd, Vector3 right, Vector3 up, Vector3 eye, const LightNow *light)
 {
     float fog_span = fmaxf(light->fog_end - light->fog_start, 1.0f);
-    for (int i = 0; i < nmodels; ++i) {
-        DoodadModel *md = &models[i];
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
         if (!md->nemitters || !md->nruns) continue;
         for (int k = 0; k < md->nemitters; ++k) {
             const Emitter *e = &md->emitters[k];
             if (md->emit_pic[k] < 0) continue;
             BeginBlendMode(e->blend >= 3 ? BLEND_ADDITIVE : BLEND_ALPHA);
-            rlSetTexture(pictures[md->emit_pic[k]].tex.id);
+            rlSetTexture(dd->pictures[md->emit_pic[k]].tex.id);
             rlBegin(RL_QUADS);
             for (int c = 0; c < md->ncopies; ++c) {
                 const EmitterRun *run = &md->runs[c * md->nemitters + k];
@@ -767,12 +811,12 @@ static void draw_particles(Vector3 right, Vector3 up, Vector3 eye, const LightNo
  * (173u). A copy's ball: its place, the model's reach times the copy's
  * size (its matrix's longest axis), a tenth more for swaying and a yard
  * for luck. The skybox isn't a placed model and is drawn on its own. */
-static void gather_sight(void)
+static void gather_sight(Doodads *dd)
 {
     Sight sight;
     sight_from(&sight, MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection()));
-    for (int i = 0; i < nmodels; ++i) {
-        DoodadModel *md = &models[i];
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
         md->nvis = 0;
         if (!md->ncopies) continue;
         if (md->vis_cap < md->ncopies) {
@@ -792,20 +836,20 @@ static void gather_sight(void)
 }
 /* }}} */
 
-int doodads_orders_last(void) { int n = doodad_orders; doodad_orders = 0; return n; }
+int doodads_orders_last(Doodads *dd) { int n = dd->doodad_orders; dd->doodad_orders = 0; return n; }
 
-void doodads_draw(Vector3 eye, const LightNow *light)
+void doodads_draw(Doodads *dd, Vector3 eye, const LightNow *light)
 {
-    gather_sight();
-    for (int i = 0; i < nmodels; ++i) if (models[i].billboard && models[i].anim) pose_copies(&models[i], eye);
-    SetShaderValue(shader, loc_eye, &eye, SHADER_UNIFORM_VEC3);
-    sky_light_shader(shader, light);
-    draw_pass(0);
+    gather_sight(dd);
+    for (int i = 0; i < dd->nmodels; ++i) if (dd->models[i].billboard && dd->models[i].anim) pose_copies(dd, &dd->models[i], eye);
+    SetShaderValue(dd->shader, dd->loc_eye, &eye, SHADER_UNIFORM_VEC3);
+    sky_light_shader(dd->shader, light);
+    draw_pass(dd, 0);
     rlDrawRenderBatchActive();
     rlDisableDepthMask();
-    draw_pass(1);
+    draw_pass(dd, 1);
     rlDrawRenderBatchActive();
-    draw_particles(view_right, view_up, eye, light);
+    draw_particles(dd, dd->view_right, dd->view_up, eye, light);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
 }
@@ -850,7 +894,7 @@ static void run_particles(DoodadModel *md, uint32_t ms, float dt, Vector3 eye, f
  * turn undone: the transpose over its size squared), give the facing
  * bones their turn. Row v is the v-th copy drawn (gather_sight's order),
  * which the shader finds by the instance's number. */
-static void pose_copies(DoodadModel *md, Vector3 eye)
+static void pose_copies(Doodads *dd, DoodadModel *md, Vector3 eye)
 {
     if (!md->nvis) return;
     bone_rows(md, md->nvis);
@@ -860,7 +904,7 @@ static void pose_copies(DoodadModel *md, Vector3 eye)
         memcpy(at, MatrixToFloatV(md->vis[v]).v, sizeof at);
         float s2 = at[0] * at[0] + at[1] * at[1] + at[2] * at[2];
         float world[3][3] = { { eye.x - at[12], eye.y - at[13], eye.z - at[14] },
-                              { view_right.x, view_right.y, view_right.z }, { view_up.x, view_up.y, view_up.z } };
+                              { dd->view_right.x, dd->view_right.y, dd->view_right.z }, { dd->view_up.x, dd->view_up.y, dd->view_up.z } };
         float view[9];
         for (int w = 0; w < 3; ++w) {
             float o[3], l = 0;
@@ -868,21 +912,21 @@ static void pose_copies(DoodadModel *md, Vector3 eye)
             l = sqrtf(l);
             for (int k = 0; k < 3; ++k) view[w * 3 + k] = l > 0 ? o[k] / l : 0;
         }
-        anim_pose_facing(md->anim, md->stand, clock_ms, clock_ms, (float (*)[16])(md->bone_data + (size_t)v * nb * 16), view);
+        anim_pose_facing(md->anim, md->stand, dd->clock_ms, dd->clock_ms, (float (*)[16])(md->bone_data + (size_t)v * nb * 16), view);
     }
     UpdateTextureRec(md->bones, (Rectangle){ 0, 0, (float)(nb * 4), (float)md->nvis }, md->bone_data);
 }
 /* }}} */
 
-void doodads_animate(uint32_t ms, float dt, Vector3 eye, Vector3 target, float particle_density)
+void doodads_animate(Doodads *dd, uint32_t ms, float dt, Vector3 eye, Vector3 target, float particle_density)
 {
-    clock_ms = ms;
+    dd->clock_ms = ms;
     Vector3 ahead = Vector3Normalize(Vector3Subtract(target, eye));
-    view_right = Vector3Normalize(Vector3CrossProduct(ahead, (Vector3){ 0, 0, 1 }));
-    view_up = Vector3CrossProduct(view_right, ahead);
-    for (int i = 0; i < nmodels; ++i) {
-        DoodadModel *md = &models[i];
-        if (!md->anim || (!md->ncopies && i != skybox)) continue;
+    dd->view_right = Vector3Normalize(Vector3CrossProduct(ahead, (Vector3){ 0, 0, 1 }));
+    dd->view_up = Vector3CrossProduct(dd->view_right, ahead);
+    for (int i = 0; i < dd->nmodels; ++i) {
+        DoodadModel *md = &dd->models[i];
+        if (!md->anim || (!md->ncopies && i != dd->skybox)) continue;
         anim_pose(md->anim, md->stand, ms, ms, md->poses);
         if (md->nemitters) run_particles(md, ms, dt, eye, particle_density);
         if (!md->moving || md->billboard) continue;      /* camera-facing ones are posed per copy when drawn */
@@ -893,46 +937,46 @@ void doodads_animate(uint32_t ms, float dt, Vector3 eye, Vector3 target, float p
 /* }}} */
 
 /* {{{ doodads_skybox, doodads_draw_skybox (173n) */
-void doodads_skybox(const char *path)
+void doodads_skybox(Doodads *dd, const char *path)
 {
-    skybox = path && path[0] ? load_model(path) : -1;
-    if (skybox >= 0 && !models[skybox].npieces) { fprintf(stderr, "sky: the skybox %s has nothing to draw\n", path); skybox = -1; }
+    dd->skybox = path && path[0] ? load_model(dd, path) : -1;
+    if (dd->skybox >= 0 && !dd->models[dd->skybox].npieces) { fprintf(stderr, "sky: the skybox %s has nothing to draw\n", path); dd->skybox = -1; }
 }
-void doodads_draw_skybox(Vector3 eye)
+void doodads_draw_skybox(Doodads *dd, Vector3 eye)
 {
-    if (skybox < 0) return;
-    DoodadModel *md = &models[skybox];
+    if (dd->skybox < 0) return;
+    DoodadModel *md = &dd->models[dd->skybox];
     float s = md->radius > 0 ? 800.0f / md->radius : 1;                       /* inside the far plane */
     Matrix at = MatrixMultiply(MatrixScale(s, s, s), MatrixTranslate(eye.x, eye.y, eye.z));
     float unlit = 1, indoor = 0, far_fog[2] = { 1e6f, 2e6f };
-    SetShaderValue(shader, loc_eye, &eye, SHADER_UNIFORM_VEC3);
-    SetShaderValue(shader, GetShaderLocation(shader, "fog_range"), far_fog, SHADER_UNIFORM_VEC2);
-    SetShaderValue(shader, loc_unlit, &unlit, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(shader, loc_indoor, &indoor, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(dd->shader, dd->loc_eye, &eye, SHADER_UNIFORM_VEC3);
+    SetShaderValue(dd->shader, GetShaderLocation(dd->shader, "fog_range"), far_fog, SHADER_UNIFORM_VEC2);
+    SetShaderValue(dd->shader, dd->loc_unlit, &unlit, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(dd->shader, dd->loc_indoor, &indoor, SHADER_UNIFORM_FLOAT);
     rlDisableDepthTest();
     rlDisableDepthMask();
-    use_bones(md);
+    use_bones(dd, md);
     for (int k = 0; k < md->npieces; ++k) {
         DoodadPiece *p = &md->pieces[k];
         float move0[4] = { 0, 0, 1, 1 }, move1[4] = { 0, 0, 1, 1 }, tint[4] = { 1, 1, 1, 1 };
         if (md->anim) {
-            anim_uv(md->anim, p->uvanim[0], md->stand, clock_ms, clock_ms, move0);
-            anim_uv(md->anim, p->uvanim[1], md->stand, clock_ms, clock_ms, move1);
-            piece_tint(md, p, tint);
+            anim_uv(md->anim, p->uvanim[0], md->stand, dd->clock_ms, dd->clock_ms, move0);
+            anim_uv(md->anim, p->uvanim[1], md->stand, dd->clock_ms, dd->clock_ms, move1);
+            piece_tint(dd, md, p, tint);
         }
         float cutoff = -1;
-        SetShaderValue(shader, loc_cutoff, &cutoff, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(shader, loc_layers, &p->layers, SHADER_UNIFORM_INT);
-        SetShaderValue(shader, loc_combine, &p->combine, SHADER_UNIFORM_INT);
-        SetShaderValue(shader, loc_set0, &p->set[0], SHADER_UNIFORM_INT);
-        SetShaderValue(shader, loc_set1, &p->set[1], SHADER_UNIFORM_INT);
-        SetShaderValue(shader, loc_move0, move0, SHADER_UNIFORM_VEC4);
-        SetShaderValue(shader, loc_move1, move1, SHADER_UNIFORM_VEC4);
-        SetShaderValue(shader, loc_tint, tint, SHADER_UNIFORM_VEC4);
-        material.maps[MATERIAL_MAP_DIFFUSE].texture = pictures[p->picture].tex;
-        material.maps[MATERIAL_MAP_METALNESS].texture = p->picture2 >= 0 ? pictures[p->picture2].tex : pictures[p->picture].tex;
+        SetShaderValue(dd->shader, dd->loc_cutoff, &cutoff, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(dd->shader, dd->loc_layers, &p->layers, SHADER_UNIFORM_INT);
+        SetShaderValue(dd->shader, dd->loc_combine, &p->combine, SHADER_UNIFORM_INT);
+        SetShaderValue(dd->shader, dd->loc_set0, &p->set[0], SHADER_UNIFORM_INT);
+        SetShaderValue(dd->shader, dd->loc_set1, &p->set[1], SHADER_UNIFORM_INT);
+        SetShaderValue(dd->shader, dd->loc_move0, move0, SHADER_UNIFORM_VEC4);
+        SetShaderValue(dd->shader, dd->loc_move1, move1, SHADER_UNIFORM_VEC4);
+        SetShaderValue(dd->shader, dd->loc_tint, tint, SHADER_UNIFORM_VEC4);
+        dd->material.maps[MATERIAL_MAP_DIFFUSE].texture = dd->pictures[p->picture].tex;
+        dd->material.maps[MATERIAL_MAP_METALNESS].texture = p->picture2 >= 0 ? dd->pictures[p->picture2].tex : dd->pictures[p->picture].tex;
         BeginBlendMode(p->blend >= 3 ? BLEND_ADDITIVE : BLEND_ALPHA);
-        DrawMeshInstanced(p->mesh, material, &at, 1);
+        DrawMeshInstanced(p->mesh, dd->material, &at, 1);
         EndBlendMode();
     }
     rlDrawRenderBatchActive();
@@ -942,10 +986,10 @@ void doodads_draw_skybox(Vector3 eye)
 /* }}} */
 
 /* {{{ doodads_counts */
-void doodads_counts(int *nm, int *nc, int *ns, int *nmoving, int *nemitting)
+void doodads_counts(Doodads *dd, int *nm, int *nc, int *ns, int *nmoving, int *nemitting)
 {
     int copies = 0;
-    for (int i = 0; i < nmodels; ++i) copies += models[i].ncopies;
-    *nm = nmodels; *nc = copies; *ns = skipped_pieces; *nmoving = moving_models; *nemitting = emitting_models;
+    for (int i = 0; i < dd->nmodels; ++i) copies += dd->models[i].ncopies;
+    *nm = dd->nmodels; *nc = copies; *ns = dd->skipped_pieces; *nmoving = dd->moving_models; *nemitting = dd->emitting_models;
 }
 /* }}} */

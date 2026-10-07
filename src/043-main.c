@@ -194,6 +194,7 @@ static struct { double x, y, z; float facing; MovesState moves; int cycle; float
 
 /* {{{ the world and the camera */
 static MapWorld world;
+static Doodads *doodads;                                 /* doodads and buildings (042-doodads.h) */
 static Ground *ground;                                   /* the painted ground (038-ground.h) */
 static Figures *figures;                                 /* the figure maker (041-figure.h) */
 static MpqChain chain;                                   /* the original client's archives, open for the whole run */
@@ -399,7 +400,7 @@ static void refresh_tiles(void)
             if (got == 0) {
                 liquid_add_tile(waters, x, y, adt);
                 water_add_tile(water, adt, x * 64 + y, ox, oy);
-                if (doodads_add_tile(adt, x * 64 + y, ox, oy, &why)) { fprintf(stderr, "doodads on tile (%d, %d): %s\n", x, y, why.text); exit(1); }
+                if (doodads_add_tile(doodads, adt, x * 64 + y, ox, oy, &why)) { fprintf(stderr, "doodads on tile (%d, %d): %s\n", x, y, why.text); exit(1); }
                 if (started_walking) walk_doodads_s += GetTime() - ground_t1;
                 adt_free(adt);
                 free(adt);
@@ -428,7 +429,7 @@ static void refresh_tiles(void)
                 ground_drop_tile(ground, x, y);
                 water_drop_tile(water, x * 64 + y);
                 liquid_drop_tile(waters, x, y);
-                doodads_drop_tile(x * 64 + y);
+                doodads_drop_tile(doodads, x * 64 + y);
             }
             tile_state[x * 64 + y] = 0;
             ++tiles_dropped;
@@ -580,7 +581,8 @@ int main(int argc, char **argv)
     waters = liquid_new();
     water = water_new(&chain, &why);
     if (!water) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
-    if (doodads_init(&chain, solids, waters, water, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    doodads = doodads_new(&chain, solids, waters, water, &why);
+    if (!doodads) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     horizon = horizon_new(&chain, map_name, ox, oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
@@ -605,7 +607,7 @@ int main(int argc, char **argv)
     stream_creatures(60.0);                              /* all those near her at the start */
     printf("creatures: %d standing round her (built in %.2f s)\n", nstanding, creature_build_s);
     int dm, dc, ds, dmov, demit;
-    doodads_counts(&dm, &dc, &ds, &dmov, &demit);
+    doodads_counts(doodads, &dm, &dc, &ds, &dmov, &demit);
     printf("doodads: %d models (%d of them moving, %d with particles), %d placed; %d solid triangles\n", dm, dmov, demit, dc, collide_count(solids));
     if (ds) printf("doodads: %d pieces left out: their picture is chosen by the game at run time (not built yet)\n", ds);
 
@@ -787,7 +789,7 @@ int main(int argc, char **argv)
             }
         }
         Camera3D cam = { .position = eye, .target = look, .up = { 0, 0, 1 }, .fovy = 60, .projection = CAMERA_PERSPECTIVE };
-        TIMED(PH_DOODADS_ANIMATE, doodads_animate((uint32_t)clock_ms, dt, eye, look, (float)settings_num(settings, "particleDensity")));   /* moving doodads, and particles near the camera */
+        TIMED(PH_DOODADS_ANIMATE, doodads_animate(doodads, (uint32_t)clock_ms, dt, eye, look, (float)settings_num(settings, "particleDensity")));   /* moving doodads, and particles near the camera */
         SetShaderValue(model_sh, eye_m, &eye, SHADER_UNIFORM_VEC3);
         /* }}} */
 
@@ -818,7 +820,7 @@ int main(int argc, char **argv)
         rlMultMatrixf(MatrixToFloat(MatrixPerspective(60 * DEG2RAD, (double)GetScreenWidth() / GetScreenHeight(), 0.3, fmax(settings_num(settings, "farclip") * 1.25 + 100, (HORIZON_REACH + 1) * 533.33))));   /* out to the far horizon (173s) */
         rlMatrixMode(RL_MODELVIEW);
         rlDisableBackfaceCulling();
-        TIMED(PH_SKY, sky_draw(sky, eye, &light); rlDrawRenderBatchActive());   /* first, behind everything */
+        TIMED(PH_SKY, sky_draw(sky, doodads, eye, &light); rlDrawRenderBatchActive());   /* first, behind everything */
         {
             int htx, hty;
             maps_tile_of((float)elf.x, (float)elf.y, &htx, &hty);
@@ -832,7 +834,7 @@ int main(int argc, char **argv)
             ground_blob(ground, (float)(sp->x - ox), (float)(sp->y - oy), (float)sp->z, 1.3f * standing[i].fig.scale);
         }
         TIMED(PH_GROUND, ground_draw(ground, eye, &light); rlDrawRenderBatchActive());
-        TIMED(PH_DOODADS_DRAW, doodads_draw(eye, &light); rlDrawRenderBatchActive());
+        TIMED(PH_DOODADS_DRAW, doodads_draw(doodads, eye, &light); rlDrawRenderBatchActive());
         TIMED(PH_WATER, water_draw(water, eye, &light, clock_ms / 1000.0); rlDrawRenderBatchActive());   /* see-through, after the solid world */
         double figures_t0 = GetTime();
         Matrix place = MatrixMultiply(MatrixRotateZ((float)elf.o + moves.body_turn), MatrixTranslate(at.x, at.y, (float)elf.z));
@@ -866,7 +868,7 @@ int main(int argc, char **argv)
             UnloadImage(im);
             printf(ok ? "picture saved: %s\n" : "could not save the picture to %s\n", shot);
             int dm2, dc2, ds2, dmov2, demit2;
-            doodads_counts(&dm2, &dc2, &ds2, &dmov2, &demit2);
+            doodads_counts(doodads, &dm2, &dc2, &ds2, &dmov2, &demit2);
             int ahead_tiles, ahead_files, grounds_made, grounds_taken;
             prefetch_counts(pf, &ahead_tiles, &ahead_files, &grounds_made, &grounds_taken);
             printf("unpacking files from the archives: %.0f ms over the run, both threads (%llu read, %llu from memory); read ahead: %d tiles, %d files\n",
@@ -878,7 +880,7 @@ int main(int argc, char **argv)
             printf("tiles: %d loaded, %d dropped over the run; now %d placed, %d solid triangles\n", tiles_loaded, tiles_dropped, dc2, collide_count(solids));
             printf("frames took %.1f ms each on average, over %d (drawing, bending and all)\n", (GetTime() - loop_start) * 1000.0 / frames, frames);
             for (int ph = 0; ph < PH_COUNT; ++ph) printf("  %5.2f ms a frame: %s\n", phase_s[ph] * 1000.0 / frames, PHASE_NAME[ph]);
-            printf("the ground sent %.1f draw orders a frame, the doodads %.1f (173u)\n", (double)ground_orders_last(ground) / frames, (double)doodads_orders_last() / frames);
+            printf("the ground sent %.1f draw orders a frame, the doodads %.1f (173u)\n", (double)ground_orders_last(ground) / frames, (double)doodads_orders_last(doodads) / frames);
             size_t tex_sent, tex_unpacked;
             texture_bytes(&tex_sent, &tex_unpacked);
             printf("model pictures on the card: %.1f MB (%.1f MB if unpacked; 173u)\n", tex_sent / 1048576.0, tex_unpacked / 1048576.0);

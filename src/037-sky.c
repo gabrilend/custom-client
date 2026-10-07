@@ -103,23 +103,23 @@ void sky_light_shader(Shader sh, const LightNow *l)
 
 /* {{{ sky_draw */
 /* the skybox the light names, handed to the doodads when it changes */
-static void skybox_for(Sky *sk, const LightNow *light)
+static void skybox_for(Sky *sk, Doodads *dd, const LightNow *light)
 {
     if (!strcmp(light->skybox, sk->box_path)) return;
     snprintf(sk->box_path, sizeof sk->box_path, "%s", light->skybox);
-    doodads_skybox(sk->box_path);
+    doodads_skybox(dd, sk->box_path);
     if (sk->box_path[0]) printf("sky: the skybox %s\n", sk->box_path);
 }
 
-void sky_draw(Sky *sk, Vector3 eye, const LightNow *light)
+void sky_draw(Sky *sk, Doodads *dd, Vector3 eye, const LightNow *light)
 {
-    skybox_for(sk, light);
+    skybox_for(sk, dd, light);
     SetShaderValueV(sk->plain.shader, sk->loc_sky, light->sky, SHADER_UNIFORM_VEC3, 5);   /* the five colours, overhead to horizon */
     rlDisableDepthTest();
     rlDisableDepthMask();
     DrawMesh(sk->dome, sk->plain, MatrixTranslate(eye.x, eye.y, eye.z));
     rlDrawRenderBatchActive();
-    doodads_draw_skybox(eye);
+    doodads_draw_skybox(dd, eye);
     rlEnableDepthMask();
     rlEnableDepthTest();
 }
