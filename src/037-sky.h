@@ -24,12 +24,16 @@
 #include "026-light.h"
 #include "raylib.h"
 
-void sky_init(void);
+/* A sky (the handle: docs/001, "Handles"): the dome made and sent once.
+ * Needs the window. Freed with sky_free. */
+typedef struct Sky Sky;
+Sky *sky_new(void);
+void sky_free(Sky *sk);
 
 /* Hands a shader the light: its uniforms sun_dir, sun_col, shade_col,
  * fog_col (vec3) and fog_range (vec2: where the fog starts and ends,
  * yards). Every world shader (ground, doodads, figures) declares them. */
 void sky_light_shader(Shader sh, const LightNow *light);
-void sky_draw(Vector3 eye, const LightNow *light);
+void sky_draw(Sky *sk, Vector3 eye, const LightNow *light);
 
 #endif

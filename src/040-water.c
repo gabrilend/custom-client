@@ -49,42 +49,54 @@ static const char *FS =
     "}\n";
 /* }}} */
 
-/* {{{ state
+/* {{{ a water drawer (the handle: 040-water.h)
  * kinds: per LiquidType id met so far, its run of pictures and its type
  * (0 water, 1 ocean, 2 magma, 3 slime). layers: one mesh per water layer
- * with the kind it uses. */
+ * with the kind it uses; centre, radius: its bounding ball (173u). */
 #define MAX_FRAMES 32
 typedef struct { int id, type; Texture2D frames[MAX_FRAMES]; int nframes; } Kind;
-static Kind  kinds[64];   static int nkinds;
-static struct { Mesh mesh; int kind, tile; Vector3 centre; float radius; } *layers;   /* centre, radius: its bounding ball (173u) */
-static int   nlayers, layers_cap;
-static MpqChain *chain;
-static Dbc   table;  static unsigned char *table_bytes;
-static Shader shader;
-static Material material;
-static int   loc_eye, loc_near, loc_deep, loc_opacity, loc_raw;
+typedef struct { Mesh mesh; int kind, tile; Vector3 centre; float radius; } Layer;
+struct Water {
+    Kind      kinds[64];  int nkinds;
+    Layer    *layers;     int nlayers, layers_cap;
+    MpqChain *chain;
+    Dbc       table;      unsigned char *table_bytes;
+    Shader    shader;
+    Material  material;
+    int       loc_eye, loc_near, loc_deep, loc_opacity, loc_raw;
+};
 /* }}} */
 
 /* {{{ water_init */
-WErr water_init(MpqChain *c, WWhy *why)
+void water_free(Water *w)
 {
-    chain = c;
+    for (int i = 0; i < w->nlayers; ++i) UnloadMesh(w->layers[i].mesh);
+    for (int i = 0; i < w->nkinds; ++i) for (int f = 0; f < w->kinds[i].nframes; ++f) UnloadTexture(w->kinds[i].frames[f]);
+    free(w->layers);
+    free(w->table_bytes);
+    if (IsShaderReady(w->shader)) UnloadShader(w->shader);
+    free(w);
+}
+Water *water_new(MpqChain *c, WWhy *why)
+{
+    Water *w = calloc(1, sizeof *w);
+    w->chain = c;
     size_t len;
     const char *from;
-    table_bytes = mpq_chain_read(chain, "DBFilesClient\\LiquidType.dbc", &len, &from);
-    if (!table_bytes) { w_fail(why, W_ERR_NOT_FOUND, "LiquidType.dbc is in none of the client's archives"); return why->code; }
+    w->table_bytes = mpq_chain_read(w->chain, "DBFilesClient\\LiquidType.dbc", &len, &from);
+    if (!w->table_bytes) { w_fail(why, W_ERR_NOT_FOUND, "LiquidType.dbc is in none of the client's archives"); water_free(w); return NULL; }
     WWhy inner;
-    if (dbc_open(&table, table_bytes, len, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); return why->code; }
-    shader = LoadShaderFromMemory(VS, FS);
-    if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the water shader didn't compile (see Raylib's messages above)"); return why->code; }
-    loc_eye = GetShaderLocation(shader, "eye");
-    loc_near = GetShaderLocation(shader, "tint_near");
-    loc_deep = GetShaderLocation(shader, "tint_deep");
-    loc_opacity = GetShaderLocation(shader, "opacity");
-    loc_raw = GetShaderLocation(shader, "raw");
-    material = LoadMaterialDefault();
-    material.shader = shader;
-    return 0;
+    if (dbc_open(&w->table, w->table_bytes, len, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); water_free(w); return NULL; }
+    w->shader = LoadShaderFromMemory(VS, FS);
+    if (!IsShaderReady(w->shader)) { w_fail(why, W_ERR_GPU, "the water shader didn't compile (see Raylib's messages above)"); water_free(w); return NULL; }
+    w->loc_eye = GetShaderLocation(w->shader, "eye");
+    w->loc_near = GetShaderLocation(w->shader, "tint_near");
+    w->loc_deep = GetShaderLocation(w->shader, "tint_deep");
+    w->loc_opacity = GetShaderLocation(w->shader, "opacity");
+    w->loc_raw = GetShaderLocation(w->shader, "raw");
+    w->material = LoadMaterialDefault();
+    w->material.shader = w->shader;
+    return w;
 }
 /* }}} */
 
@@ -92,23 +104,23 @@ WErr water_init(MpqChain *c, WWhy *why)
  * LiquidType (3.3.5a): 1 id, 4 type, 16 the picture name with %d for the
  * frame number (1 upward). Frames are loaded until one is missing. A kind
  * with no pictures is drawn plain (and said once). */
-static int kind_of(int id)
+static int kind_of(Water *w, int id)
 {
-    for (int i = 0; i < nkinds; ++i) if (kinds[i].id == id) return i;
-    if (nkinds == 64) return -1;
-    Kind *k = &kinds[nkinds];
+    for (int i = 0; i < w->nkinds; ++i) if (w->kinds[i].id == id) return i;
+    if (w->nkinds == 64) return -1;
+    Kind *k = &w->kinds[w->nkinds];
     memset(k, 0, sizeof *k);
     k->id = id;
     const char *pattern = NULL;
-    for (uint32_t r = 0; r < table.rows; ++r)
-        if ((int)dbc_u32(&table, r, 1) == id) { k->type = (int)dbc_u32(&table, r, 4); pattern = dbc_text(&table, r, 16); break; }
+    for (uint32_t r = 0; r < w->table.rows; ++r)
+        if ((int)dbc_u32(&w->table, r, 1) == id) { k->type = (int)dbc_u32(&w->table, r, 4); pattern = dbc_text(&w->table, r, 16); break; }
     if (!pattern || !pattern[0]) fprintf(stderr, "water: liquid kind %d has no pictures in LiquidType.dbc; drawn plain\n", id);
     for (int f = 1; pattern && pattern[0] && f <= MAX_FRAMES; ++f) {
         char name[300];
         snprintf(name, sizeof name, pattern, f);
         size_t len;
         const char *from;
-        unsigned char *s = mpq_chain_read(chain, name, &len, &from);
+        unsigned char *s = mpq_chain_read(w->chain, name, &len, &from);
         if (!s) break;
         BlpImage img;
         WWhy why;
@@ -123,7 +135,7 @@ static int kind_of(int id)
         texture_filter(k->frames[k->nframes].id, 0x0DE1, k->frames[k->nframes].mipmaps);   /* a 2D picture, as Texture Filtering says (173b6) */
         ++k->nframes;
     }
-    return nkinds++;
+    return w->nkinds++;
 }
 /* }}} */
 
@@ -142,7 +154,7 @@ static void bounds(const Mesh *m, Vector3 *centre, float *radius)
  * Each wet cell: two triangles over its four corners; the picture
  * repeats once a cell (4.2 yards), placed by world position so
  * neighbouring layers meet seamlessly. */
-void water_add_tile(const AdtTile *t, int tile, double ox, double oy)
+void water_add_tile(Water *w, const AdtTile *t, int tile, double ox, double oy)
 {
     const float step = ADT_CHUNK_SIZE / 8;
     for (int i = 0; i < t->nliquids; ++i) {
@@ -176,18 +188,18 @@ void water_add_tile(const AdtTile *t, int tile, double ox, double oy)
                 }
             }
         UploadMesh(&m, false);
-        if (nlayers == layers_cap) { layers_cap = layers_cap ? layers_cap * 2 : 128; layers = realloc(layers, sizeof *layers * layers_cap); }
-        layers[nlayers].mesh = m;
-        layers[nlayers].kind = kind_of(q->kind);
-        layers[nlayers].tile = tile;
-        bounds(&m, &layers[nlayers].centre, &layers[nlayers].radius);
-        ++nlayers;
+        if (w->nlayers == w->layers_cap) { w->layers_cap = w->layers_cap ? w->layers_cap * 2 : 128; w->layers = realloc(w->layers, sizeof *w->layers * w->layers_cap); }
+        w->layers[w->nlayers].mesh = m;
+        w->layers[w->nlayers].kind = kind_of(w, q->kind);
+        w->layers[w->nlayers].tile = tile;
+        bounds(&m, &w->layers[w->nlayers].centre, &w->layers[w->nlayers].radius);
+        ++w->nlayers;
     }
 }
 /* }}} */
 
 /* {{{ water_add_pool */
-void water_add_pool(int tile, const float at[16], const WmoPool *p, int kind)
+void water_add_pool(Water *w, int tile, const float at[16], const WmoPool *p, int kind)
 {
     int cx = p->nx - 1, cy = p->ny - 1, cells = 0;
     for (int i = 0; i < cx * cy; ++i) cells += !wmo_pool_dry(p->cell[i]);
@@ -213,50 +225,50 @@ void water_add_pool(int tile, const float at[16], const WmoPool *p, int kind)
             }
         }
     UploadMesh(&m, false);
-    if (nlayers == layers_cap) { layers_cap = layers_cap ? layers_cap * 2 : 128; layers = realloc(layers, sizeof *layers * layers_cap); }
-    layers[nlayers].mesh = m;
-    layers[nlayers].kind = kind_of(kind);
-    layers[nlayers].tile = tile;
-    bounds(&m, &layers[nlayers].centre, &layers[nlayers].radius);
-    ++nlayers;
+    if (w->nlayers == w->layers_cap) { w->layers_cap = w->layers_cap ? w->layers_cap * 2 : 128; w->layers = realloc(w->layers, sizeof *w->layers * w->layers_cap); }
+    w->layers[w->nlayers].mesh = m;
+    w->layers[w->nlayers].kind = kind_of(w, kind);
+    w->layers[w->nlayers].tile = tile;
+    bounds(&m, &w->layers[w->nlayers].centre, &w->layers[w->nlayers].radius);
+    ++w->nlayers;
 }
 /* }}} */
 
 /* {{{ water_drop_tile */
-void water_drop_tile(int tile)
+void water_drop_tile(Water *w, int tile)
 {
     int kept = 0;
-    for (int i = 0; i < nlayers; ++i) {
-        if (layers[i].tile == tile) { UnloadMesh(layers[i].mesh); continue; }
-        layers[kept++] = layers[i];
+    for (int i = 0; i < w->nlayers; ++i) {
+        if (w->layers[i].tile == tile) { UnloadMesh(w->layers[i].mesh); continue; }
+        w->layers[kept++] = w->layers[i];
     }
-    nlayers = kept;
+    w->nlayers = kept;
 }
 /* }}} */
 
 /* {{{ water_draw
  * Ripples at 15 pictures a second. Drawn with depth testing but without
  * depth writing, see-through, after everything solid. */
-void water_draw(Vector3 eye, const LightNow *light, double seconds)
+void water_draw(Water *w, Vector3 eye, const LightNow *light, double seconds)
 {
-    SetShaderValue(shader, loc_eye, &eye, SHADER_UNIFORM_VEC3);
-    sky_light_shader(shader, light);
+    SetShaderValue(w->shader, w->loc_eye, &eye, SHADER_UNIFORM_VEC3);
+    sky_light_shader(w->shader, light);
     Sight sight;
     sight_from(&sight, MatrixMultiply(rlGetMatrixModelview(), rlGetMatrixProjection()));
     rlDisableDepthMask();
     BeginBlendMode(BLEND_ALPHA);
-    for (int i = 0; i < nlayers; ++i) {
-        if (layers[i].kind < 0 || !sight_ball(&sight, layers[i].centre, layers[i].radius)) continue;   /* out of sight: not sent */
-        Kind *k = &kinds[layers[i].kind];
+    for (int i = 0; i < w->nlayers; ++i) {
+        if (w->layers[i].kind < 0 || !sight_ball(&sight, w->layers[i].centre, w->layers[i].radius)) continue;   /* out of sight: not sent */
+        Kind *k = &w->kinds[w->layers[i].kind];
         float raw = k->type >= 2 ? 1.0f : 0.0f;
         int sea = k->type == 1;                         /* the sea's colours and opacity, or a river's */
         float opacity[2] = { light->water_alpha[sea ? 0 : 2], light->water_alpha[sea ? 1 : 3] };
-        SetShaderValue(shader, loc_near, light->water[sea ? 0 : 2], SHADER_UNIFORM_VEC3);
-        SetShaderValue(shader, loc_deep, light->water[sea ? 1 : 3], SHADER_UNIFORM_VEC3);
-        SetShaderValue(shader, loc_opacity, opacity, SHADER_UNIFORM_VEC2);
-        SetShaderValue(shader, loc_raw, &raw, SHADER_UNIFORM_FLOAT);
-        if (k->nframes) material.maps[MATERIAL_MAP_DIFFUSE].texture = k->frames[(int)(seconds * 15.0) % k->nframes];
-        DrawMesh(layers[i].mesh, material, MatrixIdentity());
+        SetShaderValue(w->shader, w->loc_near, light->water[sea ? 0 : 2], SHADER_UNIFORM_VEC3);
+        SetShaderValue(w->shader, w->loc_deep, light->water[sea ? 1 : 3], SHADER_UNIFORM_VEC3);
+        SetShaderValue(w->shader, w->loc_opacity, opacity, SHADER_UNIFORM_VEC2);
+        SetShaderValue(w->shader, w->loc_raw, &raw, SHADER_UNIFORM_FLOAT);
+        if (k->nframes) w->material.maps[MATERIAL_MAP_DIFFUSE].texture = k->frames[(int)(seconds * 15.0) % k->nframes];
+        DrawMesh(w->layers[i].mesh, w->material, MatrixIdentity());
     }
     EndBlendMode();
     rlDrawRenderBatchActive();

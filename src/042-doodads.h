@@ -19,6 +19,7 @@
 
 #include "020-adt.h"
 #include "028-collide.h"
+#include "040-water.h"
 #include "026-light.h"
 #include "027-liquid.h"
 #include "015-mpq.h"
@@ -28,7 +29,7 @@
  * adds its model's solid shape to `collide` (173q; NULL: none), and every
  * building placed its pools to `liquids` and to the water drawer (173r;
  * NULL: none). W_OK, or a code with `why`. */
-WErr  doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, WWhy *why);
+WErr  doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);
 
 /* Adds a tile's doodads, placed relative to the drawing origin (ox, oy),
  * loading any model not seen before. A model that can't be read is

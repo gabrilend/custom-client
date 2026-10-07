@@ -21,23 +21,26 @@
 #include "015-mpq.h"
 #include "raylib.h"
 
-/* Reads the liquid table; the chain must outlive the drawer. W_OK, or a code
- * with `why`. */
-WErr  water_init(MpqChain *chain, WWhy *why);
+/* A water drawer (the handle: docs/001, "Handles"), with the liquid
+ * table read; the chain must outlive it. NULL with `why` when the table
+ * or the shader can't be had. Freed with water_free. */
+typedef struct Water Water;
+Water *water_new(MpqChain *chain, WWhy *why);
+void   water_free(Water *w);
 
 /* Adds a tile's water (tile = tx * 64 + ty), placed relative to the
  * drawing origin; drops it again (173s). */
-void water_add_tile(const AdtTile *t, int tile, double ox, double oy);
-void water_drop_tile(int tile);
+void water_add_tile(Water *w, const AdtTile *t, int tile, double ox, double oy);
+void water_drop_tile(Water *w, int tile);
 
 /* Adds a building's pool (021-wmo.h), of kind `kind` (LiquidType.dbc id),
  * placed by `at` (the building's placement, Raylib's layout, relative to
  * the drawing origin), brought by `tile`; water_drop_tile drops it. Its
  * wet cells are drawn as the ground's water is, the picture repeating
  * once a cell. */
-void water_add_pool(int tile, const float at[16], const WmoPool *p, int kind);
+void water_add_pool(Water *w, int tile, const float at[16], const WmoPool *p, int kind);
 
 /* Draws all water at `seconds` since start (the ripples' clock). */
-void water_draw(Vector3 eye, const LightNow *light, double seconds);
+void water_draw(Water *w, Vector3 eye, const LightNow *light, double seconds);
 
 #endif

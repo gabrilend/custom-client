@@ -17,7 +17,7 @@ How a placement becomes a position and a turn is adt_place_matrix
 
 ## What it offers
 
-- `WErr doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, WWhy *why);`
+- `WErr doodads_init(MpqChain *chain, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);`
   Readies the drawer; the chain must outlive it. Every copy placed also
   adds its model's solid shape to `collide` (173q; NULL: none), and every
   building placed its pools to `liquids` and to the water drawer (173r;

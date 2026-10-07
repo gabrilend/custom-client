@@ -14,6 +14,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* {{{ the rings */
@@ -22,9 +23,6 @@ static const float RING_DEG[] = { -30, 0, 6, 15, 35, 90 };
 static const int   RING_SKY[] = { 4, 4, 3, 2, 1, 0 };           /* which sky colour each ring takes */
 #define RINGS ((int)(sizeof RING_DEG / sizeof RING_DEG[0]))
 #define RADIUS 900.0f                                            /* inside the far plane (1600) */
-static Mesh     dome;
-static Material plain;
-static int      loc_sky;
 /* the dome's shader: each point's sky colour number rides in its colour's
  * red (0-4); the colours themselves are five shader values, set each
  * frame. No light, no fog: the sky is the fog's backdrop. */
@@ -35,12 +33,28 @@ static const char *SKY_VS =
 static const char *SKY_FS =
     "#version 330\n"
     "in vec3 c; out vec4 frag; void main() { frag = vec4(min(c, vec3(1.0)), 1.0); }\n";
-static char     box_path[128];        /* the skybox now drawn ("" none) */
 /* }}} */
 
-/* {{{ sky_init */
-void sky_init(void)
+/* {{{ a sky (the handle: 037-sky.h): the dome, its material and shader
+ * value's place, and the skybox now drawn ("" none) */
+struct Sky {
+    Mesh     dome;
+    Material plain;
+    int      loc_sky;
+    char     box_path[128];
+};
+/* }}} */
+
+/* {{{ sky_new, sky_free */
+void sky_free(Sky *sk)
 {
+    UnloadMesh(sk->dome);
+    UnloadShader(sk->plain.shader);
+    free(sk);
+}
+Sky *sky_new(void)
+{
+    Sky *sk = calloc(1, sizeof *sk);
     Mesh m = { 0 };
     m.vertexCount = RINGS * (SEGMENTS + 1);
     m.vertices = MemAlloc(sizeof(float) * 3 * m.vertexCount);
@@ -67,10 +81,11 @@ void sky_init(void)
             n += 6;
         }
     UploadMesh(&m, false);                                   /* sent once; the colours come as shader values */
-    dome = m;
-    plain = LoadMaterialDefault();
-    plain.shader = LoadShaderFromMemory(SKY_VS, SKY_FS);
-    loc_sky = GetShaderLocation(plain.shader, "sky");
+    sk->dome = m;
+    sk->plain = LoadMaterialDefault();
+    sk->plain.shader = LoadShaderFromMemory(SKY_VS, SKY_FS);
+    sk->loc_sky = GetShaderLocation(sk->plain.shader, "sky");
+    return sk;
 }
 /* }}} */
 
@@ -88,21 +103,21 @@ void sky_light_shader(Shader sh, const LightNow *l)
 
 /* {{{ sky_draw */
 /* the skybox the light names, handed to the doodads when it changes */
-static void skybox_for(const LightNow *light)
+static void skybox_for(Sky *sk, const LightNow *light)
 {
-    if (!strcmp(light->skybox, box_path)) return;
-    snprintf(box_path, sizeof box_path, "%s", light->skybox);
-    doodads_skybox(box_path);
-    if (box_path[0]) printf("sky: the skybox %s\n", box_path);
+    if (!strcmp(light->skybox, sk->box_path)) return;
+    snprintf(sk->box_path, sizeof sk->box_path, "%s", light->skybox);
+    doodads_skybox(sk->box_path);
+    if (sk->box_path[0]) printf("sky: the skybox %s\n", sk->box_path);
 }
 
-void sky_draw(Vector3 eye, const LightNow *light)
+void sky_draw(Sky *sk, Vector3 eye, const LightNow *light)
 {
-    skybox_for(light);
-    SetShaderValueV(plain.shader, loc_sky, light->sky, SHADER_UNIFORM_VEC3, 5);   /* the five colours, overhead to horizon */
+    skybox_for(sk, light);
+    SetShaderValueV(sk->plain.shader, sk->loc_sky, light->sky, SHADER_UNIFORM_VEC3, 5);   /* the five colours, overhead to horizon */
     rlDisableDepthTest();
     rlDisableDepthMask();
-    DrawMesh(dome, plain, MatrixTranslate(eye.x, eye.y, eye.z));
+    DrawMesh(sk->dome, sk->plain, MatrixTranslate(eye.x, eye.y, eye.z));
     rlDrawRenderBatchActive();
     doodads_draw_skybox(eye);
     rlEnableDepthMask();

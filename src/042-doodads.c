@@ -150,6 +150,7 @@ static int       npictures, pictures_cap;
 typedef struct { WmoPool pool; int kind; } BuildingPool;   /* a part's pool and its LiquidType id (173r) */
 typedef struct { int model; WmoRoot root; BuildingPool *pools; int npools; } Building;
 static LiquidWorld *liquids;          /* where placed buildings' pools go (doodads_init) */
+static Water       *pools;            /* where placed buildings' pools are drawn (doodads_init) */
 static double origin_x, origin_y;     /* the drawing origin, from doodads_add_tile (pools are filed in world coordinates) */
 static Building *buildings; static int nbuildings, buildings_cap;
 static int       skipped_pieces, moving_models, emitting_models;
@@ -163,11 +164,12 @@ static Vector3   view_right = { 1, 0, 0 }, view_up = { 0, 0, 1 };   /* the camer
 /* }}} */
 
 /* {{{ doodads_init */
-WErr doodads_init(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, WWhy *why)
+WErr doodads_init(MpqChain *c, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
 {
     chain = c;
     solids = collide;
     liquids = liquid_world;
+    pools = water;
     shader = LoadShaderFromMemory(VS, FS);
     if (!IsShaderReady(shader)) { w_fail(why, W_ERR_GPU, "the doodad shader didn't compile (see Raylib's messages above)"); return why->code; }
     shader.locs[SHADER_LOC_MATRIX_MODEL] = GetShaderLocationAttrib(shader, "instanceTransform");
@@ -542,7 +544,7 @@ static void realise(const TileRecord *r)
         float m[16];
         memcpy(m, MatrixToFloatV(p->at).v, sizeof m);
         for (int k2 = 0; liquids && k2 < b->npools; ++k2) {   /* its pools (173r) */
-            water_add_pool(r->tile, m, &b->pools[k2].pool, b->pools[k2].kind);
+            water_add_pool(pools, r->tile, m, &b->pools[k2].pool, b->pools[k2].kind);
             liquid_add_pool(liquids, r->tile, m, origin_x, origin_y, &b->pools[k2].pool, b->pools[k2].kind);
         }
         for (int si = 0; si < b->root.nsets; ++si) {
