@@ -13,6 +13,27 @@ this project and that one share. On 2026-09-23 the two designs were merged,
 and this project's documents and issues were rewritten to the merged design.
 The previous versions are in git history (commit `48811d0` and earlier).
 
+**October 2026: three projects become one.** On 2026-10-07 the owner
+decided to merge wow-chat-2026's working custom client (C on raylib: the
+world of Ashenvale drawn from the game's own files, her moving by the
+server's own rules, checked by its own test program) into this project, and to fold
+world-edit-to-execute's client into it as well: "The goal is to be able
+to play both games seamlessly in the same binary, and to re-use as much
+of the code as we can between them. The goal is to condense the two games
+into a single project." The working code is the start of this project's
+`src/`; its design and the owner's decisions on it are recorded in
+wow-chat-2026 issue 173v and carried into these documents:
+
+| Decided 2026-10-07 | Where |
+|--------------------|-------|
+| One engine in C for both games; Lua for scripting only | [001](./001-architecture-overview.md), [002](./002-technology-stack.md) |
+| Both games server-authoritative on AzerothCore; lockstep only maybe, later, for LAN | [004](./004-network-protocol.md) |
+| Every part behind a handle; errors as codes that keep their sentence | [001](./001-architecture-overview.md) |
+| Our own archive reader, the system's zlib, a bash build | [002](./002-technology-stack.md), [008](./008-build-system.md) |
+| Blizzard's files are the placeholders; the resolver waits for the first replacement | [012](./012-asset-replacement-and-provenance.md) |
+| Each server a player plays on is a profile, with its own settings and assets | [001](./001-architecture-overview.md) |
+| Source files numbered in reading order | [010](./010-table-of-contents.md) |
+
 ## What changed from the first design
 
 | First design (May 2026) | W client (September 2026) |
@@ -38,7 +59,8 @@ question, recorded in [012](./012-asset-replacement-and-provenance.md).
 
 - Read the asset archives (MPQ), with loose-file folders layered on top for
   converted WC3 maps and replacement packs.
-- Resolve every asset through the resolver and report where each came from.
+- Resolve every asset through the resolver and report where each came from
+  (once replacements exist; until then, read Blizzard's files directly).
 - Render terrain, world objects, characters, particles, full-screen overlays.
 - Capture and rebind input; in WC3 map mode, RTS selection and orders.
 - Play positional sound and streamed music.

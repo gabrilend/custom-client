@@ -3,7 +3,27 @@
 How the W client moves from Blizzard's assets to its own, and how it keeps a
 record of how each replacement was made.
 
-## The resolver
+## Today: Blizzard's files, as placeholders
+
+The owner, 2026-10-07: "we don't have a replacement pack yet ... we only
+have the blizzard ones for now, not even placeholders. We're just using
+them as, well, placeholders." So the client reads every asset straight
+from the owner's archives, as the working client did before the merge.
+The resolver below is built when the first replacement exists; until
+then every asset counts as borrowed.
+
+## How players share assets
+
+The owner, 2026-10-07: "A plain folder of files would be converted into
+a compressed archive when received. When we use our system to pass the
+files back and forth over the network, we will work with the compressed
+archive version, but we shouldn't require them to, and do the conversion
+as part of the input process." So a player may hand in a folder of files
+or an archive. A folder is packed into an archive when it is taken in,
+and only archives travel over the network. Packing needs the archive
+writer (planned: [105](../issues/105-mpq-reader.md)).
+
+## The resolver (when the first replacement exists)
 
 Every asset request (model, texture, animation set, particle definition,
 sound, font, interface image) goes through one function that asks three

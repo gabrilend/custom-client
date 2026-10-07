@@ -20,11 +20,18 @@ in `src/`.
   how the W client loads world-edit-to-execute's converted maps; no patch
   archive is needed for them.
 - The chain can answer **which** archive or overlay supplied a file.
-- Implementation: StormLib (reading and writing; writing is used by
-  world-edit-to-execute to build patch archives for the stock client, and for
-  the "default client compatible" seal).
-- Consumers never read the chain directly: they go through the asset
-  resolver ([012](./012-asset-replacement-and-provenance.md)).
+- Implementation: **our own reader** (owner, 2026-10-07: "We use our own
+  extracter"), written from the format's public description and built in
+  wow-chat-2026's custom client: the hash and block tables, the
+  encryption, zlib-compressed and stored sectors, the chain with its
+  locale and patch archives, a memory of files already unpacked shared by
+  both threads under a lock. Writing archives (patch archives for the
+  stock client, the "default client compatible" seal, packing a player's
+  folder of files: [012](./012-asset-replacement-and-provenance.md)) is
+  still to build ([105](../issues/105-mpq-reader.md)).
+- Today every part reads the chain directly. Once replacements exist,
+  reads go through the asset resolver
+  ([012](./012-asset-replacement-and-provenance.md)).
 
 ## DBC — client-side data tables
 
@@ -54,8 +61,10 @@ in `src/`.
 - Companion files: `.skin` (LOD index buffers + submesh table), `.anim`
   (external animation chunks for long anims), `.phys` (cloth physics, often
   absent in 3.3.5a), `.bone`, `.skel` (Cataclysm+ — ignored).
-- Skinning is bone-space; we evaluate the bone matrices on CPU per frame
-  and upload them as a UBO. Pre-3.3.5 era models stay well under any
+- Skinning is bone-space: the processor poses the bones each frame (items
+  hang from bones and particles start at them, so the poses are needed
+  there anyway) and sends them as a one-row float picture; the graphics
+  card bends the points (built, wow-chat-2026 173u). Pre-3.3.5 era models stay well under any
   reasonable bone budget.
 
 ## WMO — world map objects (buildings, dungeons)

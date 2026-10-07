@@ -1,78 +1,94 @@
 # 005 — Rendering Pipeline
 
-raylib (OpenGL 3.3 core under the hood). One window, one main thread, no
-raylib or `rlgl` calls from anywhere else. The high-level raylib API
-handles the per-frame `BeginDrawing` / `EndDrawing` cycle for us; we drop
-down to `rlgl` for terrain splatting, M2 skinning, and other custom
-shader work. Frame structure below.
+raylib on OpenGL 3.3 core. One window; every OpenGL call on the main
+thread. Rewritten 2026-10-07 for the merge: what is below **built** came
+from wow-chat-2026's custom client (issues 173f to 173u), measured at
+Astranaar; what is **planned** is this project's earlier plan, kept.
 
-## Frame outline (main thread)
+The step-by-step flow of data (files → memory → card → screen) is the
+datapath document that moves here with the code (wow-chat-2026's
+`docs/custom-client-datapath.md`); the measured history of making the
+frame fast is its optimization checklist
+(`docs/custom-client-optimization-checklist.md`), moving too.
+
+## The rule
+
+The processor decides *what* and *where*: a few numbers per object (a
+place, a bone table, a colour). The graphics card does the per-point and
+per-pixel work. Fewer, larger draw orders beat many small ones. Measured:
+a frame at Astranaar with its 467 creatures went from 36 ms to about 13
+by following it (2026-10-06).
+
+## The frame (main thread), as built
 
 ```
-poll input ──▶ pump network queue ──▶ simulation tick ──▶
-   build scene ──▶ run Lua UI scripts ──▶ build UI draw list ──▶
-      render passes ──▶ swap
+tiles in and out ──▶ input and movement ──▶ camera ──▶ animation ──▶
+   light for here and now ──▶ ground ──▶ doodads and buildings ──▶
+      figures and creatures ──▶ water ──▶ particles ──▶ sky ──▶ swap
 ```
 
-Simulation tick is a fixed 30 Hz (matching the original world-server tick).
-Rendering decouples: it interpolates entity positions between the last two
-ticks based on accumulated wall-clock time.
+1. **Tiles.** The tiles round her are loaded and those left behind
+   dropped. A second thread reads the next ring of tiles' files ahead and
+   prepares their ground (points, light, blend pictures, unpacked
+   pictures with their smaller copies); the main thread only sends what
+   is ready to the card. Creatures are built as they come within 110
+   yards, a few each frame.
+2. **Input and movement.** The mover answers from the server's own
+   heights, the models' solid shapes and the water, so she walks where
+   the server lets her.
+3. **Animation.** Bones are posed on the processor; the card bends the
+   points.
+4. **Light.** The zone's light tables give the sun, shade, sky colours,
+   fog and water colours for her place and hour; the underwater set
+   when the camera is below the surface.
 
-## Render passes (in order)
+## How each kind of thing is drawn (built)
 
-1. **Depth pre-pass for opaques** — terrain + WMO opaques. Cheap fill, kills
-   overdraw in the lit pass.
-2. **Shadow map** — directional, one cascade for v1. Two cascades is a
-   straightforward extension once the cascade math is parameterized.
-3. **Opaque pass** — terrain (texture splatting from ADT alpha maps), WMO
-   opaques, M2 opaques.
-4. **Sky + atmosphere** — skybox, sun disk, distant fog applied as
-   exponential height fog in the shader.
-5. **Transparent pass** — water (planar reflection at quality > medium),
-   M2 transparents sorted back-to-front, particles, ribbons.
-6. **Full-screen overlays** — vignette, weather effects (rain, snow),
-   underwater tint, "drowsy" / `daze` overlays driven by gameplay state.
-7. **UI pass** — single ortho projection, draws the FrameXML widget tree
-   that Lua built this frame.
+| Thing | How |
+|-------|-----|
+| Ground | each tile in four meshes; every ground picture is a layer of one shared texture array; each patch's four layer numbers ride on its points; the tile's blend maps (and baked shadow) are one 1024 × 1024 picture; quarters out of sight not drawn |
+| Doodads and buildings | each model's copies in sight gathered each frame and drawn together; compressed pictures sent as stored (DXT); two-layer pieces, moving pictures and animated tints in the shader |
+| Swaying and camera-facing doodads | bones and weights on the points, sent once; the bone poses each frame as a float picture (one row a model, or a row per copy for camera-facing ones) |
+| Characters and creatures | bent on the card the same way; a character's skin painted once from its pieces |
+| Water | per-layer meshes, sight-tested; the zone's water colours and opacities |
+| Particles | run on the processor near the camera; drawn as squares facing the camera |
+| Sky | the dome sent once, its five colours as shader values; skybox models (Northrend's auroras) drawn round the camera; the far horizon from the map's low-detail heights |
 
-## Asset pipeline (streamer thread → main thread)
+Every picture goes through one filtering setting (bilinear, trilinear,
+anisotropic up to 16x).
 
-1. Asset request enqueued by gameplay or the renderer.
-2. Streamer reads from MPQ (StormLib), decompresses, parses to an
-   intermediate CPU-side struct.
-3. For GPU resources: streamer stages bytes into a thread-owned scratch
-   buffer and enqueues the upload request.
-4. Main thread, at the top of the next frame: walks the upload ring,
-   issues the actual `rlLoadTexture` / `rlUpdateTexture` /
-   `rlLoadVertexBuffer` calls, and returns the handle to the requesting
-   subsystem.
+## Planned (kept from the earlier plan)
 
-This means assets never block the main thread on I/O or decompression, and
-all raylib/rlgl calls stay single-threaded.
+- **Shadow map** (one directional cascade), and torch and spell light
+  reaching the world: in the merged engine (173v, answer 11).
+- **Full-screen overlays:** weather, the ghost world, the drunk blur.
+- **The interface pass:** one orthographic projection drawing the
+  interface tree Lua built this frame.
+- **Particles in one batch** and doodad pieces merged: measured small
+  for now (wow-chat-2026 173u, items 2b and 6).
+- **Pictures without a window:** a scene drawn straight into a picture
+  file (the test scenes, wow-chat-2026 176a).
+- **WC3 models, animations and particles** drawn by the same renderer
+  ([001](./001-architecture-overview.md), "one engine, two games").
 
 ## Shaders
 
-Hand-written GLSL 330. We do **not** use a shader cross-compiler. One shader
-per material kind (terrain, M2-opaque, M2-skinned-transparent, water,
-particle). UI uses raylib's default shaders. Permutations via `#define` and
-a small cache. Loaded via `LoadShader` for raylib-managed materials,
-`rlLoadShaderCode` for the lower-level cases.
+Hand-written GLSL 330, one per kind of thing (ground, models, water,
+sky, particles); no cross-compiler.
 
 ## Camera
 
-Right-handed, +Z up (matches the original asset coordinate system). Default
-projection: 70° vertical FOV, 0.1 → 2000.0 near/far. Player camera is
-spring-arm + chase, configured from gameplay state.
++Z up, the game's own axes (x north, y west). 60° vertical field of
+view, near 0.3 yards, far a little past the view distance (or the far
+horizon). Third person behind her, with the original's following styles,
+and first person; the WC3 top-down camera is Phase 11.
 
-## What we deliberately skip in v1
+## Not in v1
 
-- Deferred shading.
-- HDR / tonemapping. We can fake it with a post-process LUT later.
-- Vulkan / D3D backends.
-- Mesh shaders, indirect draw, bindless textures.
+Deferred shading, HDR and tone mapping, Vulkan or Direct3D, mesh
+shaders, bindless textures.
 
 ## Related
 
-- [003-asset-formats.md](./003-asset-formats.md) — what feeds the pipeline.
-- [001-architecture-overview.md](./001-architecture-overview.md) — threading
-  model.
+- [003-asset-formats.md](./003-asset-formats.md): what feeds the frame.
+- [001-architecture-overview.md](./001-architecture-overview.md): threads.

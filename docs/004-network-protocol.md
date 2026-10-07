@@ -41,7 +41,54 @@ SRP6 is implemented with OpenSSL `BIGNUM`. Constants (N, g, k) are the
   - `MSG_MOVE_*` movement opcodes
   - `SMSG_MESSAGECHAT` / `CMSG_MESSAGECHAT`
 
+## Who holds the truth (decided 2026-10-07)
+
+Both games are **server-authoritative** on AzerothCore. The owner: "I
+think we transition WETE to Azerothcore then", and, after weighing
+lockstep: "I think lockstep isn't worth the implementation cost. Let's
+just do server-authoritative and call it good. Maybe lockstep for WETE
+LAN games or something...?"
+
+- **The WoW world:** as the 3.3.5a protocol already works. The client
+  moves its own character and sends where it is (`MSG_MOVE_*`), and asks
+  for things (cast spell 133 on that target). The server works out every
+  result (hits, damage, creatures' thinking, loot) and sends each client
+  what is near it.
+- **A WC3 map:** the client sends orders ("unit 12 moves to here"); the
+  server runs the map (its triggers converted to server scripts) and
+  sends each player what that player can see. A unit coming out of the
+  fog arrives with its full state.
+- **The world's shape only comes from the server.** Ground and doodads
+  that change while playing are sent from the server; a client is never
+  believed about them, and the server checks player positions against
+  its own world.
+- **Lockstep** (no server: every machine runs the whole game from the
+  players' orders, and only orders are sent) may come later as a LAN mode
+  for world-edit-to-execute's own engine. Not on AzerothCore.
+
+### Considered and set aside (2026-10-07)
+
+- **Orders sent player to player as well as to the server**, a player
+  who withholds them caught by the others. Edge cases found: simulating
+  only what a player sees breaks lockstep (things coming out of the fog
+  have no known state, and causes cross the fog); a player can't notice
+  what they can't see, while the server, holding every order, can check
+  a digest of what each player received; lost packets look exactly like
+  cheating; a player can lie about another; players' addresses are
+  exposed to each other. Orders are a few bytes, so sending them directly
+  saves little traffic; the only real gain is delay.
+- **Switching a game to server-only when a player's packets go missing:**
+  two systems to keep right and a hand-over mid-game, for a case server
+  authority never has.
+- **To measure:** under server authority every visible unit's changes are
+  sent, where lockstep sent one order per click. Large WC3 battles
+  (several hundred units) are where traffic is measured first.
+
 ## Frames: when timed things take effect (added 2026-09-23)
+
+Open since 2026-10-07: this section was written for world-edit-to-execute's
+own server (its W08). With WC3 maps now on AzerothCore, whether that
+server is still built is to be decided in the merged planning.
 
 With our own server (world-edit-to-execute W08), every timing-dependent
 message carries the **frame** (uint32 simulation tick, 62.5 per second) at

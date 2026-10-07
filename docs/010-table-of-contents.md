@@ -8,13 +8,13 @@ custom-client/
 ├── docs/
 │   ├── 000-vision-summary.md             # vision as actionable summary
 │   ├── 001-architecture-overview.md      # process model, layering, threading
-│   ├── 002-technology-stack.md           # C11, CMake, raylib, OpenSSL, LuaJIT, …
+│   ├── 002-technology-stack.md           # C11, bash build, raylib, our MPQ reader, zlib, OpenSSL, LuaJIT
 │   ├── 003-asset-formats.md              # MPQ, DBC, BLP, M2, WMO, ADT, …
 │   ├── 004-network-protocol.md           # auth + world handshake & framing
 │   ├── 005-rendering-pipeline.md         # frame structure, render passes
 │   ├── 006-ui-and-addons.md              # FrameXML, sandboxing, addon API
 │   ├── 007-audio-system.md               # mixer, 3D model, SoundEntries
-│   ├── 008-build-system.md               # CMake + scripts/ entry points
+│   ├── 008-build-system.md               # one bash build script, its outputs
 │   ├── 009-roadmap.md                    # 11 phases, with capstones
 │   ├── 010-table-of-contents.md          # this file
 │   ├── 011-balance-updates.md            # append-only tweak log
@@ -26,11 +26,11 @@ custom-client/
 │   └── completed/
 │       └── demos/                        # phase end-of-phase demos
 │
-├── src/                                  # C client (per-subsystem dirs)
-├── libs/                                 # vendored deps (StormLib, miniz, …)
+├── src/                                  # the engine, C, files numbered in reading order
+├── libs/                                 # vendored deps (raylib, when fetched)
 ├── assets/                               # proprietary MPQ chain (gitignored)
-├── tests/                                # one test exe per subsystem
-├── scripts/                              # build.sh, run.sh, test.sh, …
+├── tests/                                # the one test program
+├── scripts/                              # build, run, generate-info, …
 │
 ├── input/   output/   desire/   faith/   strategems/
 │                                         # see CLAUDE.md — long-lived notes
