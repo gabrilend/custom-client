@@ -44,4 +44,6 @@ animator serves both games.
 
 ## Related
 
+- Posing runs as stations on the ceramic engine: [110e](./110e-per-frame-work-as-stations.md).
+
 - [401](./401-m2-reader.md), [404](./404-characters-and-equipment.md).

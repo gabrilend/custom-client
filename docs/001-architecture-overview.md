@@ -49,6 +49,15 @@ Both games are **server-authoritative** on AzerothCore (owner,
 
 ## Threads
 
+**Decided 2026-10-07: the ceramic shape** ([110](../issues/110-the-ceramic-shape.md)).
+The owner: "I'd prefer not to have any main thread at all, or if we do,
+that it's only the rendering thread. Ideally we'd be able to have
+multiple rendering threads for different openGL contexts." Every part's
+work becomes a station on the ceramic engine's workers; the only other
+threads are render threads, one per OpenGL context, which take the
+newest state, upload finished assets and draw. The table below is the
+shape as built today, until 110 lands.
+
 | Thread | Does | State |
 |--------|------|-------|
 | **Main** | input, the frame's simulation, Lua, every OpenGL call | built |

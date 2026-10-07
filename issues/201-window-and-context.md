@@ -32,6 +32,11 @@ int   window_height(const window_t *);
 double window_dt   (const window_t *);   /* seconds since last frame      */
 ```
 
+**Since 2026-10-07 ([110](./110-the-ceramic-shape.md)):** there is no main
+loop; the process's first thread is the window's render thread
+([110b](./110b-the-window-render-thread.md)), and the guard below is a
+**render-thread guard** per context.
+
 The window subsystem also owns the **main-thread guard**: every other
 subsystem that calls raylib or `rlgl` asserts that it's on this thread.
 Catches threading mistakes at the boundary instead of as mysterious GL

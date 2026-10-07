@@ -29,7 +29,7 @@ No C++. One language at module boundaries, faster builds, one ABI.
 | MPQ archives | **our own reader** | "We use our own extracter" (owner, 2026-10-07). Written from the format's public description; reads the 3.3.5a chain with its locale and patch archives, kept thread-safe for the reading-ahead thread. Writing archives (replacement packs, the stock-client seal) is a planned issue of its own. |
 | Compression | the system's zlib | What the reader already uses. |
 | Crypto (networking) | OpenSSL libcrypto | SRP6 (big numbers), RC4, HMAC-SHA1 for the 3.3.5a protocol ([004](./004-network-protocol.md)). |
-| Threads | POSIX threads | The reading-ahead thread; locks where it shares the archive reader and the server's heights. |
+| Threads | POSIX threads; the ceramic engine (soramech's `cera.c`, world-edit-to-execute's kept copy) from 110 | Now: the reading-ahead thread, with locks where it shares the archive reader and the server's heights. From 110: workers run every part as stations; render threads only draw. |
 | Math | our own | Exactly what the renderer and the mover need; raylib's `raymath` where it fits. |
 | XML (FrameXML) | our own pull parser | FrameXML uses a small subset of XML. |
 | Lua VM | LuaJIT | Above. |

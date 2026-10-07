@@ -21,6 +21,9 @@ by following it (2026-10-06).
 
 ## The frame (main thread), as built
 
+(To become render threads drawing from a mailbox while stations do the
+work: [110](../issues/110-the-ceramic-shape.md).)
+
 ```
 tiles in and out ──▶ input and movement ──▶ camera ──▶ animation ──▶
    light for here and now ──▶ ground ──▶ doodads and buildings ──▶

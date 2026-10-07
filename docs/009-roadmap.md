@@ -34,6 +34,7 @@ Issues:
 - [107-blp-parser](../issues/107-blp-parser.md)
 - [108-phase-demo](../issues/108-phase-demo.md)
 - [109-test-scenes-client-half](../issues/109-test-scenes-client-half.md)
+- [110-the-ceramic-shape](../issues/110-the-ceramic-shape.md) (2026-10-07): no main loop; workers run every part as stations, render threads only draw
 
 ## Phase 2 — Rendering Core
 
@@ -223,8 +224,10 @@ world-edit-to-execute (WETE) has its own client: a small C host on raylib
 models, pictures, ground, placements), runs the game's rules, and hands
 C flat arrays to draw. Here C reads and draws, and Lua is only for
 scripting (docs/001). So WETE's client does not move file for file: each
-part either gets a **C twin** here (its Lua stays in WETE as the
-reference the twin is checked against, byte for byte where it can be),
+part either gets a **C twin** here (checked byte for byte against WETE's
+Lua once, then the Lua is deprecated and the C is the one
+implementation; the owner, 2026-10-07: "Let's just deprecate the lua
+version and keep the C version"),
 is **replaced** by a part this client already has, or **stays in WETE**
 because it is the game's rules, which run on AzerothCore (docs/004).
 
@@ -240,27 +243,32 @@ tables are still read by WETE through StormLib, before conversion.
 | `assets/anim.lua` | WC3 sequences posed (node matrices) | the same posing as M2: [402](../issues/402-skeletons-and-animation.md) step 1 |
 | particle and ribbon emitters inside `mdx.lua`; spell art (WETE 530, 538) | WC3 particles, ribbons, lightning | one particle system: [403](../issues/403-particles.md) |
 | `render/models.c` | draws Lua-built meshes with team colour | replaced by 041 (figure) and 042 (doodads), which learn team colour (404) |
-| `parsers/w3e.lua`, `assets/ground.lua`, `render/landscape.c`, `render/terrain.c` | WC3 ground and its tileset blending | replaced: WETE's converter (its W02) writes the map as ground tiles (ADT) into an overlay folder; 301 and 302 draw them. *Open question below* |
+| `parsers/w3e.lua`, `assets/ground.lua`, `render/landscape.c`, `render/terrain.c` | WC3 ground and its tileset blending | C twin of the reading; the ground renderer (302) extended to paint WC3's tilesets and WoW's layers onto one mesh, cliffs seated on it (answer 1 below) |
 | `parsers/doo.lua`, `parsers/unitsdoo.lua` | doodads and starting units placed | WETE's converter writes doodads into the tiles and units as the server's spawns |
 | `render/fog.c` | fog of war drawn over the world | Phase 11, new issue when it begins; the server decides what is seen, the client only shades it |
 | `render/input.c` | ground and unit picking, box select | [1108](../issues/1108-phase-demo.md)'s 1102 and 1103 |
 | `render/ui2d.c`, `ui/wc3/*.lua` | the WC3 interface (command card, resource bar, portraits) | Phase 7's interface runtime, then 1105; the Lua moves as "WC3 interface (Lua)" (docs/001's layers) |
-| `demo/wc3map/*.lua`, `runtime/`, `jass/`, `ai/` | the game's rules: combat, economy, triggers, computer players | **stays in WETE**: converted to server scripts on AzerothCore (WETE W02e); WETE's own engine keeps them for a possible lockstep LAN mode |
-| `render/ceramic/`, `render/threading.c`, `render/slots.c`, `render/bridge.c` | WETE's thread pool and render graph | not moving now: this client has its reading-ahead thread (034). Whether the pool replaces it is open |
-| `render/geometry.c`, `geometry/*.lua` | flat-shaded solids painted from designs | not moving now; *open question below* |
+| the custom map browser (WETE 609, 1001) | finding, fetching and listing maps | stays in WETE; drawn as an HTML page onto a flat interface pane here (owner, 2026-10-07: "maybe we just render the browser to HTML and cast it onto a flat UI pane in the W client"), as the AzerothCore project's custom-model pages may be too |
+| `demo/wc3map/*.lua`, `runtime/`, `jass/`, `ai/` | the game's rules: combat, economy, triggers, computer players | **not in this client**: AzerothCore runs every trigger and WC3 mechanic, in ALE Lua or by patching the server (owner, 2026-10-07); WETE's Lua is the reference the server's version is checked against |
+| `render/ceramic/`, `render/threading.c`, `render/slots.c`, `render/bridge.c` | WETE's thread pool and render graph | moves: the engine becomes this client's shape, [110](../issues/110-the-ceramic-shape.md); its old pool (`threading.c`, `slots.c`, `bridge.c`) does not |
+| `render/geometry.c`, `geometry/*.lua` | flat-shaded solids painted from designs | moves as placeholder art, and the first test of the custom model system (answer 2 below) |
 | `net/` | WETE's own message server | superseded for both games by AzerothCore; WETE's W08 (its own server) is open |
 | `editor/` | the world editor | stays in WETE: it writes maps, this client plays them |
 
 ### Open questions for the second crosswalk
 
-1. **WC3 ground: converted or read directly?** The design so far converts
-   a WC3 map's ground into ADT tiles (WETE W02). An ADT chunk blends at
-   most four ground pictures, and WC3 cliffs are models placed by rule,
-   not ground. A direct reader of `war3map.w3e` here would draw WC3 ground
-   exactly as WC3 does, at the cost of a second ground renderer. Which?
-2. **Flat-shaded designs.** WETE's geometry designs (boxes, wedges, quads
-   painted from Lua) are its placeholder art. Do they come here as a
-   placeholder kind for the resolver (012), or stay WETE-only?
-3. **The thread pool.** WETE's ceramic engine (a task graph over a worker
-   pool) is the larger threading design; this client has one reading-ahead
-   thread. Does the pool come here to replace it, later?
+1. ~~WC3 ground: converted or read directly?~~ Answered 2026-10-07: the
+   ground renderer is extended to draw both kinds, "We should be able to
+   paint both onto the same terrain mesh. Cliffs placed onto a terrain
+   mesh should jump to the highest point that their lowest point
+   intersects with the terrain... or something similar" (the owner). So
+   one ground mesh takes WoW's layered painting and WC3's tileset
+   painting, and WC3 cliffs are models seated on that mesh by rule.
+2. ~~Flat-shaded designs~~ Answered 2026-10-07: they come here as
+   placeholder art, "We can use them for a test of the custom model
+   system" (the owner).
+3. ~~The thread pool~~ Answered 2026-10-07: the ceramic engine becomes
+   this client's shape, "I'd prefer not to have any main thread at all,
+   or if we do, that it's only the rendering thread. Ideally we'd be able
+   to have multiple rendering threads for different openGL contexts"
+   (the owner). [110](../issues/110-the-ceramic-shape.md).

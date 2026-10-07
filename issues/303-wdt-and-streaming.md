@@ -13,6 +13,12 @@ Checked: a far jump leaves exactly what starting there gives.
 
 ## Intended behavior
 
+**Since 2026-10-07:** the streamer thread below becomes loading stations
+on the ceramic engine, and the reading-ahead thread (034) retires into
+them ([110d](./110d-the-asset-table-and-loading-stations.md)). The
+choreography below is the earlier design.
+
+
 Two intertwined deliverables.
 
 ### The WDT parser
