@@ -10,6 +10,18 @@ threads for different openGL contexts, so that we can do things like
 
 ## Current behavior
 
+**Paused 2026-10-07, blocked on soramech.** The owner: "We need to have
+timer support in the ceramic engine too. Maybe we should put a pin in
+this until soramech is developed a bit more? With the relevant issue
+files blocked until we get it built." What soramech
+(`/home/ritz/programming/ai-playground/minimal-soramech`) needs first:
+**timers** (work handed in at given moments, the shape in
+[110g](./110g-the-clock.md)) and **standing tasks** (a task handed in
+again each tick, skipped while still running, [110e](./110e-per-frame-work-as-stations.md)).
+These are built in soramech itself, not as patches here, and arrive
+through the pin of [110a](./110a-the-engine-in-the-client.md). Checked
+2026-10-07: soramech's issues plan neither yet.
+
 The client has two threads (docs/001, "Threads"):
 
 - **The main thread** (`src/043-main.c`) does everything each frame, one
@@ -68,7 +80,7 @@ and no timer thread. Per-frame work runs as **standing tasks**: a task
 that stays in existence and is handed in again each tick, writing only
 its own slice, skipped for a tick while still running (a flag says so).
 The owner: "Let's build it now and see what happens. We can optimize it
-later." Built here (110e), and offered to soramech after.
+later." Then, the same day: built in soramech first (see the pause above).
 
 Everything else is a station: loading and decoding files, preparing
 ground, posing models, stepping particles, deciding what is in view,
@@ -120,6 +132,8 @@ Execution order: 110a → (110b ∥ 110c ∥ 110g) → 110d → 110e → 110f
 3. ~~Standing tasks~~ Answered 2026-10-07: built now, here (110e).
 
 ## Related
+
+- **Blocked by:** soramech timers and standing tasks (above).
 
 - world-edit-to-execute `issues/515-render-graph-on-the-ceramic-engine.md`
   and its sub-issues (the measurements this design rests on).

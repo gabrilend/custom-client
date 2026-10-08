@@ -4,6 +4,9 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 There is nothing between the work and the drawing: the main thread does
 both, in turn. world-edit-to-execute built and measured the mailbox
 (515c: 725 frames a second uncapped against 472 taking turns) and

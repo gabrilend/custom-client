@@ -4,6 +4,9 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 Every frame, on the main thread, one after another: the mover steps,
 every animated model is posed (`anim_pose`, `anim_pose_facing` in
 `042-doodads.c`; figures in `041-figure.c`), every particle emitter is
@@ -13,7 +16,8 @@ and Lua runs.
 ## Intended behavior
 
 Each of these is a **standing task** (110; the owner, 2026-10-07: "Let's
-build it now and see what happens"): it stays in existence, the clock
+build it now and see what happens"; later the same day, to be built in
+soramech itself): it stays in existence, the clock
 (110g) hands it in each tick, it writes only its slice of the mailbox's
 buffer being written, and a flag skips it for a tick while it is still
 running, so a slow machine updates less often but never queues up work:

@@ -4,6 +4,9 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 The client has no worker pool. Copies of the engine (2026-10-07):
 soramech (`ai-playground/minimal-soramech`, the upstream, and
 `tiny-soramech`), supcom-derivative-clone (`libs/900-cera.c`), and

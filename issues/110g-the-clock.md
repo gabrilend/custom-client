@@ -5,11 +5,18 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 Nothing in the client runs "at a time". The frame loop runs everything
 every frame. The ceramic engine runs a station when its inputs arrive;
 it has no notion of "at 12.5 seconds" or "every 50 ms".
 
 ## Intended behavior
+
+**The clock belongs in the ceramic engine** (2026-10-07): the shape below
+is to be built in soramech, so every ceramic program has it; this client
+then uses it. The render thread moving the hand is this client's part.
 
 A **clock** keeps a registry of work to start at given moments: every
 increment (a repeating entry), or once at a future increment and never

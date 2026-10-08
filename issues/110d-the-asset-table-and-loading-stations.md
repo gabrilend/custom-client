@@ -4,6 +4,9 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 Loading is split between the main thread (tiles in reach: reading,
 preparing, sending to the card) and the reading-ahead thread
 (`src/034-prefetch.c`: the next ring of tiles unpacked and their ground

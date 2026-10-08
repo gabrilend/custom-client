@@ -4,6 +4,9 @@
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 `src/043-main.c` runs one loop on the process's first thread: it reads
 input, does every part of the frame's work in order, and draws. Issue
 201 plans a "main-thread guard" asserting that raylib is only called

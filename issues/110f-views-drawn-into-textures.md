@@ -6,6 +6,9 @@ displaying it on a texture is fine."*
 
 ## Current behavior
 
+*Paused with its parent, 2026-10-07: blocked until soramech has timers
+and standing tasks ([110](./110-the-ceramic-shape.md)).*
+
 One window, one OpenGL context, drawn by the main thread. Pictures of a
 scene for tests are taken from the window (`scripts/run --shot`).
 
