@@ -118,6 +118,8 @@ card and resource bar, minimap. The owner's reason for building this client:
 
 Capstone: [1108-phase-demo](../issues/1108-phase-demo.md).
 
+Also in Phase 11: [1109](../issues/1109-the-editor-as-a-mode.md), world-edit-to-execute's map editor as a mode of this client (2026-10-07).
+
 Decided 2026-09-23: AzerothCore runs a WC3 map's rules, with the map's
 triggers converted into server scripts (world-edit-to-execute W02e). The client
 sends orders and shows results; multiplayer comes with the server.
@@ -253,7 +255,7 @@ tables are still read by WETE through StormLib, before conversion.
 | `render/ceramic/`, `render/threading.c`, `render/slots.c`, `render/bridge.c` | WETE's thread pool and render graph | moves: the engine becomes this client's shape, [110](../issues/110-the-ceramic-shape.md); its old pool (`threading.c`, `slots.c`, `bridge.c`) does not |
 | `render/geometry.c`, `geometry/*.lua` | flat-shaded solids painted from designs | moves as placeholder art, and the first test of the custom model system (answer 2 below) |
 | `net/` | WETE's own message server | superseded for both games by AzerothCore; WETE's W08 (its own server) is open |
-| `editor/` | the world editor | stays in WETE: it writes maps, this client plays them |
+| `editor/` | the world editor | its code stays in WETE; it runs here as a mode, on this client's renderer (owner, 2026-10-07: "let's make the editor a mode of the W client"): [1109](../issues/1109-the-editor-as-a-mode.md). WETE's renderer retires once the mode works |
 
 ### Open questions for the second crosswalk
 
