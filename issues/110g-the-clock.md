@@ -59,7 +59,17 @@ idea, with the 'ring of buckets'". So the leaning is:
 - **A consequence:** a repeating entry with a period shorter than a frame
   fires several times in one burst each frame. Socket polling and other
   "every frame" work therefore repeat once per frame's worth of
-  milliseconds (16), not every millisecond.
+  milliseconds, not every millisecond.
+- **By refresh rate** (the owner asked about 144 and 240, 2026-10-07):
+
+  | Rate | A frame | Buckets the hand passes a frame | Latest start | Average lateness |
+  |------|---------|--------------------------------|--------------|------------------|
+  | 60 Hz | 16.7 ms | 16 or 17 | 16.7 ms | 8.3 ms |
+  | 144 Hz | 6.9 ms | 6 or 7 | 6.9 ms | 3.5 ms |
+  | 240 Hz | 4.2 ms | 4 or 5 | 4.2 ms | 2.1 ms |
+
+  The clock gets finer as the screen gets faster, at no cost: the hand
+  moves the same way, through fewer buckets each time.
 - **The registry is a timing wheel**: a ring of buckets like a clock
   face, one bucket per increment. Something due 5 increments from now
   goes into the bucket 5 past the hand. Each time the hand moves on a
@@ -70,6 +80,18 @@ idea, with the 'ring of buckets'". So the leaning is:
   as its time approaches. Entries are added from any thread by pushing
   onto the bucket's list with one compare-and-swap, so adding takes no
   lock. A repeating entry puts itself back one period on when fired.
+
+## Open questions
+
+1. **"Every frame" as its own kind of entry?** A fixed period (16 ms) is
+   right only at 60 Hz: at 144 Hz it skips frames, and at 240 Hz it runs
+   on one frame in four. An entry that fires once each time the hand
+   moves, whatever the rate, would follow the screen. Add it?
+2. **A window that stops drawing.** When the window is minimized or
+   hidden, the system may slow or pause its frames, and the clock (and
+   with it the socket polling) would slow or stop with them, so the
+   server's messages pile up. Keep the render thread's loop turning at a
+   floor rate (moving the hand, drawing nothing) while it isn't shown?
 
 ## Answered
 
