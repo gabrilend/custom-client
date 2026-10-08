@@ -1,7 +1,7 @@
 # 110g — The Clock: Work at Times, with No Thread Asleep Waiting for Them
 
-*Parent: [110](./110-the-ceramic-shape.md). Design still open: the shape
-below is the owner's sketch of 2026-10-07 and the questions it raises.*
+*Parent: [110](./110-the-ceramic-shape.md). Shape settled with the owner
+2026-10-07 (the sketch, the leaning and the answers below).*
 
 ## Current behavior
 
@@ -41,17 +41,25 @@ earliest moment in the registry (one atomic read and one comparison);
 when that moment has passed, it takes the due entries and hands them in.
 The checking rides on work that is happening anyway.
 
-## Leaning (2026-10-07, not yet settled)
+## The shape (settled 2026-10-07)
 
 The owner considered a task that hands itself in again each time it
 finishes, to check the clock, and noticed it "would certainly spin when
 nothing else is going on", then: "maybe the render thread is the right
 idea, with the 'ring of buckets'". So the leaning is:
 
-- **The render thread moves the clock's hand** once a frame (it is awake
-  every frame anyway); any worker taking a task may also move it, which
-  makes the clock finer while the client is busy. Lateness while idle:
-  at most one frame (about 16 ms at 60 a second); on average half that.
+- **The step is one millisecond; the hand moves once a frame** (the
+  owner: "let's say one ms is the timestep, but we update the clock once
+  per frame"). The window's render thread, awake every frame anyway,
+  moves the hand from where it was to now, passing every millisecond
+  bucket between in order (about 16 at 60 frames a second) and handing
+  in what each holds. Workers do not move it. An entry's moment is kept
+  to the millisecond, so work keeps its order and spacing, but it starts
+  up to one frame late (about 16 ms; 8 on average).
+- **A consequence:** a repeating entry with a period shorter than a frame
+  fires several times in one burst each frame. Socket polling and other
+  "every frame" work therefore repeat once per frame's worth of
+  milliseconds (16), not every millisecond.
 - **The registry is a timing wheel**: a ring of buckets like a clock
   face, one bucket per increment. Something due 5 increments from now
   goes into the bucket 5 past the hand. Each time the hand moves on a
@@ -63,16 +71,27 @@ idea, with the 'ring of buckets'". So the leaning is:
   onto the bucket's list with one compare-and-swap, so adding takes no
   lock. A repeating entry puts itself back one period on when fired.
 
-## Open questions
+## Answered
 
-1. Is a frame's lateness acceptable for everything the clock serves? The
-   socket polled once a frame adds up to 16 ms before a server message
-   is seen.
-2. The increment: one millisecond, or the frame?
+1. ~~Is a frame's lateness acceptable?~~ Yes (2026-10-07).
+2. ~~The increment~~ One millisecond, the hand moved once a frame.
 
 ## Suggested implementation steps
 
-To be written once the shape is chosen.
+1. The fine wheel (a ring of millisecond buckets, a power of two, such
+   as 1024) and a coarse wheel above it; each bucket a list pushed with
+   one compare-and-swap; an entry holds its moment, its period (0 for
+   once) and the task to hand in.
+2. Moving the hand on the render thread: for each millisecond passed,
+   take the bucket's list in one exchange, hand its due entries in as one
+   batch, put repeating ones back one period on, and drop coarse entries
+   into the fine wheel as their lap comes round.
+3. Tests: entries fire in moment order; a once entry fires once; a
+   repeating one keeps its period over many frames; entries added from
+   many threads during a move all fire (`--tsan` clean); a frame that
+   runs long fires every bucket it passed.
+4. The first users: polling the socket without waiting (Phase 5), the
+   offline simulation's tick, standing tasks (110e).
 
 ## Related
 

@@ -84,7 +84,7 @@ the mover, Lua scripts, decoding the server's packets.
 | 110d | [the-asset-table-and-loading-stations](./110d-the-asset-table-and-loading-stations.md) | 110a, 110b | The append-only asset table (515e); reading tiles, models and pictures as stations; the reading-ahead thread (034) retired into them |
 | 110e | [per-frame-work-as-stations](./110e-per-frame-work-as-stations.md) | 110c, 110d | Posing, particles, what is in view and the mover as stations in chunks, writing the mailbox; measured against the single-thread frame |
 | 110f | [views-drawn-into-textures](./110f-views-drawn-into-textures.md) | 110b, 110d | A second view, pictures for files, and the map browser's page, each drawn into a texture by the one render thread |
-| 110g | [the-clock](./110g-the-clock.md) | 110a | Work at given moments (socket polling, ticks, timers) with no thread asleep waiting; design open |
+| 110g | [the-clock](./110g-the-clock.md) | 110a | Work at given moments (socket polling, ticks, timers) on a ring of one-millisecond buckets, its hand moved once a frame by the render thread |
 
 Execution order: 110a → (110b ∥ 110c ∥ 110g) → 110d → 110e → 110f
 
@@ -94,7 +94,7 @@ Execution order: 110a → (110b ∥ 110c ∥ 110g) → 110d → 110e → 110f
 2. 110b and 110c together: the window thread and the mailbox it reads.
 3. 110d: loading as stations; this retires 034's thread.
 4. 110e: the frame's work as stations; the frame-time comparison.
-5. 110f: views into textures. 110g once its shape is chosen.
+5. 110f: views into textures.
 6. Rewrite docs/001 "Threads" and docs/005 "The frame" to the built shape.
 
 ## Acceptance
