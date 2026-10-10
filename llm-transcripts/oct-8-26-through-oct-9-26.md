@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:01:03
+Generated on: 2026-10-09 20:04:04
 Models: claude-opus-5-5
 
 ## Contents
@@ -1825,6 +1825,69 @@ And how should the server's assets travel?
 If you'd rather leave this for later, the next question in line is about the
 editor's drawing: keep its dozen drawing calls as a small layer on the new
 engine, or rebuild it on phase 7's XML-and-Lua interface once that exists?
+
+--------------------------------------------------------------------------------
+
+### User Request 17
+
+> A server's version of an asset the original game also has. Say a server
+> delivers its own wolf. You have no wolf replacement of your own, but you do
+> have the original game's files, which contain Blizzard's wolf. I placed the
+> server's assets before the original files, so you'd see
+>   the server's wolf. Is that right, or should the original's wolf win?
+
+priority is: player chosen, server supplied, blizzard original.
+
+>   And how should the server's assets travel?
+> - (b) Beside it. For example, the server could name a pack, and the client
+> downloads it separately, perhaps over rmail-style packages.
+
+using our asset browser, which runs on rmail.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 17
+
+> Recording this one. "Our asset browser, which runs on rmail" sounds like
+> something already planned somewhere, so I'll search this project and your
+> other projects for it before writing it in:
+
+> This is already partly designed in world-edit-to-execute, and one piece of it
+> pulls against your new answer. Recording your answer first, with the links:
+
+*[commit] a4bbc3512 in custom-client - The asset lookup's order is decided, and a server's assets travel over rmail through the asset browser*
+
+I've recorded the order and committed it as `a4bbc35`. The asset plan now says
+that first, then how the assets travel:
+
+1. what the player chose
+2. what the server supplied
+3. the original game's files
+
+They travel over rmail, through the asset browser. The browser is already
+planned in world-edit-to-execute, the map editor project: its phase 6B browses,
+imports, previews, edits and shares the assets of a map or a server. Its rmail
+route is that project's issue 609. A list of assets goes first, then only the
+files you're missing follow as attachments, and rmail's consent form is the
+prompt before any byte moves. The plan now links both.
+
+**A question from putting the two side by side.** Issue 609 records a rule of
+yours from September: "the model is the model. the user uses whichever models
+they have installed, not what their playmates suggest they do." It goes on to
+say joining a game never changes what you see unless you accept a shared list.
+Today's answer puts a server's assets ahead of the original game's.
+
+Here's how both can hold. Picture connecting to a new server that has its own
+wolf. Does its wolf:
+- **(a)** wait in rmail's consent form ("this server wants to send you 40 files,
+  12 MB: accept or deny") until you say yes, once per server or once per
+  delivery? Or
+- **(b)** arrive and take effect because you chose to connect to that server,
+  with connecting counting as the yes?
+
+And from the other side: what should someone see who connects but declines, or
+whose client can't accept server assets? The original game's wolf, presumably.
+Is that right?
 
 --------------------------------------------------------------------------------
 

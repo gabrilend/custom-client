@@ -208,9 +208,37 @@ while any source can give a real one.
    only the missing files follow as rmail attachments, and rmail's consent
    form is the prompt (the owner, 2026-09-23: rmail is "the only
    connection protocol for assets that I trust").
-5. **Joining a server, and what you see.** 609 says "joining a game never
-   changes what you see" unless the player accepts a shared list; the
-   answer above puts a server's assets ahead of the original game's.
-   Does a server's delivery wait for the player to accept it (rmail's
-   consent form, once per server or per delivery), or does connecting to
-   the server count as accepting?
+5. ~~**Joining a server, and what you see.**~~ Answered 2026-10-09: no
+   separate acceptance. The owner: "the user who did not choose their own
+   wolf model will use the server supplied wolf model. It can download when
+   we see it for the first time, and until it's loaded properly we can use
+   the Blizzard default version. But only if the user extracts the models
+   from their own client, which will be a requirement until we develop our
+   own baseline standard model set." So 609's "joining never changes what
+   you see" holds for what the player chose (their own models always win)
+   and not for what they left to the defaults. Two consequences:
+   - **A requirement, for now:** the player supplies the original game's
+     models from their own copy of the game, until the project has its
+     own baseline standard model set. That set is then what stands in
+     while a server's asset is on its way.
+   - **rmail's consent form** (every attachment waits for the receiver's
+     yes) has to be answered for the player when the sender is the server
+     they connected to: 609's "remembered choices" hook, which answers
+     consent for trusted senders, is that road.
+6. **When a server's assets arrive.** Two shapes, both the owner's
+   (2026-10-09), the second "might be cheaper / easier":
+   - **On first sight:** an asset is fetched when it is first needed; the
+     original game's version is drawn until it has arrived and loaded, then
+     swapped in. Nothing is fetched that the player never meets, but the
+     world changes under the player as things arrive, every asset needs a
+     moment where it is swapped, and a slow delivery shows the old version
+     for a while.
+   - **Before logging in:** the server's list is compared with what the
+     player already holds, and everything missing is fetched before the
+     world opens. One wait, at a known moment; nothing swaps in play; the
+     lookup only ever sees files on disk. It fetches assets the player
+     may never meet, and a server that adds assets while players are on
+     needs them fetched at their next login (or a way to fetch mid-game).
+   The leaning here is before logging in: it is the shape 609's list
+   already has (the list first, then only what's missing), and it keeps the
+   asset lookup free of anything that arrives while drawing. Which?
