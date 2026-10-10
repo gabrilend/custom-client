@@ -40,8 +40,10 @@ places in order:
 
 The player's own packs outrank the server's assets (the owner,
 2026-10-09: "A player's own replacements are higher priority than the
-server's"). Where the server's sit against Blizzard's files, for an asset
-both have, is open question 4 below; the order drawn is the leaning.
+server's"). For an asset both have, the server's comes before the original game's
+("priority is: player chosen, server supplied, blizzard original", the
+same day). They arrive over rmail, through the asset browser (open
+question 4).
 
 - A "blizzard" answer is allowed and counted. It is the normal state today.
 - A "placeholder" answer is a warning; strict mode makes it an error.
@@ -195,9 +197,20 @@ while any source can give a real one.
    server's." So the server sends them; a stock client never asks for or
    takes them; and in the lookup they come after the player's packs
    (above).
-4. **The server's assets against Blizzard's.** When a server delivers its
-   own version of an asset the stock game also has (its own wolf, say),
-   does the client draw the server's wolf, or keep Blizzard's when the
-   player has the original files? And by what road do they travel: inside
-   the game connection (an addition to AzerothCore's protocol), or beside
-   it (a download, an rmail-style package)?
+4. ~~**The server's assets against Blizzard's.**~~ Answered 2026-10-09,
+   the owner: "priority is: player chosen, server supplied, blizzard
+   original" (the lookup's order above, now decided), and they travel
+   beside the game connection, "using our asset browser, which runs on
+   rmail". The asset browser is world-edit-to-execute's planned phase 6B
+   (browse, import, preview, edit and share the assets of a map or a
+   server; its `issues/908-import-manager.md`), and its rmail road is that
+   project's `issues/609-shared-map-and-model-list.md`: a list goes first,
+   only the missing files follow as rmail attachments, and rmail's consent
+   form is the prompt (the owner, 2026-09-23: rmail is "the only
+   connection protocol for assets that I trust").
+5. **Joining a server, and what you see.** 609 says "joining a game never
+   changes what you see" unless the player accepts a shared list; the
+   answer above puts a server's assets ahead of the original game's.
+   Does a server's delivery wait for the player to accept it (rmail's
+   consent form, once per server or per delivery), or does connecting to
+   the server count as accepting?

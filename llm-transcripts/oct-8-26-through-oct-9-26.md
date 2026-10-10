@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 19:57:53
+Generated on: 2026-10-09 20:01:03
 Models: claude-opus-5-5
 
 ## Contents
@@ -1756,6 +1756,75 @@ The second follow-up, for after this one: when a server has assets the stock
 game lacks, how do they reach the client? Downloaded from the server when first
 needed, or installed beforehand as a pack the server names? And does a player's
 own replacement still beat the server's?
+
+--------------------------------------------------------------------------------
+
+### User Request 16
+
+> The editor's test-play, narrowed. With one engine, who keeps the rules while
+> you test-play a map: who moves units, resolves attacks and counts resources?
+> - (b) Always a real AzerothCore running on your machine. Test-play then
+> behaves exactly as players will see it, but you need a server running to test
+> anything.
+>
+> The second follow-up, for after this one: when a server has assets the stock
+> game lacks, how do they reach the client? Downloaded from the server when
+> first needed, or installed beforehand as a pack the server names? And does a
+> player's own replacement still beat the server's?
+
+the server can deliver them. Only a custom client can accept them. A player's
+own replacements are higher priority than the server's.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 16
+
+> Recording both. The test-play answer goes into issue 1109:
+
+> The answer may also contradict what 1109's own plan says about F5 elsewhere in
+> the file, so I'll check the rest of it:
+
+> Now the asset plan. The lookup order gains the server, between your own packs
+> and Blizzard's files:
+
+*[commit] 63891321b in custom-client - Test-play runs on a local AzerothCore, and a server's own assets come after the player's in the asset lookup*
+
+> Line 29 was left out again, because I changed it with `sed`, which the edit
+> hook can't see. Claiming it and committing it on its own:
+
+*[commit] 7a4d90524 in custom-client - The asset lookup's description counts its four places, not three*
+
+Both answers are recorded and committed, and the working tree is clean.
+
+- **Issue 1109, the editor:** test-play converts the edited map and plays it on
+  a local AzerothCore. The client keeps no rules of its own, here as everywhere.
+  I updated the three places in 1109's plan that mentioned test-play to match.
+- **`docs/012`, the asset plan:** the lookup now asks four places in order:
+  1. your own replacement packs
+  2. assets the server delivered
+  3. the original game's files
+  4. a placeholder
+
+  Your rule is recorded: only a custom client accepts the server's assets, and
+  your own replacements outrank them.
+
+Your answer raised one new question.
+
+**A server's version of an asset the original game also has.** Say a server
+delivers its own wolf. You have no wolf replacement of your own, but you do have
+the original game's files, which contain Blizzard's wolf. I placed the server's
+assets before the original files, so you'd see the server's wolf. Is that right,
+or should the original's wolf win?
+
+And how should the server's assets travel?
+- **(a)** Inside the game connection. AzerothCore would need an addition to its
+  protocol to send files.
+- **(b)** Beside it. For example, the server could name a pack, and the client
+  downloads it separately, perhaps over rmail-style packages.
+
+If you'd rather leave this for later, the next question in line is about the
+editor's drawing: keep its dozen drawing calls as a small layer on the new
+engine, or rebuild it on phase 7's XML-and-Lua interface once that exists?
 
 --------------------------------------------------------------------------------
 
