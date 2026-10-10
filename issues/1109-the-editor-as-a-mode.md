@@ -77,6 +77,14 @@ working in between.
    server (the role 515 gave "the local simulation" offline), or (b)
    convert the map and play it on a local AzerothCore. (a) works now and
    without a server; (b) tests what players will really get.
+   Partly answered 2026-10-09, the owner: "the editor will converge with
+   the custom client's engine, so we aren't maintaining more than one copy
+   of the same engine." So there is one engine: the editor's drawing and
+   running move onto this client's, and world-edit-to-execute's viewer
+   stops being a second copy. Still open: within that one engine, does
+   test-play's rules-keeping (who moves units, resolves attacks, counts
+   resources) run inside the client as the offline stand-in, which (a)
+   becomes, or always on a local AzerothCore, which (b) is?
 2. **The editor's drawing calls.** Offer the small surface the editor
    calls today (about a dozen calls: interface text, rectangles, frames,
    images, models, ground, designs) as-is, so the editor moves

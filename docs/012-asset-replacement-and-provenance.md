@@ -144,6 +144,27 @@ the criteria and the map, never from mesh bounds or animation lengths.
 Details: world-edit-to-execute `issues/W05d-clean-room-describe-build-check-loop.md`
 and `W05e-body-structure-fit-and-body-plan-standards.md`.
 
+## Everything, by generators (decided 2026-10-09)
+
+The owner, 2026-10-09: "we will replace everything we can, bit-by-bit, by
+adding 'generators' to each of the potential components. The ultimate goal
+is to have one for everything." So the scope is not only what the client
+ships: the server's data (quests, NPC text, item names, spell tables in the
+AzerothCore database) is in it too. Each kind of component gets its own
+generator, a program that makes that kind of thing; they arrive one at a
+time, and a component with no generator yet stays borrowed and counted as
+such.
+
+**What a player sees** (the owner, the same day, asked what someone who
+downloads the finished client and points it at a stock AzerothCore server
+should see): "their own models and other assets that they chose to use to
+replace one of the assets required by the server. If there are new assets
+on the server, they will use those instead of a blank, empty, or broken
+model." So the resolver above gains a place to ask: assets the server
+itself offers for things that exist only on that server, taken before a
+placeholder is ever drawn. A blank or broken model is never the answer
+while any source can give a real one.
+
 ## What gets replaced, in order
 
 1. Models and their textures (world-edit-to-execute W05, W06)
@@ -152,11 +173,19 @@ and `W05e-body-structure-fit-and-body-plan-standards.md`.
 4. Sounds and music
 5. Fonts and interface art
 6. Terrain textures and doodads used by converted WC3 maps
+7. The server's data: quests, NPC text, item names, spell tables (by
+   generators, 2026-10-09)
 
 ## Open questions
 
-1. Server-side data (quests, NPC text, spell tables in the AzerothCore
-   database) is also Blizzard-derived. Is it in scope for "legally distinct",
-   or is the goal the client-side game only?
+1. ~~Server-side data in scope?~~ Answered 2026-10-09: yes, everything,
+   bit by bit, by a generator per component ("Everything, by generators",
+   above).
 2. ~~Clean-room split for some asset kinds?~~ Answered 2026-09-23: for all
    kinds, by default (section above).
+3. **Where the server's new assets come from.** A server with assets the
+   stock game lacks offers them to the client, which uses them in place of
+   a blank. How does the client get them: downloaded from the server when
+   first needed (through what, the game connection or something beside
+   it), or installed beforehand as a pack the server names? And does the
+   player's own replacement still win over the server's?
