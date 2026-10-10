@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:04:04
+Generated on: 2026-10-09 20:09:32
 Models: claude-opus-5-5
 
 ## Contents
@@ -1888,6 +1888,66 @@ wolf. Does its wolf:
 And from the other side: what should someone see who connects but declines, or
 whose client can't accept server assets? The original game's wolf, presumably.
 Is that right?
+
+--------------------------------------------------------------------------------
+
+### User Request 18
+
+the user who did not choose their own wolf model will use the server supplied
+wolf model. It can download when we see it for the first time, and until it's
+loaded properly we can use the Blizzard default version. But only if the user
+extracts the models from their own client, which will be a requirement until we
+develop our own baseline standard model set.
+
+alternatively, we could just download all the required files before the user
+logs in. That might be cheaper / easier.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 18
+
+> Recording this in the asset plan. It answers the consent question and adds a
+> requirement. Your two delivery options are still open, so I'll write the
+> trade-off as a question.
+
+*[commit] d75e4c8d7 in custom-client - A player who chose no replacement sees the server's, and the original game's files are required until the project has its own*
+
+I've recorded your answer in the asset plan and committed it as `d75e4c8`.
+
+- **No separate yes.** Connecting is enough. What you left to the defaults comes
+  from the server; what you chose stays yours. That keeps your September rule
+  ("the model is the model") for the player's own choices, and lets the server
+  fill in everything else.
+- **A requirement, for now.** Players supply the original game's models from
+  their own copy of the game. They're what stands in while a server's asset is
+  on its way, until the project has its own baseline standard model set.
+- **One mechanical detail.** rmail holds every attachment until the receiver
+  says yes. So when the sender is the server you connected to, something has to
+  answer that consent form for you. The editor project's sharing design already
+  plans a hook that answers it for trusted senders; that's the route.
+
+**On first sight, or before logging in?** I think you're right that before
+logging in is cheaper. Here's the mechanism behind each:
+
+- **On first sight.** The lookup asks for a wolf and finds the server has one
+  you don't hold yet. It draws the original's wolf, starts the download, and
+  later swaps the new one in while you're playing. That requires:
+  - the swap itself, done safely while the wolf is on screen
+  - a record of what's pending
+  - handling for a download that fails halfway
+
+  Every asset needs a moment where it changes under you.
+- **Before logging in.** The server's list is compared with what you hold, and
+  everything missing is fetched while the login screen waits. Then the world
+  opens with every file already on disk. The lookup never sees anything arrive
+  mid-frame, and nothing swaps. This is exactly the shape the editor project's
+  sharing design already has: the list first, then only what's missing. The cost
+  is one wait at login, plus files for places you may never visit.
+
+My leaning is before logging in, as you said: it's simpler, and it reuses a
+design that already exists. The one gap is a server that adds an asset while
+you're already playing. You'd get it at your next login, unless it's also
+fetched mid-game. Is "next login" good enough for that case?
 
 --------------------------------------------------------------------------------
 

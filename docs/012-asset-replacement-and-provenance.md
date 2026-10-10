@@ -225,8 +225,18 @@ while any source can give a real one.
      yes) has to be answered for the player when the sender is the server
      they connected to: 609's "remembered choices" hook, which answers
      consent for trusted senders, is that road.
-6. **When a server's assets arrive.** Two shapes, both the owner's
-   (2026-10-09), the second "might be cheaper / easier":
+6. ~~**When a server's assets arrive.**~~ Answered 2026-10-09: before
+   logging in, "Let's re-use the editor project's machinery if we can"
+   (the owner). The server's list is compared with what the player holds
+   and everything missing is fetched while the login screen waits, with
+   world-edit-to-execute's pieces: its `issues/609-shared-map-and-model-list.md`
+   (the list first, then only the missing files, over rmail), `604`
+   (every file stored once, by the hash of its bytes, so nothing held is
+   fetched again) and `605` (the local store those land in). The client
+   uses them rather than a second copy, as with the engine (1109). An
+   asset a server adds while a player is on reaches them at their next
+   login. The two shapes as they were weighed (the second "might be
+   cheaper / easier", the owner):
    - **On first sight:** an asset is fetched when it is first needed; the
      original game's version is drawn until it has arrived and loaded, then
      swapped in. Nothing is fetched that the player never meets, but the
@@ -239,6 +249,4 @@ while any source can give a real one.
      lookup only ever sees files on disk. It fetches assets the player
      may never meet, and a server that adds assets while players are on
      needs them fetched at their next login (or a way to fetch mid-game).
-   The leaning here is before logging in: it is the shape 609's list
-   already has (the list first, then only what's missing), and it keeps the
-   asset lookup free of anything that arrives while drawing. Which?
+   Chosen: before logging in.
