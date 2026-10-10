@@ -120,7 +120,8 @@ None.
    clock, the socket polling and everything they hand in carry on. Chosen
    over the other shape offered, a kernel timer (Linux's `timerfd`) waking
    an idle worker to move the hand, which would give the hand two movers
-. ~~The floor rate~~ 20 turns a second while hidden (2026-10-09; the
+   and need them never to move it at once.
+5. ~~The floor rate~~ 20 turns a second while hidden (2026-10-09; the
    owner: "yeah 20 a second sounds... fine I guess?"): the hand then runs
    at most 50 ms late and the socket waits at most that long. A starting
    value, kept as one named constant beside the clock so it can be turned;
