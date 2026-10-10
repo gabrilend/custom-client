@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 19:19:09
+Generated on: 2026-10-09 19:29:09
 Models: claude-opus-5-5
 
 ## Contents
@@ -22,6 +22,10 @@ Models: claude-opus-5-5
    designing rmail's "who?" contact request. Next, answer whether the secret
    travels out of band or is built in band, and whether the note box uses
    "who?".
+5. 2026-10-09 19:22, after Request 11 - We're building the W client's
+   documentation site and its note box to the project mailbox while rmail gets
+   finished. Next, you choose what to do while we wait; I'd start by committing
+   the finished work and fixing the progress chart.
 
 --------------------------------------------------------------------------------
 
@@ -1403,6 +1407,176 @@ Yes. In order, from most likely to pay off to most unusual:
 
 Which of these do you want, and in what order? 1 and 2 are quick; 4 takes about
 an hour; 5 is open-ended.
+
+--------------------------------------------------------------------------------
+
+### User Request 12
+
+1. Commit what's done.
+
+great.
+
+  2. Make the progress chart truthful.
+
+sure.
+
+> A. What exactly crosses the wire in the clear, and what has to travel out of
+> band?
+
+an IP address, a port, and an HTTP code - POST or GET I think are the two we
+request. The rest of the packet is encrypted.
+
+>   B. Where does this leave the documentation site?
+
+the docs should have messaging forms that can send a message to my computer. The
+rest of the functionality can be ignored. I have to wonder, am I gonna get
+DDoS'd from this?
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 12
+
+> Here's the order:
+> 1. Look at the two rmail facts your DDoS question depends on: whether the
+>    daemon serves one connection at a time, and whether it limits how often a
+>    contact may send.
+> 2. Fix the progress tables.
+> 3. Commit everything as one batch, so the commit includes the progress fixes.
+
+> Issue 110's own file has a table of its sub-issues and what each depends on.
+> I'll take the dependencies from there rather than guess them:
+
+> Everything I wrote is included, and nothing else. One note: the index
+> counter's single line was also last changed by an earlier commit, and the tool
+> took only this session's value. Committing:
+
+*[commit] 1c07267f6 in custom-client - The documentation becomes one browsable site, and every page carries a note box that reaches the project's own mailbox*
+
+Both are done, committed as `1c07267`, with this conversation's transcript
+included. The commit also exercised the new hook: right afterwards it rebuilt
+the site, 218 pages, with every link resolving. The progress chart now counts
+every issue. Phase 1 lists its seven paused sub-issues, and phases 5, 6, 7, 9
+and 11 each have a progress file.
+
+Your answers: in the clear go only the IP address, the port and the web method
+(GET or POST); everything else is encrypted. That's exactly how the note box
+sends today. And the docs only need their note forms to reach your computer; the
+"who?" handshake doesn't apply to them. That's what's built, so nothing changes.
+
+**Will you get DDoS'd?**
+
+There are two kinds of attack to think about:
+
+- **A flood of raw traffic.** Someone fills the network line to the server with
+  junk. Any public address can get this, and nothing in rmail changes it. Linode
+  filters some of it upstream. Your home computer isn't the target: pages post
+  to the server's mailbox, never to your house. The only link home is the
+  server's mailbox forwarding to your `~/mail`, and your home port is already
+  open to your contacts anyway.
+
+- **Cheap requests that cost you dearly.** This is the realistic risk, because
+  the page key is public: rmail can't tell an attacker's note from a reader's.
+  From reading rmail's code (I haven't tested floods):
+  1. **Every note blocks the daemon briefly.** rmail starts the checker as a
+     separate program for each note and waits for it to finish. rmail runs on
+     one thread, so all other mail waits too. A few hundred notes a second would
+     keep it permanently busy.
+  2. **Every note costs disk three times:** the server's inbox, the server's
+     outbox copy, and your `~/mail` inbox. Nothing caps any of them, so a flood
+     ends up in your personal inbox.
+  3. **Idle connections are capped by the socket library.** rmail keeps every
+     open connection in one list and watches them all at once. The socket
+     library it uses caps that at about 1,024 connections on most systems, and
+     rmail lets an idle connection sit for up to 10 seconds. Someone holding
+     about a thousand idle connections could stop it accepting new ones.
+
+The fixes, cheapest first:
+- **A firewall limit on the server:** say, a few new connections per minute per
+  address to port 5557. No code changes needed.
+- **A per-address limit in rmail** for the website contact. The sender's address
+  is the one thing visible in the clear, so it's the natural thing to count by.
+- **A cap on the website contact's stored notes,** so a flood can only fill a
+  fixed amount of disk.
+- **Forward a summary to `~/mail`** instead of every note, so your personal
+  inbox never takes the flood.
+
+A question back, because it decides which of these to build: picture the moment
+someone sends 10,000 notes in an hour. What should happen to note 10,001?
+Dropped silently, refused with a reply, or kept but never forwarded to you? And
+what would you want to see that hour: nothing, one summary, or a warning?
+
+Still open:
+- The overwrite hole (an arriving message can replace an inbox file rmail has no
+  record of): should I file it as an rmail issue? The rate limit and the
+  stored-notes cap could go into the same issue, depending on your answer above.
+- The "who?" handshake: you've answered what crosses the wire in the clear. I
+  still don't know how two people prove out of band that they can decrypt each
+  other's messages, so I'm holding the rmail issue for it until you've decided
+  that.
+
+--------------------------------------------------------------------------------
+
+### User Request 13
+
+okay let's worry about being DDoS'd later. Can you ask me some open questions
+now?
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 13
+
+> I'll first gather what's open across the project's documents and issues, so
+> you can see the whole list before we go through it one at a time.
+
+Here's what's open, gathered from every document and issue, roughly in order of
+how much each answer shapes:
+
+1. **What "legally distinct" covers.** Does the server's data (quests, NPC text,
+   spell tables in AzerothCore's database) need replacing too, or only what the
+   client ships? From the asset-replacement plan, docs/012.
+2. **Who runs a map's rules during test-play in the editor:** the editor's own
+   Lua simulation, or a local AzerothCore server? (issue 1109)
+3. **How the editor draws:** keep its dozen drawing calls as they are, or move
+   it onto phase 7's XML-and-Lua interface? (issue 1109)
+4. **Two questions about the clock:**
+   - should it have an "every frame" kind of entry, since a fixed 16 ms only
+     matches a 60 Hz screen?
+   - should it keep ticking while the window is minimized?
+   (issue 110g)
+5. **The gamma slider:** follow a formula, or be matched by eye against the
+   original? (issue 1001)
+6. **The "who?" handshake:** what the out-of-band step physically is.
+7. **rmail follow-ups:**
+   - file the overwrite hole as an issue?
+   - give the 128 KiB limit its own issue?
+   - should the website contact get an address later?
+8. **Things only the original game can answer:**
+   - her step height and how deep water must be before she swims (issue 801)
+   - what the original shows for townspeople whose beard choice is beyond the
+     table (issue 404)
+   - whether a model's own lights reach only that model (issue 310)
+
+   These need you to look in the original client, so they're best done together
+   in one sitting.
+
+**The first one.** The plan, in `docs/012`, is to make the client "legally
+distinct": every Blizzard asset the client uses gets a replacement the project
+made itself, so the client can be shared without Blizzard's files. But a player
+only sees a world when the client talks to an AzerothCore server. That server's
+database holds thousands of quest texts, item names, NPC dialogue lines and
+spell numbers, all copied from the original game. The client draws whatever the
+server sends. So a fully replaced client, talking to a stock AzerothCore, still
+shows Blizzard's writing on every quest window.
+
+So which do you mean?
+- **(a)** The client's own files are the whole goal. Server data belongs to
+  whoever runs the server.
+- **(b)** The goal is a world that's entirely the project's own, so the server's
+  database needs replacing too, eventually.
+
+And a second way in, in your own words: if someone downloaded the finished
+client and pointed it at a stock AzerothCore server, what would you want them to
+see?
 
 --------------------------------------------------------------------------------
 

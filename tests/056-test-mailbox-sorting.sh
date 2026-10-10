@@ -7,7 +7,7 @@
 # mailbox, and files the notes readers made public under the website. This
 # builds two throwaway mailboxes in RAM with the project's own scripts
 # (one made like the project's, one standing in for the owner's), connects
-# them, starts both (kept away from the router), and sends four things as
+# them, starts both, and sends four things as
 # the pages would: a private note, a public note, a note the gatekeeper must
 # refuse, and an edit of the first note carrying bytes that would take
 # over a terminal. Then it checks what each mailbox holds. The real
@@ -129,9 +129,15 @@ LUA
 STAMP=$(date +%H%M%S)
 SENT=$(lua5.4 "${WORK}/send.lua" "${RMAIL}" ${PROJECT_PORT} "${PAGES_KEY}" "${STAMP}")
 echo "${SENT}" > "${WORK}/send.log"
-if [ $(echo "${SENT}" | grep -c $'\t200\t') -ne 4 ]; then
-    fail "the project mailbox did not answer 200 to all four sends:"
+# The three notes are taken; the edit is refused by rmail itself (403):
+# the pages' contact is listen-only (rmail issue 420, commit 9ec702e) and
+# may only send plain messages. Before that, the edit reached the inbox
+# and only the gatekeeper on rmail's on_update hook stood in its way.
+if [ $(echo "${SENT}" | grep -c $'\t200\t') -ne 3 ] || ! echo "${SENT}" | grep -q $'^edit\t403\t'; then
+    fail "the mailbox did not take the three notes and refuse the edit:"
     echo "${SENT}"
+else
+    ok "rmail took the three notes and refused the edit (403: the pages' contact is listen-only)"
 fi
 
 P_INBOX="${PROJECT_BOX}/inbox"
@@ -152,15 +158,15 @@ case "${FIRST}" in
     "refused by "*) ok "the formless note was kept only as a refusal" ;;
     *) fail "the formless note was not refused: ${FIRST}" ;;
 esac
-FIRST=$(head -1 "${P_INBOX}/${PRIVATE}")
-case "${FIRST}" in
-    "checked: "*) ok "the edit of the private note went through the gatekeeper too" ;;
-    *) fail "the edited private note does not start with the gatekeeper's line: ${FIRST}" ;;
-esac
+if grep -q "a private note ${STAMP}" "${P_INBOX}/${PRIVATE}" && ! grep -q "edited" "${P_INBOX}/${PRIVATE}"; then
+    ok "the private note is as it arrived; the refused edit changed nothing"
+else
+    fail "the private note was changed by the refused edit"
+fi
 if grep -q $'\x1b' "${P_INBOX}/${PRIVATE}"; then
     fail "the edit's terminal-control byte reached the inbox"
 else
-    ok "the edit's terminal-control byte was removed"
+    ok "the edit's terminal-control byte never reached the inbox"
 fi
 
 # How the sorter filed them.

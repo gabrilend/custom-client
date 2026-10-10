@@ -146,22 +146,23 @@ Done by rmail's maintainers and measured here (`tests/052 --real-mailbox`,
 gatekeeper and lands in the inbox; openings that are neither a message nor
 a web request are dropped at once.
 
-Still open on rmail's side, each written into an rmail issue:
+Where rmail stands, each part in an rmail issue:
 
-- **The pages' contact may do whatever any contact may** (rmail issue 420,
-  extended 2026-10-08; this mailbox writes its mark, `listen = true`,
-  ahead of rmail reading it). The key is in every page, so today anyone can
-  send attachments (a plain message's `attachments` field is saved),
-  delete or rewrite any note by its id (every visitor is the same
-  contact), and announce a new address for the contact. The owner: "we
+- **The pages' contact may only send plain messages** (rmail issue 420,
+  extended 2026-10-08, built 2026-10-09 in rmail commit 9ec702e; the mark
+  is the `listen = true` this mailbox already writes). The owner: "we
   have exactly one contact, which is the website client. It should refuse
   deletes, address changes, attachments, and anything other than a plain
-  message from that contact." The restriction belongs to the contact, not
-  to the web wrapping: the key also works in a bare frame sent straight to
-  the port. Until then, the one hole this project can close itself is
-  closed: an edit runs rmail's `on_update` hook, not the raw one, so the
-  gatekeeper is on both (`tests/056` sends an edit with terminal-control
-  bytes and checks they never reach the inbox).
+  message from that contact." rmail now checks every request from a
+  listen-only contact before handling it, whether bare or wrapped by a
+  browser: only `POST /deliver` with a plain message (type, subject, a
+  body of at most 64 KiB, message id, time) is taken; a delete, an edit,
+  attachments, an address change or anything else is answered 403,
+  logged, and changes nothing. Such a contact is also never sent to.
+  `tests/056` sends an edit carrying terminal-control bytes and checks that
+  rmail refuses it and the note is left as it arrived. The gatekeeper
+  stays on rmail's `on_update` hook as well, in case a contact without the
+  mark ever sends an edit.
 - **The router check is gone** (rmail issue 411, reopened and built
   2026-10-08, commit cac3d72). Before it, once it held its port, rmail
   probed the router whenever it could find `upnpc` or `natpmpc` (first in
@@ -187,8 +188,9 @@ Still open on rmail's side, each written into an rmail issue:
   came". Asking the sender to send again would change nothing, since the
   same body would fail the same way. The fix is in how rmail hands the
   body over (standard input, or a file, both unlimited) and in treating a
-  hook that failed to run as a refusal; recorded as an open question in
-  rmail issue 420.
+  hook that failed to run as a refusal: rmail issue 215 (open). Meanwhile
+  the pages' contact cannot reach it: rmail takes at most 64 KiB of body
+  from a listen-only contact, and the gatekeeper at most 8000 bytes of words.
 - An inbox file the daemon has no record of is overwritten by an arriving
   message with the same subject. The pages' subjects carry the second and
   six random letters, so honest notes never collide; a stranger could aim
@@ -245,15 +247,11 @@ address (rmail also announces new addresses itself); and
 
 ## Open questions
 
-1. **Starting the project mailbox here.** Everything is made and
-   connected; `scripts/run-project-mailbox` would start it. On start it
-   asks DNS services for this machine's public address and announces it to
-   `owner` (rmail's normal start, no router traffic). Start it now, by
-   hand, or as a service?
+1. ~~**Starting the project mailbox here.**~~ Answered 2026-10-09: not
+   now, "we don't have the website set up yet, so there's no way to receive
+   traffic" (the owner). It will run as a service once the site is up.
 2. **The website contact's address.** Public notes are addressed to
    `website`, which has no address, so they wait in the outbox. When
    wow.ritzmenardi.com runs a mailbox, should `website` get its address so
    the notes travel there, or stay address-less, gathered by the build?
 3. **The overwrite hole** (above): file it as an rmail issue?
-4. **Bodies past 128 KiB** (above): in rmail issue 420's open questions;
-   its own rmail issue, since it concerns every contact?
