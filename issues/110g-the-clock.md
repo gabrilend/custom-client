@@ -94,10 +94,7 @@ idea, with the 'ring of buckets'". So the leaning is:
 
 ## Open questions
 
-1. **The floor rate.** How often the render thread turns while the window
-   is hidden (answered question 4): 20 times a second was the number
-   offered (the hand then runs at most 50 ms late, and socket polling
-   waits at most that long), not yet chosen.
+None.
 
 ## Answered
 
@@ -123,7 +120,11 @@ idea, with the 'ring of buckets'". So the leaning is:
    clock, the socket polling and everything they hand in carry on. Chosen
    over the other shape offered, a kernel timer (Linux's `timerfd`) waking
    an idle worker to move the hand, which would give the hand two movers
-   and need them never to move it at once.
+. ~~The floor rate~~ 20 turns a second while hidden (2026-10-09; the
+   owner: "yeah 20 a second sounds... fine I guess?"): the hand then runs
+   at most 50 ms late and the socket waits at most that long. A starting
+   value, kept as one named constant beside the clock so it can be turned;
+   any change goes in docs/011-balance-updates.md with its reason.
 
 ## Suggested implementation steps
 

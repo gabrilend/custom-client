@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:29:11
+Generated on: 2026-10-09 20:37:40
 Models: claude-opus-5-5
 
 ## Contents
@@ -38,6 +38,10 @@ Models: claude-opus-5-5
    questions one at a time, recording and committing each answer as we go. Next,
    answer the clock question: should a 240 Hz screen update animations every
    frame, or on fixed timing like everyone else's?
+9. 2026-10-09 20:32, after Request 21 - We're working through the project's open
+   questions, now the engine clock, after settling the docs site and its rmail
+   mailbox. Next, I need your answer on how the clock keeps moving while the
+   window is minimized: a slow render loop, or a kernel timer.
 
 --------------------------------------------------------------------------------
 
@@ -2119,6 +2123,50 @@ thread asleep waiting":
 And from another angle: when the window is hidden, what should still be
 happening? Just staying connected to the server, or the whole world going on, so
 that when you come back everything has caught up?
+
+--------------------------------------------------------------------------------
+
+### User Request 22
+
+> And from another angle: when the window is hidden, what should still be
+> happening? Just staying connected to the server, or the whole world going on,
+> so that when you come back everything has caught up?
+
+it should be processing in the background. I think option (a) is probably the
+best shape.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 22
+
+> Recording both clock answers in issue 110g:
+
+> The settled-shape section should mention the hidden window too, since that's
+> where someone building it will look first:
+
+*[commit] 38afa9664 in custom-client - The clock keeps fixed time, and keeps turning while the window is hidden*
+
+I recorded both clock answers in issue 110g and committed them as `38afa96`. The
+settled shape now says two things:
+- **Fixed time only.** Every entry runs on fixed time, and nothing fires "per
+  frame". The note includes the measured 17 nanoseconds per frame for reading
+  the time.
+- **The world keeps going when the window is hidden.** The render thread keeps
+  looping at a slower floor rate, moving the hand and drawing nothing.
+
+That leaves one small number in 110g: **the floor rate.** At 20 turns a second,
+a hidden client runs its scheduled work and reads the server's socket at most 50
+ms late, and costs almost nothing. The lateness and the cost both scale with the
+choice:
+- **10 a second:** up to 100 ms late.
+- **60 a second:** up to 17 ms late, the same as a visible window on a 60 Hz
+  screen.
+
+If nothing in the background needs to be faster than a server message every few
+tenths of a second, 20 is my suggestion. Do you have a number in mind, or does
+20 sound right?
+
+After that, the next question is the gamma slider, in issue 1001.
 
 --------------------------------------------------------------------------------
 
