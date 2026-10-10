@@ -26,7 +26,7 @@ writer (planned: [105](../issues/105-mpq-reader.md)).
 ## The resolver (when the first replacement exists)
 
 Every asset request (model, texture, animation set, particle definition,
-sound, font, interface image) goes through one function that asks three
+sound, font, interface image) goes through one function that asks four
 places in order:
 
 ```
