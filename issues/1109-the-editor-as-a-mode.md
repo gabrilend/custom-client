@@ -55,7 +55,9 @@ working in between.
    the editor's Lua loaded from world-edit-to-execute's `src/editor/`.
 2. WC3 ground on the one mesh, redrawn by tile after a stroke.
 3. Models (after 401 step 2) and the designs as placeholders.
-4. The Lua drawing surface (open question 2), then each panel in turn.
+4. The editor's panels rebuilt on Phase 7's interface runtime (XML frames
+   and Lua, as WoW's own interface; open question 2, answered
+   2026-10-09), then each panel in turn.
 5. Picking and selection; saving through the editor's own writer.
 6. Test-play: convert the edited map and play it on a local AzerothCore
    (open question 1, answered 2026-10-09); no rules run in the client.
@@ -93,7 +95,12 @@ working in between.
    test-play's rules-keeping (who moves units, resolves attacks, counts
    resources) run inside the client as the offline stand-in, which (a)
    becomes, or always on a local AzerothCore, which (b) is? (b), as above.
-2. **The editor's drawing calls.** Offer the small surface the editor
+2. ~~**The editor's drawing calls.**~~ Answered 2026-10-09, the owner: "We
+   can push the editor to phase 7. It's important that WoW addons work
+   as-is." So the editor waits for Phase 7 and is rebuilt on its
+   interface runtime; its panels are made the way addon authors make
+   WoW's interface, and that runtime runs original addons unchanged
+   (docs/006). The question as asked: Offer the small surface the editor
    calls today (about a dozen calls: interface text, rectangles, frames,
    images, models, ground, designs) as-is, so the editor moves
    unchanged; or move the editor onto Phase 7's interface runtime (XML
@@ -103,7 +110,7 @@ working in between.
 
 - Blocked by: [401](./401-m2-reader.md) (step 2, WC3 models),
   [302](./302-terrain-renderer.md) (WC3 ground on the one mesh), Phase 7
-  for the interface runtime if open question 2 says so.
+  (its interface runtime, which the editor is built on: open question 2).
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103
   selection are shared with this mode).
 - world-edit-to-execute issues 901-912 (the editor), its

@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:09:32
+Generated on: 2026-10-09 20:16:12
 Models: claude-opus-5-5
 
 ## Contents
@@ -26,6 +26,10 @@ Models: claude-opus-5-5
    documentation site and its note box to the project mailbox while rmail gets
    finished. Next, you choose what to do while we wait; I'd start by committing
    the finished work and fixing the progress chart.
+6. 2026-10-09 20:12, after Request 18 - We're working through the W client's
+   open design questions, now on how a server's assets reach players. Next, you
+   decide whether "fetch at next login" is enough when a server adds an asset
+   mid-game.
 
 --------------------------------------------------------------------------------
 
@@ -1948,6 +1952,58 @@ My leaning is before logging in, as you said: it's simpler, and it reuses a
 design that already exists. The one gap is a server that adds an asset while
 you're already playing. You'd get it at your next login, unless it's also
 fetched mid-game. Is "next login" good enough for that case?
+
+--------------------------------------------------------------------------------
+
+### User Request 19
+
+> - Before logging in. The server's list is compared with what you hold, and
+> everything missing is fetched while the login screen waits. Then the world
+> opens with every file already on disk. The lookup never sees anything arrive
+> mid-frame, and nothing swaps. This is exactly the shape
+>     the editor project's sharing design already has: the list first, then only what's missing. The cost is one wait at login, plus files for places you may never visit.
+
+this one. Let's re-use the editor project's machinery if we can.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 19
+
+> Recording the decision, and pointing at the editor project's pieces that will
+> be reused:
+
+*[commit] 4aa56ef36 in custom-client - A server's assets are all fetched before the world opens, with the map editor's sharing machinery*
+
+Recorded and committed as `4aa56ef`.
+
+At login, the client compares the server's list with what you already hold,
+fetches only the missing files while the login screen waits, and opens the world
+with everything on disk. It reuses three of the editor project's pieces rather
+than building copies, the same way it shares the engine:
+- **The sharing list (issue 609):** the list goes first, then only the files
+  you're missing, over rmail.
+- **Store by hash (604):** every file is stored once, under a fingerprint of its
+  bytes, so nothing you already hold is fetched again.
+- **The local store (605):** where those files land on disk.
+
+One thing I wrote down without your explicit say-so: an asset a server adds
+while you're already playing reaches you at your next login. That follows from
+fetching at login, but you didn't answer it directly. Tell me if mid-game
+additions should arrive sooner.
+
+**The next question: how the editor draws.** The editor is moving onto this
+client's engine. Today it draws through about a dozen calls of its own: text,
+rectangles, frames, images, models, ground, and its flat-shaded designs.
+- **(a)** Keep those dozen calls as a small layer on the new engine. The
+  editor's Lua code moves over unchanged and works as soon as the layer exists.
+- **(b)** Rebuild the editor on phase 7's interface runtime, once that exists.
+  That's XML frames plus Lua, the way WoW's own interface is built. Then the
+  editor's panels are made exactly like the game's interface and can be modded
+  like it, but the editor waits for phase 7, and its code gets rewritten.
+
+From the other side: when someone adds a new panel to the editor in a year,
+should they write it the way addon authors write WoW interface code, or the way
+the editor's Lua is written today?
 
 --------------------------------------------------------------------------------
 

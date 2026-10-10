@@ -13,7 +13,7 @@ of this client.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 1108 | [Phase 11 demo](./1108-phase-demo.md) | pending | Phase 4, Phase 7 |
-| 1109 | [The editor as a mode of the W client](./1109-the-editor-as-a-mode.md) | pending (decided 2026-10-07) | 401, 302; Phase 7 if its open question 2 says so |
+| 1109 | [The editor as a mode of the W client](./1109-the-editor-as-a-mode.md) | pending (decided 2026-10-07) | 401, 302, Phase 7 (the editor is built on its interface runtime) |
 
 The capstone names the issues to be written when the phase begins
 (1101 the RTS camera, 1102 picking, 1103 selection, 1104 orders, 1105 the
