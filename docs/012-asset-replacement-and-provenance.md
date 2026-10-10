@@ -33,9 +33,15 @@ places in order:
  logical path ("Creature\Wolf\Wolf.m2")
       │
       ├─ 1. replacement packs (loose folders, ours)          → source = "pack"
-      ├─ 2. the owner's Blizzard client (MPQ chain)          → source = "blizzard"
-      └─ 3. placeholder (magenta checker / wireframe / beep) → source = "placeholder"
+      ├─ 2. assets the server delivered (2026-10-09)         → source = "server"
+      ├─ 3. the owner's Blizzard client (MPQ chain)          → source = "blizzard"
+      └─ 4. placeholder (magenta checker / wireframe / beep) → source = "placeholder"
 ```
+
+The player's own packs outrank the server's assets (the owner,
+2026-10-09: "A player's own replacements are higher priority than the
+server's"). Where the server's sit against Blizzard's files, for an asset
+both have, is open question 4 below; the order drawn is the leaning.
 
 - A "blizzard" answer is allowed and counted. It is the normal state today.
 - A "placeholder" answer is a warning; strict mode makes it an error.
@@ -183,9 +189,15 @@ while any source can give a real one.
    above).
 2. ~~Clean-room split for some asset kinds?~~ Answered 2026-09-23: for all
    kinds, by default (section above).
-3. **Where the server's new assets come from.** A server with assets the
-   stock game lacks offers them to the client, which uses them in place of
-   a blank. How does the client get them: downloaded from the server when
-   first needed (through what, the game connection or something beside
-   it), or installed beforehand as a pack the server names? And does the
-   player's own replacement still win over the server's?
+3. ~~**Where the server's new assets come from.**~~ Answered 2026-10-09,
+   the owner: "the server can deliver them. Only a custom client can
+   accept them. A player's own replacements are higher priority than the
+   server's." So the server sends them; a stock client never asks for or
+   takes them; and in the lookup they come after the player's packs
+   (above).
+4. **The server's assets against Blizzard's.** When a server delivers its
+   own version of an asset the stock game also has (its own wolf, say),
+   does the client draw the server's wolf, or keep Blizzard's when the
+   player has the original files? And by what road do they travel: inside
+   the game connection (an addition to AzerothCore's protocol), or beside
+   it (a download, an rmail-style package)?

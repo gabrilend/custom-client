@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 19:49:46
+Generated on: 2026-10-09 19:57:53
 Models: claude-opus-5-5
 
 ## Contents
@@ -1683,6 +1683,79 @@ server sends.
 
 Put another way: if someone downloaded the finished client and pointed it at a
 stock AzerothCore server, what would you want them to see?
+
+--------------------------------------------------------------------------------
+
+### User Request 15
+
+> 1. What "legally distinct" covers. Does the server's data (quests, NPC text,
+> spell tables in AzerothCore's database) need replacing too, or only what the
+> client ships? From the asset-replacement plan, docs/012.
+
+we will replace everything we can, bit-by-bit, by adding "generators" to each of
+the potential components. The ultimate goal is to have one for everything.
+
+  2. Who runs a map's rules during test-play in the editor: the editor's own Lua
+     simulation, or a local AzerothCore server? (issue 1109)
+
+the editor will converge with the custom client's engine, so we aren't
+maintaining more than one copy of the same engine.
+
+> Put another way: if someone downloaded the finished client and pointed it at a
+> stock AzerothCore server, what would you want them to see?
+
+their own models and other assets that they chose to use to replace one of the
+assets required by the server. If there are new assets on the server, they will
+use those instead of a blank, empty, or broken model.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 15
+
+> Recording both answers where the questions live, starting with the
+> asset-replacement plan:
+
+> Before moving on, I'll check the plan's question list, because I inserted the
+> new question 3 above the existing question 2:
+
+> In order now. Committing these two recorded answers:
+
+*[commit] d4170293d in custom-client - Everything is to be replaced by generators, servers' own assets come before a blank, and the editor shares the client's engine*
+
+I've recorded both answers where the questions were asked, and committed them as
+`d417029`, with the transcript included.
+
+- **The asset-replacement plan (`docs/012`):**
+  - **Scope:** it's no longer only what the client ships. Every kind of
+    component, the server's quests, text and spell tables included, gets its own
+    generator, added one at a time. A component without a generator yet stays
+    borrowed, and is counted as borrowed.
+  - **What a player sees:** your answer about the finished client on a stock
+    server is in there in your words. Their own chosen replacements come first;
+    a server's own new assets come before any blank or broken model. That means
+    the part of the client that looks up each asset gains a new place to ask:
+    the server itself.
+- **Issue 1109, the editor:** one engine. The editor moves onto this client's
+  engine, and world-edit-to-execute's viewer stops being a second copy.
+
+Each answer raised one follow-up. I'll ask them one at a time.
+
+**The editor's test-play, narrowed.** With one engine, who keeps the rules while
+you test-play a map: who moves units, resolves attacks and counts resources?
+- **(a)** The client itself. The engine carries a small rules-keeper of its own,
+  standing in for the server when there isn't one. You press F5 and play
+  instantly, offline, no server needed.
+- **(b)** Always a real AzerothCore running on your machine. Test-play then
+  behaves exactly as players will see it, but you need a server running to test
+  anything.
+
+The same question from another angle: picture yourself editing a map on a laptop
+with no server installed. Should pressing F5 still let you play it?
+
+The second follow-up, for after this one: when a server has assets the stock
+game lacks, how do they reach the client? Downloaded from the server when first
+needed, or installed beforehand as a pack the server names? And does a player's
+own replacement still beat the server's?
 
 --------------------------------------------------------------------------------
 

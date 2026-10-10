@@ -42,7 +42,8 @@ What the mode needs from this client:
   (1108's 1102), box select (1103).
 - **The top-down camera** (1108's 1101) with the editor's pan and zoom.
 - **Sound** for the sound editor (Phase 10).
-- **Test-play** of the map being edited (open question 1).
+- **Test-play** of the map being edited, its rules kept by a local
+  AzerothCore (open question 1, answered 2026-10-09).
 
 Order: world-edit-to-execute's renderer is retired only after this mode
 opens, edits, saves and test-plays a map, so the editor never stops
@@ -56,7 +57,8 @@ working in between.
 3. Models (after 401 step 2) and the designs as placeholders.
 4. The Lua drawing surface (open question 2), then each panel in turn.
 5. Picking and selection; saving through the editor's own writer.
-6. Test-play (open question 1).
+6. Test-play: convert the edited map and play it on a local AzerothCore
+   (open question 1, answered 2026-10-09); no rules run in the client.
 7. Check against the editor running in world-edit-to-execute's viewer
    (the same map, the same edits, the same saved bytes), then retire
    that viewer there.
@@ -66,11 +68,17 @@ working in between.
 - The editor opens Daow 4.4 in this client, paints ground, places and
   moves a unit, edits a trigger, saves, and the saved map is byte for
   byte what world-edit-to-execute's viewer saves for the same edits.
-- F5 test-plays the edited map.
+- F5 test-plays the edited map on a local AzerothCore.
 
 ## Open questions
 
-1. **Test-play: who runs the rules?** The editor's F5 today runs
+1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
+   real AzerothCore running on the editor's machine, option (b) below (the
+   owner chose it over a rules-keeper inside the client). Test-play behaves
+   exactly as players will get it, and needs a local server to run at all;
+   the client keeps no rules of its own, as with everything else ("World
+   changes come only from the server", CLAUDE.md). The question as asked:
+   The editor's F5 today runs
    world-edit-to-execute's Lua simulation in the viewer. Under the
    decision that AzerothCore runs a map's rules, test-play could (a)
    run that Lua simulation locally as the offline stand-in for the
@@ -81,10 +89,10 @@ working in between.
    the custom client's engine, so we aren't maintaining more than one copy
    of the same engine." So there is one engine: the editor's drawing and
    running move onto this client's, and world-edit-to-execute's viewer
-   stops being a second copy. Still open: within that one engine, does
+   stops being a second copy. Then asked: within that one engine, does
    test-play's rules-keeping (who moves units, resolves attacks, counts
    resources) run inside the client as the offline stand-in, which (a)
-   becomes, or always on a local AzerothCore, which (b) is?
+   becomes, or always on a local AzerothCore, which (b) is? (b), as above.
 2. **The editor's drawing calls.** Offer the small surface the editor
    calls today (about a dozen calls: interface text, rectangles, frames,
    images, models, ground, designs) as-is, so the editor moves
