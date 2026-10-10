@@ -1,0 +1,150 @@
+#!/bin/bash
+# make-project-mailbox - makes, or brings up to date, the project's own
+# rmail mailbox, which receives readers' notes from the HTML documentation.
+#
+# For a general audience: rmail is a mail program where every message is a
+# plain text file. This makes a mailbox for the W client project inside the
+# project folder, at project-rmail/: a settings file (its name, the port it
+# listens on, and which of the project's programs it runs when mail
+# arrives), and a list of who it knows. It knows the documentation pages
+# (whose key is printed in every page, so it may only send plain messages)
+# and the website (where notes readers made public are addressed). The
+# owner's main mailbox is added by scripts/connect-owner-mailbox.
+#
+# When mail arrives, three of the project's programs run:
+#   scripts/check-docs-feedback  checks and cleans every note from the pages,
+#                                new or edited, before it is saved
+#   scripts/sort-docs-feedback   once saved, puts a copy in the outbox for the
+#                                owner, and for the website if made public
+#
+# Run it again whenever this script changes: the settings file is written
+# fresh every time (it holds nothing secret); the list of contacts is made
+# once and afterwards only completed, never rewritten, because the pages'
+# key in it is printed in every built page and a new key would cut them off.
+# The mailbox is private: git ignores it.
+#
+# Usage: scripts/make-project-mailbox [PROJECT_DIR] [--mailbox FOLDER] [--port N]
+#   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+#   --mailbox FOLDER  make the mailbox there instead of PROJECT_DIR/project-rmail
+#                     (the tests make throwaway copies this way)
+#   --port N          listen on N instead of the project's port (5557)
+# Then start it: scripts/run-project-mailbox
+
+DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+MAILBOX=""
+PORT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mailbox) MAILBOX="$2"; shift 2 ;;
+        --port)    PORT="$2"; shift 2 ;;
+        *)         DIR="$1"; shift ;;
+    esac
+done
+
+# The names, from the one list every script reads (scripts/libs/project-mailbox.lua).
+NAMES=$(luajit -e "package.path = '${DIR}/scripts/libs/?.lua;' .. package.path
+local box = require('project-mailbox')
+print(box.NAME, box.PORT, box.PAGES, box.WEBSITE)")
+read -r NAME DEFAULT_PORT PAGES WEBSITE <<< "${NAMES}"
+if [ -z "${WEBSITE}" ]; then
+    echo "make-project-mailbox: could not read the names from ${DIR}/scripts/libs/project-mailbox.lua" >&2
+    exit 1
+fi
+
+if [ -z "${MAILBOX}" ]; then
+    MAILBOX="${DIR}/project-rmail"
+fi
+if [ -z "${PORT}" ]; then
+    PORT="${DEFAULT_PORT}"
+fi
+
+CHECKER="${DIR}/scripts/check-docs-feedback"
+SORTER="${DIR}/scripts/sort-docs-feedback"
+for program in "${CHECKER}" "${SORTER}"; do
+    if [ ! -x "${program}" ]; then
+        echo "make-project-mailbox: no ${program}; is ${DIR} the project?" >&2
+        exit 1
+    fi
+done
+
+# {{{ new_key
+# 32 random bytes as hex. rmail turns a key into its encryption key with
+# SHA-256, so its length only needs to be unguessable.
+new_key() {
+    local bytes
+    bytes=$(od -An -tx1 -N32 /dev/urandom)
+    echo ${bytes} | tr -d ' '
+}
+# }}}
+
+mkdir -p "${MAILBOX}/inbox"
+mkdir -p "${MAILBOX}/outbox"
+
+cat > "${MAILBOX}/config" <<EOF
+# Made by scripts/make-project-mailbox, which rewrites this file every time
+# it runs: change the script, not this. See rmail's README.md for every key.
+
+# The mailbox's own name. Never transmitted.
+name = ${NAME}
+
+# The port the documentation pages post notes to.
+port = ${PORT}
+
+# A new message, or an edit of one, passes through the gatekeeper before it
+# is saved: notes from the pages are checked and reshaped or refused,
+# anything else passes unchanged. Once saved, the sorter puts a copy in the
+# outbox for the owner, and for the website if the reader made it public.
+on_receive_raw = ${CHECKER}
+on_update      = ${CHECKER}
+on_receive     = ${SORTER}
+on_package     = ""
+on_send        = ""
+on_delete      = ""
+
+# The router is left alone: no automatic port forwarding, which is also
+# rmail's default. (Since rmail issue 411, commit cac3d72, a mailbox never
+# probes the router at start either.)
+auto_port_forward = false
+EOF
+
+CONTACTS="${MAILBOX}/contacts"
+
+if [ ! -e "${CONTACTS}" ]; then
+    cat > "${CONTACTS}" <<EOF
+// Who this mailbox knows. Made by scripts/make-project-mailbox; completed,
+// never rewritten, when it runs again. The owner's main mailbox is added
+// by scripts/connect-owner-mailbox.
+//
+// ${PAGES}: the HTML documentation pages. Its key is printed in every built
+// page, so it is public: anyone holding a page can post as it. It has no
+// address because this mailbox never writes back to it. "listen" (rmail
+// issue 420) limits it to plain messages: no deletions, edits, address
+// changes or attachments. rmail ignores the field until it learns it;
+// until then the gatekeeper is the only check.
+${PAGES}.token  = "$(new_key)"
+${PAGES}.listen = true
+EOF
+    chmod 600 "${CONTACTS}"
+    echo "make-project-mailbox: made ${CONTACTS} with a new key for the pages"
+fi
+
+# Brought forward from the first version of this script, which wrote the
+# pages' limit as "submit_only" before rmail's issue 420 named it "listen".
+if grep -q "^${PAGES}\.submit_only" "${CONTACTS}"; then
+    sed -i "s/^${PAGES}\.submit_only *= *true/${PAGES}.listen = true/" "${CONTACTS}"
+    echo "make-project-mailbox: renamed the pages' submit_only mark to listen (rmail issue 420)"
+fi
+
+if ! grep -q "^${WEBSITE}\." "${CONTACTS}"; then
+    cat >> "${CONTACTS}" <<EOF
+
+// ${WEBSITE}: the documentation website (wow.ritzmenardi.com). Notes a
+// reader marks public are addressed to it in the outbox, where the site
+// builder gathers them. It has no address yet, so rmail never sends them
+// anywhere; they wait in the outbox, sorted.
+${WEBSITE}.token = "$(new_key)"
+EOF
+    echo "make-project-mailbox: added the ${WEBSITE} contact"
+fi
+
+echo "make-project-mailbox: ${MAILBOX} is ready (name ${NAME}, port ${PORT})"

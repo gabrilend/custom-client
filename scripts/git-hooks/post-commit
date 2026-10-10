@@ -1,0 +1,33 @@
+#!/bin/bash
+# post-commit - rebuilds the documentation site after every commit.
+#
+# For a general audience: the documentation site (docs/HTML/) is made from
+# the project's own files and goes stale the moment one of them changes.
+# Git runs this right after each commit, so the site always matches the
+# last thing committed. It takes about a second. Its full report goes to a
+# log in RAM; the one-line summary, or the error if the build failed, is
+# printed where the commit was made, so a failure is never silent.
+#
+# Installed by scripts/install-git-hooks (a link from .git/hooks/).
+# Usage: run by git; by hand: scripts/git-hooks/post-commit [PROJECT_DIR]
+
+DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+if [ -n "$1" ]; then
+    DIR="$1"
+fi
+
+LOG_DIR="${DIR}/tmp/shared-memory"
+mkdir -p "${LOG_DIR}"
+LOG="${LOG_DIR}/build-docs.log"
+
+"${DIR}/scripts/build-docs" > "${LOG}" 2>&1
+STATUS=$?
+
+if [ ${STATUS} -ne 0 ]; then
+    echo "post-commit: the documentation site did NOT rebuild:"
+    cat "${LOG}"
+    exit ${STATUS}
+fi
+
+SUMMARY=$(head -1 "${LOG}")
+echo "post-commit: ${SUMMARY} (report: ${LOG})"

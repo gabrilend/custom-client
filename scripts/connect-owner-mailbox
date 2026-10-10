@@ -1,0 +1,104 @@
+#!/bin/bash
+# connect-owner-mailbox - introduces the project's mailbox and the owner's
+# main mailbox to each other, so the project can forward mail to the owner.
+#
+# For a general audience: two rmail mailboxes can only talk once each lists
+# the other in its contacts file, with the same secret key on both sides
+# and the address where the other listens. This writes both entries at
+# once: in the project's mailbox, the owner's mailbox as "owner"; in the
+# owner's mailbox, the project's as "w-client-docs". Both run on this
+# machine for now, so each reaches the other at 127.0.0.1; when the
+# project's mailbox moves to a server, the owner's entry for it changes to
+# the server's address (rmail also announces new addresses by itself).
+#
+# It refuses if either side already has the entry, rather than replacing a
+# key the other side may still hold. A running rmail notices its contacts
+# file change; nothing needs restarting.
+#
+# Usage: scripts/connect-owner-mailbox [PROJECT_DIR] [--mailbox FOLDER] [--owner FOLDER]
+#   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+#   --mailbox FOLDER  the project's mailbox (default PROJECT_DIR/project-rmail)
+#   --owner FOLDER    the owner's mailbox (default /home/ritz/mail)
+
+DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+MAILBOX=""
+OWNER_BOX="/home/ritz/mail"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mailbox) MAILBOX="$2"; shift 2 ;;
+        --owner)   OWNER_BOX="$2"; shift 2 ;;
+        *)         DIR="$1"; shift ;;
+    esac
+done
+if [ -z "${MAILBOX}" ]; then
+    MAILBOX="${DIR}/project-rmail"
+fi
+
+NAMES=$(luajit -e "package.path = '${DIR}/scripts/libs/?.lua;' .. package.path
+local box = require('project-mailbox')
+print(box.OWNER, box.OWNER_SIDE_NAME)")
+read -r OWNER OWNER_SIDE_NAME <<< "${NAMES}"
+if [ -z "${OWNER_SIDE_NAME}" ]; then
+    echo "connect-owner-mailbox: could not read the names from ${DIR}/scripts/libs/project-mailbox.lua" >&2
+    exit 1
+fi
+
+# {{{ port_of
+# A mailbox's listening port, from its own config.
+port_of() {
+    local line
+    line=$(grep -E '^port *= *[0-9]+' "$1/config")
+    echo "${line##*= }"
+}
+# }}}
+
+for box in "${MAILBOX}" "${OWNER_BOX}"; do
+    if [ ! -f "${box}/config" ] || [ ! -f "${box}/contacts" ]; then
+        echo "connect-owner-mailbox: ${box} has no config or contacts; is it an rmail mailbox?" >&2
+        exit 1
+    fi
+done
+
+PROJECT_PORT=$(port_of "${MAILBOX}")
+OWNER_PORT=$(port_of "${OWNER_BOX}")
+if [ -z "${PROJECT_PORT}" ] || [ -z "${OWNER_PORT}" ]; then
+    echo "connect-owner-mailbox: a config has no port line (project ${PROJECT_PORT:-none}, owner ${OWNER_PORT:-none})" >&2
+    exit 1
+fi
+
+if grep -q "^${OWNER}\." "${MAILBOX}/contacts"; then
+    echo "connect-owner-mailbox: ${MAILBOX}/contacts already has ${OWNER}; left alone" >&2
+    exit 1
+fi
+if grep -q "^${OWNER_SIDE_NAME}\." "${OWNER_BOX}/contacts"; then
+    echo "connect-owner-mailbox: ${OWNER_BOX}/contacts already has ${OWNER_SIDE_NAME}; left alone" >&2
+    exit 1
+fi
+
+KEY_BYTES=$(od -An -tx1 -N32 /dev/urandom)
+KEY=$(echo ${KEY_BYTES} | tr -d ' ')
+WHEN=$(date +%Y-%m-%d)
+
+cat >> "${MAILBOX}/contacts" <<EOF
+
+// ${OWNER}: the owner's main mailbox (${OWNER_BOX}). Everything this mailbox
+// receives is copied to it by scripts/sort-docs-feedback. Added by
+// scripts/connect-owner-mailbox on ${WHEN}.
+${OWNER}.ip    = 127.0.0.1
+${OWNER}.port  = ${OWNER_PORT}
+${OWNER}.token = "${KEY}"
+EOF
+
+cat >> "${OWNER_BOX}/contacts" <<EOF
+
+// ${OWNER_SIDE_NAME}: the W client project's own mailbox
+// (${MAILBOX}). It forwards readers' notes from the
+// project's documentation site here. Added by the project's
+// scripts/connect-owner-mailbox on ${WHEN}.
+${OWNER_SIDE_NAME}.ip    = 127.0.0.1
+${OWNER_SIDE_NAME}.port  = ${PROJECT_PORT}
+${OWNER_SIDE_NAME}.token = "${KEY}"
+EOF
+
+echo "connect-owner-mailbox: ${MAILBOX} now knows ${OWNER} (port ${OWNER_PORT}),"
+echo "  and ${OWNER_BOX} knows ${OWNER_SIDE_NAME} (port ${PROJECT_PORT}), with one new shared key"

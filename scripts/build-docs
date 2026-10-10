@@ -1,0 +1,1076 @@
+#!/usr/bin/env luajit
+-- build-docs - builds the W client's documentation site in docs/HTML/.
+--
+-- For a general audience: the project's thinking is spread over a couple of
+-- hundred plain-text files: the vision, the design documents, every issue
+-- (a plan for one piece of work), a short description beside every piece
+-- of code, the code itself, the tests and the scripts. Read one at a time
+-- in an editor they are a pile. This turns all of them into web pages that
+-- share one look, with the full contents down the left of every page (so
+-- every page reaches every other), every mention of an issue, a document or
+-- a piece of code made into a link to it, code coloured as in an editor,
+-- and charts of how far each phase of the plan has come and how big each
+-- part of the engine is. At the foot of every page is a box for a note
+-- about that page, which goes to the project's own mailbox
+-- (scripts/make-project-mailbox makes it; docs/055 explains the path).
+--
+-- Nothing in docs/HTML/ is edited by hand: it is rebuilt from the sources
+-- every time, and git ignores it (each page carries the mailbox's key).
+-- Re-run it whenever a document changes.
+--
+-- It reports what it could not resolve: links to nothing, issue numbers
+-- that belong to another project, pages nothing in the prose points at.
+-- A dead link found here is a documentation bug found for free.
+--
+-- Usage: scripts/build-docs [PROJECT_DIR] [--host HOST] [--mailbox FOLDER] [--out FOLDER]
+--   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+--   --host HOST       where readers' browsers send notes: the address of the
+--                     machine the project mailbox runs on, as readers reach
+--                     it (default 127.0.0.1, this machine; a server's name or
+--                     address when the site is served from one)
+--   --mailbox FOLDER  the project mailbox (default PROJECT_DIR/project-rmail):
+--                     its port, the pages' key, and the public notes in its outbox
+--   --out FOLDER      where the site goes (default PROJECT_DIR/docs/HTML)
+--   reads:   docs/ notes/ issues/ src/ tests/ scripts/ and the intent folders;
+--            the mailbox's config, contacts and outbox
+--   writes:  *.html, docs-site.css, docs-seal.js, docs-site.js, site-config.js
+
+local DIR = "/mnt/mtwo/games/azeroth-core/custom-client"
+local MAILBOX_HOST = "127.0.0.1"
+local MAILBOX, OUT
+
+-- The options, each read by its entry in a table (a positional argument is
+-- the project directory).
+local OPTIONS = {
+    ["--host"]    = function(value) MAILBOX_HOST = value end,
+    ["--mailbox"] = function(value) MAILBOX = value end,
+    ["--out"]     = function(value) OUT = value end,
+}
+do
+    local i = 1
+    while arg[i] do
+        local option = OPTIONS[arg[i]]
+        if option then
+            if arg[i + 1] == nil then
+                io.stderr:write("build-docs: " .. arg[i] .. " needs a value\n")
+                os.exit(1)
+            end
+            option(arg[i + 1])
+            i = i + 2
+        elseif arg[i]:sub(1, 2) == "--" then
+            io.stderr:write("build-docs: no such option " .. arg[i] .. "\n")
+            os.exit(1)
+        else
+            DIR = arg[i]
+            i = i + 1
+        end
+    end
+end
+MAILBOX = MAILBOX or (DIR .. "/project-rmail")
+OUT = OUT or (DIR .. "/docs/HTML")
+
+-- A host name or address only: it is written into a script every page runs.
+if not MAILBOX_HOST:match("^[%w%.%-:%[%]]+$") then
+    io.stderr:write("build-docs: \"" .. MAILBOX_HOST .. "\" is not a host name or address\n")
+    os.exit(1)
+end
+package.path = DIR .. "/scripts/libs/?.lua;" .. package.path
+
+local md = require("docs-markdown")
+local form = require("feedback-form")
+local box = require("project-mailbox")
+
+-- {{{ local function read_file
+local function read_file(path)
+    local handle = io.open(path, "rb")
+    if handle == nil then return nil end
+    local text = handle:read("*a")
+    handle:close()
+    return text
+end
+-- }}}
+
+-- {{{ local function write_file
+local function write_file(path, text)
+    local handle = assert(io.open(path, "wb"))
+    handle:write(text)
+    handle:close()
+end
+-- }}}
+
+-- {{{ local function list_files
+-- The regular files directly inside one folder of the project, sorted by
+-- name. (Not recursive: each section names its folders exactly.)
+local function list_files(folder)
+    local found = {}
+    local pipe = io.popen("find '" .. DIR .. "/" .. folder .. "' -mindepth 1 -maxdepth 1 -type f -print")
+    for path in pipe:lines() do
+        found[#found + 1] = path:sub(#DIR + 2)
+    end
+    pipe:close()
+    table.sort(found)
+    return found
+end
+-- }}}
+
+local esc = md.escape
+
+-- ---------------------------------------------------------------------------
+-- The mailbox the note box posts to
+-- ---------------------------------------------------------------------------
+
+-- {{{ local function read_mailbox
+-- The port (number) from project-rmail/config and the pages' key (string)
+-- from project-rmail/contacts. No mailbox is an error, not a site without
+-- a note box: a page with a box that cannot post is a page that lies.
+local function read_mailbox()
+    local config = read_file(MAILBOX .. "/config")
+    local contacts = read_file(MAILBOX .. "/contacts")
+    if config == nil or contacts == nil then
+        io.stderr:write("build-docs: no project mailbox at " .. MAILBOX .. "\n"
+                     .. "  make it first: " .. DIR .. "/scripts/make-project-mailbox\n")
+        os.exit(1)
+    end
+    local port = tonumber(config:match("\nport%s*=%s*(%d+)"))
+    local token = contacts:match("\n" .. form.SENDER:gsub("%-", "%%-") .. "%.token%s*=%s*\"([^\"]+)\"")
+    if port == nil or token == nil then
+        io.stderr:write("build-docs: the mailbox has no port in its config or no "
+                     .. form.SENDER .. ".token in its contacts\n")
+        os.exit(1)
+    end
+    return { host = MAILBOX_HOST, port = port, token = token }
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- Gathering: which files become pages, and under which heading
+-- ---------------------------------------------------------------------------
+
+--[[
+The sections down the left of every page, in the order a newcomer would
+want to meet the project: what it is, what it means to become, how it is
+planned, what each piece does, the pieces themselves.
+
+Each: title (string); folders (list of project-relative folders, each read
+one level deep); match (Lua pattern a file's path must match); skip
+(pattern a path must not match); kind ("text" for Markdown, "source" for
+code shown coloured); sort ("issues" for issue order, else by name).
+]]
+local SECTIONS = {
+    { title = "the vision",          folders = { "notes", "notes/wow-chat-2026-conversations" }, kind = "text" },
+    { title = "the design",          folders = { "docs" }, match = "%.md$", kind = "text" },
+    { title = "phase progress",      folders = { "issues" }, match = "phase%-%d+%-progress%.md$", kind = "text", sort = "phases" },
+    { title = "issues being worked", folders = { "issues" }, match = "/%d+%l?%-[^/]+%.md$", kind = "text", sort = "issues" },
+    { title = "issues completed",    folders = { "issues/completed", "issues/completed/demos" }, kind = "text", sort = "issues" },
+    { title = "what each part does", folders = { "src" }, match = "%.info%.md$", kind = "text" },
+    { title = "the engine's code",   folders = { "src" }, match = "%.[ch]$", kind = "source" },
+    { title = "the tests",           folders = { "tests" }, kind = "source" },
+    { title = "the scripts",         folders = { "scripts", "scripts/libs", "scripts/git-hooks" }, skip = "%.info%.md$", kind = "source" },
+    { title = "the project's edges", folders = { ".", "input", "output", "desire", "faith", "strategems" },
+      match = "[^/]*$", only_root = { "CLAUDE.md" }, kind = "text" },
+}
+
+local pages = {}          -- relative path -> page (see gather)
+local sections = {}       -- list of { title, list of relative paths }
+
+-- {{{ local function page_name
+-- Every page sits in one flat folder, named after the path it came from:
+-- one rule for every link instead of a calculation per pair of pages.
+local function page_name(relative)
+    local flat = relative:gsub("%.md$", ""):gsub("[/%.]", "-")
+    return flat .. ".html"
+end
+-- }}}
+
+-- {{{ local function issue_key
+-- An issue file's number with its letter ("110g", "1001"), or nil.
+local function issue_key(relative)
+    return relative:match("^issues/.-([%d]+%l?)%-[^/]*%.md$")
+end
+-- }}}
+
+-- {{{ local function issue_order
+-- Issues sort by number, then letter: 101, 105, 105a, 106 ... 1001.
+local function issue_order(a, b)
+    local na, la = issue_key(a):match("^(%d+)(%l?)$")
+    local nb, lb = issue_key(b):match("^(%d+)(%l?)$")
+    if tonumber(na) ~= tonumber(nb) then return tonumber(na) < tonumber(nb) end
+    return la < lb
+end
+-- }}}
+
+-- {{{ local function title_of
+-- A text page's own first heading, or its file name when it has none
+-- (the vision, the intent notes).
+local function title_of(relative, text, kind)
+    if kind == "text" then
+        local heading = text:match("^#+%s+([^\n]+)") or text:match("\n#+%s+([^\n]+)")
+        if heading then return (heading:gsub("%s+$", "")) end
+    end
+    return relative:match("([^/]+)$")
+end
+-- }}}
+
+-- {{{ local function gather
+-- Reads every file the sections name into a page:
+--   relative (string)  its path from the project root
+--   name (string)      its HTML file name
+--   title (string)     what the contents list calls it
+--   text (string)      its contents
+--   kind (string)      "text" or "source"
+--   section (string)   its section's title
+local function gather()
+    for _, section in ipairs(SECTIONS) do
+        local chosen = {}
+        for _, folder in ipairs(section.folders) do
+            for _, relative in ipairs(list_files(folder)) do
+                relative = relative:gsub("^%./", "")
+                local wanted = (section.match == nil or relative:match(section.match))
+                               and (section.skip == nil or not relative:match(section.skip))
+                if folder == "." then
+                    wanted = false
+                    for _, name in ipairs(section.only_root) do
+                        if relative == name then wanted = true end
+                    end
+                end
+                if wanted and pages[relative] == nil then
+                    local text = read_file(DIR .. "/" .. relative)
+                    pages[relative] = {
+                        relative = relative, name = page_name(relative),
+                        title = title_of(relative, text, section.kind),
+                        text = text, kind = section.kind, section = section.title,
+                    }
+                    chosen[#chosen + 1] = relative
+                end
+            end
+        end
+        if section.sort == "issues" then
+            table.sort(chosen, issue_order)
+        elseif section.sort == "phases" then
+            table.sort(chosen, function(a, b)
+                return tonumber(a:match("phase%-(%d+)")) < tonumber(b:match("phase%-(%d+)"))
+            end)
+        end
+        if #chosen > 0 then
+            sections[#sections + 1] = { title = section.title, list = chosen }
+        end
+    end
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- What a name in the prose can point at
+-- ---------------------------------------------------------------------------
+
+local issues = {}         -- "110g" -> relative path of the issue file
+local by_basename = {}    -- "013-errors.h", "build-docs" -> relative path
+local by_module = {}      -- "013-errors" -> relative path of its .info.md (or its code)
+local by_doc_index = {}   -- "045" -> relative path of docs/045-*.md
+
+-- {{{ local function index_names
+local function index_names()
+    for relative, page in pairs(pages) do
+        local key = issue_key(relative)
+        if key and not relative:match("phase%-%d+%-progress") then issues[key] = relative end
+
+        local base = relative:match("([^/]+)$")
+        if page.kind == "source" or relative:match("^src/") then by_basename[base] = relative end
+
+        local module = relative:match("^src/(%d+%-[%w%-]+)%.info%.md$")
+        if module then by_module[module] = relative end
+
+        local doc = relative:match("^docs/(%d%d%d)%-")
+        if doc then by_doc_index[doc] = relative end
+    end
+    -- A module with no .info.md (a test, the main program) points at its code.
+    for base, relative in pairs(by_basename) do
+        local module = base:match("^(%d+%-[%w%-]+)%.%w+$")
+        if module and by_module[module] == nil then by_module[module] = relative end
+    end
+end
+-- }}}
+
+-- What could not be resolved, gathered for the report at the end.
+local dead = {}           -- { from, target }
+local foreign = {}        -- issue number -> count, mentioned but not in this project
+local linked = {}         -- relative path -> true once anything links to it
+
+-- {{{ local function link_to
+-- The href for a page, noting that something linked to it.
+local function link_to(relative, anchor)
+    linked[relative] = true
+    return pages[relative].name .. (anchor or "")
+end
+-- }}}
+
+-- {{{ local function resolve_path
+-- A path written relative to the folder of the page it is in, resolved to
+-- a path from the project root ("../src/x.h" from docs/ is "src/x.h").
+local function resolve_path(from, target)
+    local parts = {}
+    for piece in (from:match("^(.*)/[^/]*$") or ""):gmatch("[^/]+") do parts[#parts + 1] = piece end
+    for piece in target:gmatch("[^/]+") do
+        if piece == ".." then parts[#parts] = nil
+        elseif piece ~= "." then parts[#parts + 1] = piece end
+    end
+    return table.concat(parts, "/")
+end
+-- }}}
+
+-- {{{ local function name_target
+-- What a bare name in the prose or in `code` points at, or nil:
+--   a path from the root ("docs/045-datapath.md", "scripts/build")
+--   "docs/045" (a design document by its number)
+--   a file's own name ("013-errors.h", "build-docs")
+--   a module's name ("013-errors") -> what it does (its .info.md)
+local function name_target(name)
+    name = name:gsub("^%./", "")
+    if pages[name] then return name end
+    local doc = name:match("^docs/(%d%d%d)$")
+    if doc and by_doc_index[doc] then return by_doc_index[doc] end
+    if by_basename[name] then return by_basename[name] end
+    if by_module[name] then return by_module[name] end
+    return nil
+end
+-- }}}
+
+-- {{{ local function after_issue_word
+-- True when the text just before a number says it is an issue: "issue ",
+-- "issues ", "#", or such a word followed by a list of numbers
+-- ("issues 105, 106 and ").
+local function after_issue_word(before)
+    local trimmed = before
+    while true do
+        local shorter = trimmed:gsub("%d%d%d%d?%l?,?%s+and%s+$", ""):gsub("%d%d%d%d?%l?,?%s+or%s+$", "")
+                               :gsub("%d%d%d%d?%l?,%s*$", "")
+        if shorter == trimmed then break end
+        trimmed = shorter
+    end
+    return trimmed:match("[Ii]ssues?%s+$") ~= nil or trimmed:match("#$") ~= nil
+end
+-- }}}
+
+-- Projects whose issue numbers this project's documents quote. A number
+-- with one of these names shortly before it is that project's issue.
+local OTHER_PROJECTS = { "wow-chat-2026", "world-edit-to-execute", "soramech", "r-mail", "rmail" }
+
+-- {{{ local function make_context
+-- The link-finding the Markdown converter asks for, for one page. In the
+-- issue folders and the roadmap every number that is one of this
+-- project's issues is a link (they are tables of issue numbers); elsewhere
+-- only a number with "issue" or "#" before it is.
+local function make_context(page)
+    local numbers_are_issues = page.relative:match("^issues/") ~= nil or page.relative:match("^docs/009%-") ~= nil
+    -- The conversations copied from wow-chat-2026 number issues in that
+    -- project: their "issue 808" is not this project's 808, so on those
+    -- pages no number becomes a link.
+    local numbers_are_foreign = page.relative:match("^notes/wow%-chat%-2026%-conversations/") ~= nil
+    local ctx = {}
+
+    function ctx.resolve(target)
+        if target:match("^%a[%w+.-]*:") then return target end    -- http:, https:, mailto:
+        if target:match("^#") then return target end
+        local path, anchor = target:match("^([^#]*)(#?.*)$")
+        local relative = resolve_path(page.relative, path)
+        if pages[relative] then return link_to(relative, anchor) end
+        dead[#dead + 1] = { from = page.relative, target = target }
+        return nil
+    end
+
+    function ctx.code_link(code)
+        local relative = name_target(code)
+        if relative and relative ~= page.relative then return link_to(relative) end
+        return nil
+    end
+
+    function ctx.autolink(text)
+        -- Links made here wait as \3<n>\4 markers until the end, so the
+        -- issue pass below never finds a number inside one of them.
+        local held = {}
+        local function hold(html)
+            held[#held + 1] = html
+            return "\3" .. #held .. "\4"
+        end
+
+        text = text:gsub("()([%w_%./%-]+)", function(at, token)
+            local before = text:sub(at - 1, at - 1)
+            if before == "\1" or before == "\3" then return nil end
+            local core, tail = token:match("^(.-)([%.,:;]*)$")
+            -- Only a name that cannot be an ordinary word: one with a path in
+            -- it, a module number, or a dash or dot. "run" and "build" are
+            -- scripts here and also words in sentences about item levels.
+            if not core:match("/") and not core:match("%d%d%d%-") and not core:match("[%-%.]") then return nil end
+            local relative = name_target(core)
+            if relative == nil or relative == page.relative then return nil end
+            return hold('<a href="' .. link_to(relative) .. '">' .. core .. "</a>") .. tail
+        end)
+
+        text = text:gsub("()%f[%w](%d%d%d%d?%l?)%f[%W]", function(at, number)
+            local before = text:sub(1, at - 1)
+            local marker = before:sub(-1)
+            if marker == "\1" or marker == "\3" or numbers_are_foreign then return nil end
+            -- "2026-10-07" is a date, not issue 2026.
+            if text:sub(at + #number, at + #number + 1):match("^%-%d") then return nil end
+            -- "world-edit-to-execute issues 901-912": another project's
+            -- numbers, named just before; never this project's issue.
+            local nearby = before:sub(-70)
+            for _, project in ipairs(OTHER_PROJECTS) do
+                if nearby:find(project, 1, true) then return nil end
+            end
+            local said = after_issue_word(before)
+            if issues[number] and (said or numbers_are_issues) then
+                if issues[number] == page.relative then return nil end
+                return hold('<a href="' .. link_to(issues[number]) .. '">' .. number .. "</a>")
+            end
+            if said and issues[number] == nil then
+                foreign[number] = foreign[number] or {}
+                foreign[number][page.relative] = true
+            end
+            return nil
+        end)
+
+        return (text:gsub("\3(%d+)\4", function(which) return held[tonumber(which)] end))
+    end
+
+    return ctx
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- Measuring: the numbers the charts draw
+-- ---------------------------------------------------------------------------
+
+-- The statuses an issue can be in, as the progress tables write them
+-- (first matching word wins), and the colour each is drawn in.
+local STATUSES = {
+    { key = "completed", label = "completed",    color = "--good",   words = { "completed", "done" } },
+    { key = "partly",    label = "partly built", color = "--gold",   words = { "partly", "in progress", "started" } },
+    { key = "pending",   label = "pending",      color = "--violet", words = { "pending", "not started" } },
+    { key = "paused",    label = "paused",       color = "--warn",   words = { "paused", "blocked", "waiting" } },
+    { key = "other",     label = "not in a progress table", color = "--dim", words = {} },
+}
+
+-- {{{ local function status_of
+local function status_of(words)
+    local lower = words:lower()
+    for _, status in ipairs(STATUSES) do
+        for _, word in ipairs(status.words) do
+            if lower:find(word, 1, true) then return status.key end
+        end
+    end
+    return "other"
+end
+-- }}}
+
+-- {{{ local function measure_phases
+-- Per phase: its name (from the roadmap's "## Phase N - Name"), and each
+-- of its issues with a status. A completed issue's status is its folder;
+-- an open one's is its row in the phase's progress table (the column
+-- headed "Status"); an issue with no row is "other". Returns
+-- { phases = list of { number, name, issues = list of { key, relative, title, status } } }.
+local function measure_phases()
+    local names = {}
+    local roadmap = pages["docs/009-roadmap.md"]
+    if roadmap then
+        for number, name in roadmap.text:gmatch("\n## Phase (%d+) %S+ ([^\n]+)") do names[tonumber(number)] = name end
+    end
+
+    local table_status = {}   -- issue key -> status words from a progress table
+    for relative, page in pairs(pages) do
+        if relative:match("phase%-%d+%-progress%.md$") then
+            local column
+            for line in page.text:gmatch("[^\n]+") do
+                if line:match("^%s*|") then
+                    local cells = {}
+                    for cell in line:gsub("^%s*|", ""):gmatch("([^|]*)|") do
+                        cells[#cells + 1] = cell:gsub("^%s+", ""):gsub("%s+$", "")
+                    end
+                    if column == nil then
+                        for i, cell in ipairs(cells) do if cell:lower() == "status" then column = i end end
+                    elseif cells[1] and cells[1]:match("^%d+%l?$") and cells[column] then
+                        table_status[cells[1]] = cells[column]
+                    end
+                end
+            end
+        end
+    end
+
+    local phases = {}
+    for key, relative in pairs(issues) do
+        local number = tonumber(key:match("^(%d+)"))
+        local phase_number = math.floor(number / 100)
+        local phase = phases[phase_number]
+        if phase == nil then
+            phase = { number = phase_number, name = names[phase_number] or ("Phase " .. phase_number), issues = {} }
+            phases[phase_number] = phase
+        end
+        local status
+        if relative:match("^issues/completed/") then status = "completed"
+        elseif table_status[key] then status = status_of(table_status[key])
+        else status = "other" end
+        phase.issues[#phase.issues + 1] = { key = key, relative = relative, title = pages[relative].title, status = status }
+    end
+
+    local list = {}
+    for _, phase in pairs(phases) do
+        table.sort(phase.issues, function(a, b) return issue_order(a.relative, b.relative) end)
+        list[#list + 1] = phase
+    end
+    table.sort(list, function(a, b) return a.number < b.number end)
+    return list
+end
+-- }}}
+
+-- {{{ local function count_lines
+local function count_lines(text)
+    if text == nil then return 0 end
+    local _, n = text:gsub("\n", "")
+    return n
+end
+-- }}}
+
+-- {{{ local function measure_modules
+-- Per numbered source module in src/: lines in its .c and its .h, and
+-- whether it has an .info.md. Returns a list in reading order of
+-- { module, c_lines, h_lines, info (relative or nil), code (relative) }.
+local function measure_modules()
+    local seen, list = {}, {}
+    for relative, page in pairs(pages) do
+        local module = relative:match("^src/(%d+%-[%w%-]+)%.[ch]$")
+        if module and not seen[module] then
+            seen[module] = true
+            local c = pages["src/" .. module .. ".c"]
+            local h = pages["src/" .. module .. ".h"]
+            list[#list + 1] = {
+                module = module,
+                c_lines = count_lines(c and c.text), h_lines = count_lines(h and h.text),
+                info = pages["src/" .. module .. ".info.md"] and ("src/" .. module .. ".info.md") or nil,
+                code = c and c.relative or h.relative,
+            }
+        end
+    end
+    table.sort(list, function(a, b) return a.module < b.module end)
+    return list
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- Writing the pages
+-- ---------------------------------------------------------------------------
+
+-- {{{ local function json
+-- A Lua value as JSON, for the numbers handed to the charts. Strings are
+-- escaped so "</script>" in a title cannot end the block it sits in.
+local function json(value)
+    local kind = type(value)
+    if kind == "table" then
+        if #value > 0 or next(value) == nil then
+            local parts = {}
+            for _, v in ipairs(value) do parts[#parts + 1] = json(v) end
+            return "[" .. table.concat(parts, ",") .. "]"
+        end
+        local keys = {}
+        for k in pairs(value) do keys[#keys + 1] = k end
+        table.sort(keys)
+        local parts = {}
+        for _, k in ipairs(keys) do parts[#parts + 1] = json(tostring(k)) .. ":" .. json(value[k]) end
+        return "{" .. table.concat(parts, ",") .. "}"
+    elseif kind == "string" then
+        return '"' .. value:gsub('[%c"\\<>]', function(c) return string.format("\\u%04x", c:byte()) end) .. '"'
+    elseif kind == "number" or kind == "boolean" then
+        return tostring(value)
+    end
+    return "null"
+end
+-- }}}
+
+-- {{{ local function chart
+-- A chart's holder: the drawer's name and its numbers. docs-site.js draws it.
+local function chart(kind, data)
+    return '<div class="chart" data-chart="' .. kind .. '"><script type="application/json">'
+           .. json(data) .. "</script></div>"
+end
+-- }}}
+
+-- {{{ local function contents_html
+-- The contents list for a page: every section, every page, the section
+-- holding the current page open and the page itself marked, and under it
+-- the page's own headings.
+local function contents_html(current, headings)
+    local out = {
+        '<nav id="contents">',
+        '<div class="site"><a href="index.html">the W client</a>',
+        '<button id="theme" title="light or dark">◐</button></div>',
+        '<input id="filter" type="search" placeholder="filter the contents ( / )" aria-label="filter the contents">',
+    }
+    local generated = {
+        { name = "index.html", title = "the site at a glance", key = "@index" },
+        { name = "progress.html", title = "progress by phase", key = "@progress" },
+        { name = "modules.html", title = "the engine's parts by size", key = "@modules" },
+        { name = "notes.html", title = "readers' public notes", key = "@notes" },
+    }
+    local in_start = false
+    for _, g in ipairs(generated) do if g.key == current then in_start = true end end
+    out[#out + 1] = "<details" .. (in_start and " open" or "") .. "><summary>start here</summary>"
+    for _, g in ipairs(generated) do
+        out[#out + 1] = '<a class="entry' .. (g.key == current and " here" or "") .. '" href="' .. g.name
+                        .. '" data-path="' .. g.name .. '">' .. esc(g.title) .. "</a>"
+    end
+    out[#out + 1] = "</details>"
+
+    for _, section in ipairs(sections) do
+        local holds = false
+        for _, relative in ipairs(section.list) do if relative == current then holds = true end end
+        out[#out + 1] = "<details" .. (holds and " open" or "") .. "><summary>" .. esc(section.title)
+                        .. ' <span class="count">' .. #section.list .. "</span></summary>"
+        for _, relative in ipairs(section.list) do
+            local page = pages[relative]
+            out[#out + 1] = '<a class="entry' .. (relative == current and " here" or "") .. '" href="'
+                            .. page.name .. '" data-path="' .. esc(relative) .. '" title="' .. esc(relative) .. '">'
+                            .. esc(page.title) .. "</a>"
+            if relative == current and headings then
+                for _, h in ipairs(headings) do
+                    if h.level == 2 then
+                        out[#out + 1] = '<a class="entry sub" href="#' .. h.id .. '" data-path="">'
+                                        .. esc(h.text:gsub("[`*]", "")) .. "</a>"
+                    end
+                end
+            end
+        end
+        out[#out + 1] = "</details>"
+    end
+    out[#out + 1] = "</nav>"
+    return table.concat(out, "\n")
+end
+-- }}}
+
+-- {{{ local function note_form
+-- The box at the foot of every page. Its boxes come from feedback-form.lua,
+-- the same list the mailbox's gatekeeper checks against.
+local function note_form()
+    local boxes = {}
+    for _, tag in ipairs(form.TAGS) do
+        boxes[#boxes + 1] = '<label><input type="checkbox" name="tag" value="' .. tag.key .. '"> '
+                            .. esc(tag.label) .. "</label>"
+    end
+    return table.concat({
+        '<form id="note" class="note-form">',
+        "<h2>A note about this page</h2>",
+        "<p>It goes to the project's own mailbox, private to the project. Tick anything that fits.</p>",
+        "<textarea name=\"words\" placeholder=\"what you noticed, what you wanted to find here…\"></textarea>",
+        '<div class="boxes">', table.concat(boxes),
+        '<label><input type="checkbox" name="public"> others may read this note</label></div>',
+        '<div class="row"><button type="submit">send</button><span class="status"></span><span class="count"></span></div>',
+        "</form>",
+    })
+end
+-- }}}
+
+-- {{{ local function wrap
+-- A whole page around a body. source (string): the project path the page
+-- was built from, which the note box sends ("docs/045-datapath.md"), or
+-- for a generated page the page's own file.
+local function wrap(title, current, source, trail, body, headings)
+    return table.concat({
+        "<!doctype html>",
+        "<!-- Made by scripts/build-docs from " .. esc(source) .. ", turning the project's own files "
+        .. "into one browsable site; rebuilt from them every time, so edit the source, not this. -->",
+        '<html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>" .. esc(title) .. " · the W client</title>",
+        '<link rel="stylesheet" href="docs-site.css">',
+        '<script src="site-config.js"></script>',
+        '<script src="docs-seal.js"></script>',
+        '<script src="docs-site.js"></script>',
+        '</head><body data-source="' .. esc(source) .. '"><div id="frame">',
+        contents_html(current, headings),
+        "<main>",
+        '<div id="trail">' .. trail .. "</div>",
+        body,
+        note_form(),
+        "</main></div></body></html>",
+    }, "\n")
+end
+-- }}}
+
+-- {{{ local function source_body
+-- A code file: a pointer to what it is for, then every line, numbered,
+-- each number an anchor (page.html#L120) so a document can point at a line.
+local function source_body(page)
+    local pieces = { "<h1>" .. esc(page.title) .. "</h1>" }
+    local module = page.relative:match("^src/(%d+%-[%w%-]+)%.[ch]$")
+    if module and pages["src/" .. module .. ".info.md"] then
+        pieces[#pieces + 1] = '<p class="pointer">What it is for, without reading it: <a href="'
+                              .. link_to("src/" .. module .. ".info.md") .. '">' .. module .. ".info.md</a>"
+        local sister = pages["src/" .. module .. (page.relative:match("%.c$") and ".h" or ".c")]
+        if sister then
+            pieces[#pieces] = pieces[#pieces] .. ' · its other half: <a href="' .. link_to(sister.relative) .. '">'
+                              .. esc(sister.title) .. "</a>"
+        end
+        pieces[#pieces] = pieces[#pieces] .. "</p>"
+    end
+    local lines = count_lines(page.text) + (page.text:sub(-1) == "\n" and 0 or 1)
+    local numbers = {}
+    for i = 1, lines do numbers[#numbers + 1] = '<a id="L' .. i .. '" href="#L' .. i .. '">' .. i .. "</a>" end
+    local language = md.language_of(page.relative, page.text)
+    pieces[#pieces + 1] = '<div class="numbered-code"><pre class="gutter">' .. table.concat(numbers, "\n")
+                          .. '</pre><pre class="code"><span class="lang">' .. esc(language) .. "</span><code>"
+                          .. md.highlight(page.text, language) .. "</code></pre></div>"
+    return table.concat(pieces, "\n")
+end
+-- }}}
+
+-- {{{ local function text_body
+-- A Markdown page. An .info.md also gets a line pointing at the code it
+-- describes, added here rather than typed into each file, because the
+-- relationship is mechanical (they share a name) and a hand-typed one
+-- would drift.
+local function text_body(page)
+    local html, headings = md.render(page.text, make_context(page))
+    local module = page.relative:match("^src/(%d+%-[%w%-]+)%.info%.md$")
+    if module then
+        local links = {}
+        for _, ext in ipairs({ ".h", ".c" }) do
+            local code = pages["src/" .. module .. ext]
+            if code then links[#links + 1] = '<a href="' .. link_to(code.relative) .. '">' .. esc(code.title) .. "</a>" end
+        end
+        if #links > 0 then
+            html = html:gsub("(</h1>)", "%1\n<p class=\"pointer\">The code: " .. table.concat(links, " · ") .. "</p>", 1)
+        end
+    end
+    return html, headings
+end
+-- }}}
+
+-- {{{ local function trail_of
+-- The line above a page's title: its path, and the section it is in.
+local function trail_of(page)
+    return esc(page.section) .. " · " .. esc(page.relative)
+end
+-- }}}
+
+-- {{{ local function progress_page
+local function progress_page(phases)
+    local rows, keys = {}, {}
+    for _, s in ipairs(STATUSES) do keys[#keys + 1] = { key = s.key, label = s.label, color = s.color } end
+    for _, phase in ipairs(phases) do
+        local parts = {}
+        for _, issue in ipairs(phase.issues) do parts[issue.status] = (parts[issue.status] or 0) + 1 end
+        rows[#rows + 1] = { label = phase.number .. " · " .. phase.name, href = "#phase-" .. phase.number, parts = parts }
+    end
+
+    local label_of = {}
+    for _, s in ipairs(STATUSES) do label_of[s.key] = s.label end
+
+    local body = {
+        "<h1>Progress by phase</h1>",
+        "<p>Every issue file in <code>issues/</code>, counted by phase and status. A phase's number is "
+        .. "its issues' leading digits (issue 1109 is in phase 11). A completed issue's status is its "
+        .. "folder; an open issue's is its row in that phase's progress table; an open issue with no "
+        .. "row there is counted as <em>not in a progress table</em>, which usually means the table "
+        .. "needs a line. The buttons hide and show each status.</p>",
+        chart("phases", { rows = rows, keys = keys }),
+    }
+    for _, phase in ipairs(phases) do
+        body[#body + 1] = '<h2 id="phase-' .. phase.number .. '">Phase ' .. phase.number .. " · " .. esc(phase.name) .. "</h2>"
+        local progress = pages["issues/phase-" .. phase.number .. "-progress.md"]
+        if progress then
+            body[#body + 1] = '<p>The phase\'s own account: <a href="' .. link_to(progress.relative) .. '">'
+                              .. esc(progress.title) .. "</a></p>"
+        end
+        body[#body + 1] = '<div class="table-wrap"><table><tr><th>issue</th><th>title</th><th>status</th></tr>'
+        for _, issue in ipairs(phase.issues) do
+            body[#body + 1] = '<tr><td><a href="' .. link_to(issue.relative) .. '">' .. issue.key .. "</a></td><td>"
+                              .. esc(issue.title) .. "</td><td>" .. label_of[issue.status] .. "</td></tr>"
+        end
+        body[#body + 1] = "</table></div>"
+    end
+    return table.concat(body, "\n")
+end
+-- }}}
+
+-- {{{ local function modules_page
+local function modules_page(modules)
+    local rows = {}
+    for _, m in ipairs(modules) do
+        rows[#rows + 1] = { label = m.module, href = pages[m.info or m.code].name,
+                            parts = { c = m.c_lines, h = m.h_lines } }
+    end
+    local keys = { { key = "c", label = "lines of code (.c)", color = "--gold" },
+                   { key = "h", label = "lines of promises (.h)", color = "--violet" } }
+    local body = {
+        "<h1>The engine's parts by size</h1>",
+        "<p>Each numbered part of the engine in <code>src/</code>, as lines of its code file (what it does) "
+        .. "and its header (what it offers the other parts). The numbers are the reading order. Each bar "
+        .. "leads to what the part is for. The slider hides the small parts; the buttons choose the order.</p>",
+        '<div class="legend"><span style="--swatch: var(--gold)">.c, the doing</span>'
+        .. '<span style="--swatch: var(--violet)">.h, the offering</span></div>',
+        chart("modules", { rows = rows, keys = keys }),
+        '<div class="table-wrap"><table><tr><th>part</th><th>.c lines</th><th>.h lines</th><th>what it is for</th></tr>',
+    }
+    for _, m in ipairs(modules) do
+        local info = m.info and ('<a href="' .. link_to(m.info) .. '">' .. m.module .. ".info.md</a>")
+                     or '<span class="dead" title="no .info.md beside this part">none</span>'
+        body[#body + 1] = '<tr><td><a href="' .. link_to(m.code) .. '">' .. m.module .. "</a></td><td>"
+                          .. m.c_lines .. "</td><td>" .. m.h_lines .. "</td><td>" .. info .. "</td></tr>"
+    end
+    body[#body + 1] = "</table></div>"
+    return table.concat(body, "\n")
+end
+-- }}}
+
+-- {{{ local function front_page
+local function front_page(phases, modules)
+    local open, done = 0, 0
+    for _, phase in ipairs(phases) do
+        for _, issue in ipairs(phase.issues) do
+            if issue.status == "completed" then done = done + 1 else open = open + 1 end
+        end
+    end
+    local code_lines, documents = 0, 0
+    for _, m in ipairs(modules) do code_lines = code_lines + m.c_lines + m.h_lines end
+    for _, page in pairs(pages) do if page.kind == "text" then documents = documents + 1 end end
+
+    local function tile(number, what, href)
+        return '<a class="tile" href="' .. href .. '" style="text-decoration:none"><div class="big">'
+               .. number .. '</div><div class="what">' .. what .. "</div></a>"
+    end
+
+    local rows, keys = {}, {}
+    for _, s in ipairs(STATUSES) do keys[#keys + 1] = { key = s.key, label = s.label, color = s.color } end
+    for _, phase in ipairs(phases) do
+        local parts = {}
+        for _, issue in ipairs(phase.issues) do parts[issue.status] = (parts[issue.status] or 0) + 1 end
+        rows[#rows + 1] = { label = phase.number .. " · " .. phase.name, href = "progress.html#phase-" .. phase.number, parts = parts }
+    end
+
+    local start = {}
+    for _, relative in ipairs({ "notes/vision", "docs/000-vision-summary.md", "docs/001-architecture-overview.md",
+                                "docs/009-roadmap.md", "docs/045-datapath.md" }) do
+        if pages[relative] then
+            start[#start + 1] = '<li><a href="' .. link_to(relative) .. '">' .. esc(pages[relative].title) .. "</a></li>"
+        end
+    end
+
+    return table.concat({
+        "<h1>The W client</h1>",
+        "<p>One open client, written in C, for the World of Warcraft 3.3.5a world and for Warcraft III maps. "
+        .. "These pages are built from the project's own files by <code>scripts/build-docs</code>; "
+        .. "every one of them is in the contents on the left.</p>",
+        '<div class="tiles">',
+        tile(documents, "documents and notes", "#start"),
+        tile(open, "issues open", "progress.html"),
+        tile(done, "issues completed", "progress.html"),
+        tile(#modules, "parts of the engine", "modules.html"),
+        tile(code_lines, "lines in those parts", "modules.html"),
+        "</div>",
+        '<h2 id="start">Where to start</h2><ol>' .. table.concat(start) .. "</ol>",
+        pages["docs/055-the-documentation-site.md"] and
+            ("<p>Every page ends with a box for a note about it, which goes to the project's own mailbox; "
+             .. '<a href="' .. link_to("docs/055-the-documentation-site.md") .. '">how these pages are built, '
+             .. "and the path a note takes</a>.</p>") or "",
+        "<h2 id=\"progress\">Issues by phase</h2>",
+        chart("phases", { rows = rows, keys = keys }),
+    }, "\n")
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- Readers' public notes
+-- ---------------------------------------------------------------------------
+
+--[[
+The notes readers asked to make public, gathered from the project
+mailbox's outbox, where scripts/sort-docs-feedback files them addressed to
+the website (the owner, 2026-10-08: "it goes into the outbox, to show that
+it's been sorted. The 'to: ' line goes to the website, wow.ritzmenardi.com,
+and we gather each of them when we rebuild the website").
+
+Every byte of a note's text came from a stranger. It is only ever written
+into a page escaped, and the viewer only ever puts it on screen as text,
+never as markup.
+]]
+
+-- {{{ local function parse_public_note
+-- One outbox file as a public note, or nil when it is not one: its header
+-- must name the website, its body must start with the gatekeeper's
+-- "checked:" line, and its own header must say "public: yes". Returns
+-- { file (string), when ("2026-10-08 17:52:32"), page (project path),
+--   tags (list of keys), text (the reader's words) }.
+local function parse_public_note(file, raw)
+    local head, body = raw:match("^(.-)\n\n(.*)$")
+    if head == nil then return nil end
+    if not ("\n" .. head .. "\n"):find("\nto: " .. box.WEBSITE .. "\n", 1, true) then return nil end
+    local when = body:match("^checked: (%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d) by ")
+    if when == nil then return nil end
+    local note_head, text = body:match("^[^\n]*\n(.-)\n%-%-%-\n(.*)$")
+    if note_head == nil then return nil end
+    local note = { file = file, when = when, tags = {}, text = text:gsub("%s+$", "") }
+    local public = false
+    for line in (note_head .. "\n"):gmatch("([^\n]*)\n") do
+        local key, value = line:match("^(%l+): (.+)$")
+        if key == "page" then note.page = value
+        elseif key == "tag" then note.tags[#note.tags + 1] = value
+        elseif key == "public" then public = (value == "yes") end
+    end
+    if not public or note.page == nil then return nil end
+    return note
+end
+-- }}}
+
+-- {{{ local function gather_public_notes
+-- Every public note in the mailbox's outbox, newest first.
+local function gather_public_notes()
+    local notes = {}
+    local outbox = MAILBOX .. "/outbox"
+    local pipe = io.popen("find '" .. outbox .. "' -mindepth 1 -maxdepth 1 -type f -print")
+    for path in pipe:lines() do
+        local note = parse_public_note(path:match("([^/]+)$"), read_file(path) or "")
+        if note then notes[#notes + 1] = note end
+    end
+    pipe:close()
+    table.sort(notes, function(a, b) return a.when > b.when end)
+    return notes
+end
+-- }}}
+
+-- {{{ local function tag_labels
+-- Each tag key's label from the form, for showing ("bug" -> "bug report").
+local function tag_labels()
+    local labels = {}
+    for _, tag in ipairs(form.TAGS) do labels[tag.key] = tag.label end
+    return labels
+end
+-- }}}
+
+-- {{{ local function notes_section
+-- The public notes about one page, for the foot of that page; "" if none.
+local function notes_section(notes)
+    if notes == nil or #notes == 0 then return "" end
+    local labels = tag_labels()
+    local out = { '<h2 id="readers-notes">Readers\' public notes</h2>',
+                  '<p class="pointer">All of them, sortable: <a href="notes.html">readers\' public notes</a></p>' }
+    for _, note in ipairs(notes) do
+        local tags = {}
+        for _, key in ipairs(note.tags) do tags[#tags + 1] = esc(labels[key] or key) end
+        out[#out + 1] = '<div class="reader-note"><div class="reader-note-head">' .. esc(note.when)
+                        .. (#tags > 0 and (" · " .. table.concat(tags, ", ")) or "") .. "</div>"
+                        .. '<pre class="reader-note-text">' .. esc(note.text) .. "</pre></div>"
+    end
+    return table.concat(out, "\n")
+end
+-- }}}
+
+-- {{{ local function notes_page
+-- The viewer: every public note, as folders of files the reader can
+-- regroup and resort. The builder only gathers; docs-site.js draws.
+local function notes_page(notes)
+    local labels = tag_labels()
+    local rows = {}
+    for _, note in ipairs(notes) do
+        rows[#rows + 1] = { file = note.file, when = note.when, page = note.page, tags = note.tags, text = note.text,
+                            href = pages[note.page] and pages[note.page].name or "" }
+    end
+    local tags = {}
+    for _, tag in ipairs(form.TAGS) do tags[#tags + 1] = { key = tag.key, label = labels[tag.key] } end
+    return table.concat({
+        "<h1>Readers' public notes</h1>",
+        "<p>Notes readers wrote at the foot of a page and asked to be shown to others. Every note goes "
+        .. "to the project's mailbox; the public ones are filed under the website there and gathered here "
+        .. "each time the site is built. Group them by page, by kind or by month; click a note to read it.</p>",
+        #notes == 0 and "<p><em>None yet.</em></p>" or "",
+        chart("notes", { notes = rows, tags = tags }),
+    }, "\n")
+end
+-- }}}
+
+-- ---------------------------------------------------------------------------
+-- Doing it
+-- ---------------------------------------------------------------------------
+
+-- {{{ main
+local mailbox = read_mailbox()
+gather()
+index_names()
+
+os.execute("mkdir -p '" .. OUT .. "'")
+os.execute("find '" .. OUT .. "' -maxdepth 1 -name '*.html' -delete")
+
+local public_notes = gather_public_notes()
+local notes_by_page = {}
+for _, note in ipairs(public_notes) do
+    notes_by_page[note.page] = notes_by_page[note.page] or {}
+    table.insert(notes_by_page[note.page], note)
+end
+
+local written = 0
+for relative, page in pairs(pages) do
+    local body, headings
+    if page.kind == "source" then body = source_body(page) else body, headings = text_body(page) end
+    body = body .. notes_section(notes_by_page[relative])
+    write_file(OUT .. "/" .. page.name, wrap(page.title, relative, relative, trail_of(page), body, headings))
+    written = written + 1
+end
+
+local phases = measure_phases()
+local modules = measure_modules()
+write_file(OUT .. "/progress.html", wrap("Progress by phase", "@progress", "docs/HTML/progress.html", "start here · progress.html",
+                                         progress_page(phases)))
+write_file(OUT .. "/modules.html", wrap("The engine's parts by size", "@modules", "docs/HTML/modules.html", "start here · modules.html",
+                                        modules_page(modules)))
+write_file(OUT .. "/index.html", wrap("The W client", "@index", "docs/HTML/index.html",
+                                      "start here · index.html", front_page(phases, modules)))
+write_file(OUT .. "/notes.html", wrap("Readers' public notes", "@notes", "docs/HTML/notes.html",
+                                      "start here · notes.html", notes_page(public_notes)))
+written = written + 4
+
+-- The site's style and scripts, copied with a first line saying so, since a
+-- reader of docs/HTML/ alone would otherwise edit the copy.
+for _, copied in ipairs({ { "docs-site.css", "/* ", " */" }, { "docs-seal.js", "// ", "" },
+                          { "docs-site.js", "// ", "" } }) do
+    local name, open, close = copied[1], copied[2], copied[3]
+    write_file(OUT .. "/" .. name, open .. "Copied here by scripts/build-docs from scripts/libs/" .. name
+               .. " for every page to load; edit it there, not here." .. close .. "\n"
+               .. read_file(DIR .. "/scripts/libs/" .. name))
+end
+write_file(OUT .. "/site-config.js", "// Made by scripts/build-docs from project-rmail/ (its port and the pages' key) "
+           .. "and the mailbox host given to it, so the note box knows where to send; rebuilt every time.\n"
+           .. "window.W_SITE = " .. json({ host = mailbox.host, port = mailbox.port, token = mailbox.token,
+                                           maxText = form.MAX_TEXT }) .. ";\n")
+
+print(string.format("build-docs: wrote %d pages to %s (notes go to %s:%d; %d public notes gathered)", written, OUT,
+                    mailbox.host, mailbox.port, #public_notes))
+-- }}}
+
+-- {{{ report
+if #dead > 0 then
+    print(string.format("\n  %d links go nowhere (shown on their pages with a wavy underline):", #dead))
+    table.sort(dead, function(a, b) return a.from .. a.target < b.from .. b.target end)
+    for _, d in ipairs(dead) do print(string.format("    %-50s -> %s", d.from, d.target)) end
+else
+    print("\n  every written link resolves")
+end
+
+local others = {}
+for number, where in pairs(foreign) do
+    local files = {}
+    for relative in pairs(where) do files[#files + 1] = relative end
+    table.sort(files)
+    others[#others + 1] = string.format("    %-6s %s", number, table.concat(files, ", "))
+end
+table.sort(others)
+if #others > 0 then
+    print(string.format("\n  %d issue numbers are mentioned but are not issues here (another project's, or gone):", #others))
+    print(table.concat(others, "\n"))
+end
+
+local orphans = {}
+for relative in pairs(pages) do if not linked[relative] then orphans[#orphans + 1] = relative end end
+table.sort(orphans)
+if #orphans > 0 then
+    print(string.format("\n  %d pages nothing in the prose links to (the contents still reach them):", #orphans))
+    for _, relative in ipairs(orphans) do print("    " .. relative) end
+end
+
+print("\n  open: file://" .. OUT .. "/index.html")
+-- }}}

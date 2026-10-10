@@ -11,3 +11,8 @@ compile_commands.json
 .vscode/
 .idea/
 *.swp
+# The project's own mailbox (scripts/make-project-mailbox): readers' notes
+# are private, and its contacts file holds the key.
+project-rmail/
+# Built by scripts/build-docs, never edited; each page carries the mailbox key.
+docs/HTML/

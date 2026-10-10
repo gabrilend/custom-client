@@ -1,0 +1,43 @@
+#!/bin/bash
+# run-project-mailbox - starts the project's own rmail mailbox and keeps
+# it running until stopped (Ctrl-C, or the service manager).
+#
+# For a general audience: the project's mailbox (project-rmail/, made by
+# scripts/make-project-mailbox) only receives readers' notes while its
+# rmail program runs. This starts it, the same way on this machine and,
+# later, as a server's service. rmail leaves the router alone: since its
+# commit cac3d72 (issue 411, 2026-10-08) a mailbox never probes the router
+# at start, and this config does not ask for port forwarding. (Before that,
+# this script hid the router programs from rmail; no longer needed.)
+# rmail's log goes to /tmp/rmail-progress/, named after the mailbox.
+#
+# Usage: scripts/run-project-mailbox [PROJECT_DIR] [--mailbox FOLDER]
+
+DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+MAILBOX=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --mailbox) MAILBOX="$2"; shift 2 ;;
+        *)         DIR="$1"; shift ;;
+    esac
+done
+if [ -z "${MAILBOX}" ]; then
+    MAILBOX="${DIR}/project-rmail"
+fi
+
+RMAIL="/home/ritz/programs/r-mail"
+
+if [ ! -f "${MAILBOX}/config" ]; then
+    echo "run-project-mailbox: no mailbox at ${MAILBOX}; make it with scripts/make-project-mailbox" >&2
+    exit 1
+fi
+
+# rmail before issue 411 probed the router at every start; refuse to run
+# one, rather than let it touch the router.
+if grep -q "function nat.security_check" "${RMAIL}/rmail.lua"; then
+    echo "run-project-mailbox: ${RMAIL}/rmail.lua still probes the router at start (before rmail issue 411); update rmail" >&2
+    exit 1
+fi
+
+echo "run-project-mailbox: starting ${MAILBOX} (log: /tmp/rmail-progress/log$(echo "${MAILBOX}" | tr '/' '-'))"
+exec "${RMAIL}/run-rmail.sh" "${MAILBOX}/config"

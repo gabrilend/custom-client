@@ -1,0 +1,193 @@
+#!/usr/bin/env luajit
+-- check-docs-feedback - the project mailbox's gatekeeper for readers' notes.
+--
+-- For a general audience: readers of the HTML documentation can write a
+-- note about any page, and the page posts it straight to the project's
+-- mailbox. The key that lets a page post is printed in every page, so
+-- anyone can post anything, not only through the page. Before the mailbox
+-- saves an arriving note, it hands the note to this program. This program
+-- either rewrites the note into a clean, known shape (which page, which
+-- boxes ticked, the reader's words with anything that could fool a
+-- terminal removed), or replaces it with a short refusal saying why. It
+-- never lets a note through unread.
+--
+-- How the mailbox calls it: three program arguments, the sender's contact
+-- name, the subject, and the whole body. Two of rmail's hooks run it:
+--   on_receive_raw  a new message: (sender, subject, body)
+--   on_update       an edit of an earlier message: (sender, the inbox
+--                   file's path, the new body). Without this, an edit from
+--                   the pages' contact, whose key is public, would be saved
+--                   unchecked (rmail issue 420). The path stands in for the
+--                   subject, which is only ever written into the log.
+-- Whatever this prints becomes the saved body. Printing NOTHING makes rmail
+-- keep the original body untouched, so every path below prints something:
+-- a refusal is a printed refusal, never silence.
+--
+-- Usage (by rmail, not by hand; the test runs it by hand):
+--   scripts/check-docs-feedback SENDER SUBJECT BODY
+-- The project directory is hard-coded below. rmail owns the argument list,
+-- so the override is the environment variable W_CLIENT_DIR rather than an
+-- argument.
+
+local DIR = os.getenv("W_CLIENT_DIR") or "/mnt/mtwo/games/azeroth-core/custom-client"
+package.path = DIR .. "/scripts/libs/?.lua;" .. package.path
+local form = require("feedback-form")
+
+local LOG_DIR = DIR .. "/tmp/shared-memory"
+local LOG = LOG_DIR .. "/docs-feedback-refusals.log"
+
+-- The folders a "page:" line may point into. A page outside these was not
+-- built by the documentation builder, so a note naming one is not ours.
+local PAGE_ROOTS = { "docs/", "notes/", "issues/", "src/", "scripts/", "tests/" }
+
+-- {{{ local function file_exists
+local function file_exists(path)
+    local handle = io.open(path, "r")
+    if handle == nil then return false end
+    handle:close()
+    return true
+end
+-- }}}
+
+-- {{{ local function clean_text
+-- The reader's words with everything that is not text taken out:
+-- control bytes except newline and tab (an escape byte could repaint or
+-- retitle the terminal of whoever runs cat on the inbox), carriage
+-- returns, and the Unicode marks that reverse the direction text is drawn
+-- in (U+202A to U+202E, U+2066 to U+2069), which can make a line show
+-- something other than what it says.
+local function clean_text(text)
+    text = text:gsub("\r\n", "\n")
+    text = text:gsub("[%z\1-\8\11-\31\127]", "")
+    text = text:gsub("\226\128[\170-\174]", "")   -- U+202A..U+202E
+    text = text:gsub("\226\129[\166-\169]", "")   -- U+2066..U+2069
+    return text
+end
+-- }}}
+
+-- {{{ local function page_is_ours
+-- True when a "page:" value names a real file the builder could have made
+-- a page from: plain path characters only, no "..", under one of the
+-- PAGE_ROOTS, and present on disk.
+local function page_is_ours(value)
+    if not value:match("^[%w%-_%./]+$") then return false, "the page name has characters a path never has" end
+    if value:find("..", 1, true) then return false, "the page name climbs out of the project" end
+    local rooted = false
+    for _, root in ipairs(PAGE_ROOTS) do
+        if value:sub(1, #root) == root then rooted = true end
+    end
+    if not rooted then return false, "the page name is outside the documented folders" end
+    if not file_exists(DIR .. "/" .. value) then return false, "no such page: " .. value end
+    return true
+end
+-- }}}
+
+-- {{{ local function parse
+-- Reads a note into { page, tags, public, text } or returns nil and the
+-- reason it is not a note. Each header key is handled by an entry in a
+-- table of readers rather than a chain of ifs; an unknown key is a reason
+-- to refuse, not to ignore, because a shape we do not know is a shape we
+-- cannot promise is harmless.
+local function parse(body)
+    local head, text = body:match("^(.-)\n%-%-%-\n(.*)$")
+    if head == nil then return nil, "no line of three dashes between the header and the words" end
+    if #text > form.MAX_TEXT then
+        return nil, string.format("the words are %d bytes, over the limit of %d", #text, form.MAX_TEXT)
+    end
+
+    local note = { tags = {}, page = nil, public = nil, text = text }
+    local allowed_tags = form.tag_set()
+    local readers = {
+        page = function(value)
+            if note.page ~= nil then return "two page lines" end
+            local ok, why = page_is_ours(value)
+            if not ok then return why end
+            note.page = value
+        end,
+        tag = function(value)
+            if not allowed_tags[value] then return "a box that is not on the form: " .. value end
+            for _, seen in ipairs(note.tags) do
+                if seen == value then return "the same box twice: " .. value end
+            end
+            note.tags[#note.tags + 1] = value
+        end,
+        public = function(value)
+            if note.public ~= nil then return "two public lines" end
+            if not form.PUBLIC_VALUES[value] then return "public must be yes or no" end
+            note.public = value
+        end,
+    }
+
+    local count = 0
+    for line in (head .. "\n"):gmatch("([^\n]*)\n") do
+        count = count + 1
+        if count > form.MAX_HEADER then return nil, "too many header lines" end
+        local key, value = line:match("^(%l+): (.+)$")
+        if key == nil then return nil, "a header line that is not \"key: value\"" end
+        local reader = readers[key]
+        if reader == nil then return nil, "a header key that is not on the form: " .. key end
+        local why = reader(value)
+        if why ~= nil then return nil, why end
+    end
+
+    if note.page == nil then return nil, "no page line" end
+    if note.public == nil then return nil, "no public line" end
+    return note
+end
+-- }}}
+
+-- {{{ local function log_refusal
+-- One line per refusal in RAM, so a run of junk is visible without
+-- opening every inbox file. The folder is made first: after a reboot
+-- /dev/shm is empty.
+local function log_refusal(subject, why)
+    os.execute("mkdir -p '" .. LOG_DIR .. "'")
+    local handle = io.open(LOG, "a")
+    if handle == nil then
+        io.stderr:write("check-docs-feedback: cannot write " .. LOG .. "\n")
+        return
+    end
+    handle:write(string.format("%s  %s  %s\n", os.date("%Y-%m-%d %H:%M:%S"),
+                               (clean_text(subject):gsub("\n", " ")), why))
+    handle:close()
+end
+-- }}}
+
+-- {{{ main
+local sender, subject, body = arg[1], arg[2], arg[3]
+
+if sender == nil or subject == nil or body == nil then
+    io.stderr:write("usage: check-docs-feedback SENDER SUBJECT BODY (rmail's on_receive_raw)\n")
+    os.exit(2)
+end
+
+-- Not from the pages: this checker has nothing to say about it, and the
+-- body goes through exactly as it came.
+if sender ~= form.SENDER then
+    io.write(body)
+    os.exit(0)
+end
+
+local note, why = parse(body)
+
+if note == nil then
+    log_refusal(subject, why)
+    -- The refusal keeps a cleaned, shortened look at what arrived, so the
+    -- owner can tell a broken page from a stranger trying things.
+    local glimpse = clean_text(body):sub(1, 400)
+    io.write("refused by scripts/check-docs-feedback: ", why, "\n",
+             "what arrived (cleaned, first 400 bytes):\n", glimpse, "\n")
+    os.exit(0)
+end
+
+-- The first line says what made this file and why (the owner's rule for
+-- every generated file): a reader's note, checked and cleaned on arrival.
+local out = { "checked: " .. os.date("%Y-%m-%d %H:%M:%S")
+              .. " by scripts/check-docs-feedback, which cleans every reader's note before the mailbox keeps it" }
+out[#out + 1] = "page: " .. note.page
+for _, tag in ipairs(note.tags) do out[#out + 1] = "tag: " .. tag end
+out[#out + 1] = "public: " .. note.public
+out[#out + 1] = "---"
+out[#out + 1] = clean_text(note.text)
+io.write(table.concat(out, "\n"), "\n")
+-- }}}

@@ -24,7 +24,8 @@ custom-client/
 │   ├── 046-ingame-checks.md              # what the client guesses, for the owner to check in the original
 │   ├── 047-optimization-checklist.md     # the frame made fast, item by item, measured
 │   ├── 048-stock-options.md              # the original's whole settings menu (generated)
-│   └── HTML/                             # browsable doc bundle (TBD)
+│   ├── 055-the-documentation-site.md     # the site's build, and a reader's note from page to inbox
+│   └── HTML/                             # the browsable site, built by scripts/build-docs (git-ignored)
 │
 ├── issues/                               # tracked work, see naming below
 │   ├── phase-1-progress.md
@@ -34,8 +35,15 @@ custom-client/
 ├── src/                                  # the engine, C, files numbered in reading order
 ├── libs/                                 # vendored deps (raylib, when fetched)
 ├── assets/                               # proprietary MPQ chain (gitignored)
-├── tests/                                # the test program (044); the WC3 picture parity check (050, LuaJIT)
-├── scripts/                              # build, run, generate-info, …
+├── tests/                                # the test program (044); the WC3 picture parity check (050, LuaJIT);
+│                                         #   the note gatekeeper (051); the note box end to end (052-054);
+│                                         #   two mailboxes sorting and forwarding (056)
+├── scripts/                              # build, run, generate-info, build-docs, make-project-mailbox,
+│                                         #   check-docs-feedback, sort-docs-feedback, make-, connect-
+│                                         #   and run-project-mailbox, install-git-hooks, …
+│   └── git-hooks/                        # post-commit: rebuilds the documentation site
+├── project-rmail/                        # the project's own mailbox: readers' notes (git-ignored;
+│                                         #   made by scripts/make-project-mailbox, see docs/055)
 │
 ├── input/   output/   desire/   faith/   strategems/
 │                                         # see CLAUDE.md — long-lived notes
@@ -71,4 +79,4 @@ Sub-issues for a large piece of work append a letter: `105a-...`, `105b-...`.
 
 `.file-index-counter` holds the current highest index across **all** indexed
 files in the project (docs, source, tests, scripts). Reads before
-creation, writes after. Currently at **48**: docs 000 to 012, source 013 to 043, the test program 044, docs 045 to 048. Read it: `cat .file-index-counter`.
+creation, writes after. Read it: `cat .file-index-counter` (it was 56 on 2026-10-08: docs 000 to 012, source 013 to 043, the test program 044, docs 045 to 048, the JPEG reader 049, tests 050 to 054, doc 055, test 056).

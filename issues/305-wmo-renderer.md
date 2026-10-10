@@ -77,12 +77,16 @@ A WMO is placed in the world by an `MODF` entry from an ADT
 renderer builds the model matrix per placement on the main thread each
 frame and supplies it as a uniform.
 
-### Doodad refs stubbed
+### Doodads: the building's furnishings
 
-The MODD doodad placements reference M2 models (Phase 4). For Phase 3
-the renderer just *counts* them and reports the count in the demo HUD;
-it does not draw them. [305a](./305a-wmo-doodads.md) is the future
-sub-issue that fills in M2 doodad drawing once Phase 4 lands.
+The MODD doodad placements reference M2 models (Phase 4). They are
+drawn by the doodads part (`src/042-doodads.c`, from wow-chat-2026's
+issue 173g), not by this renderer: for each building placed, it adds the
+furnishings of set 0 (which every placement shows) and of the set the
+placement asks for, as copies of small models beside the ground's own.
+An earlier plan gave this a sub-issue, 305a, which was never written:
+the work arrived already built with the code (corrected 2026-10-08,
+when the documentation site's builder reported the link to it as dead).
 
 ## Suggested implementation steps
 
@@ -131,4 +135,4 @@ iteration.
 - [docs/003-asset-formats.md](../docs/003-asset-formats.md#wmo--world-map-objects-buildings-dungeons)
 - Blocked by: 304, 203, 204, 207.
 - Blocks: [308](./308-phase-demo.md).
-- Follow-up: `305a-wmo-doodads` (Phase 4).
+- Furnishings: drawn by `src/042-doodads.c` (see "Doodads" above).

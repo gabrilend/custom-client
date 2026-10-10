@@ -21,6 +21,13 @@ The phase ends with a runnable demo that touches every Phase 1 piece.
 | 108 | [Phase 1 demo](./108-phase-demo.md)             | pending  | 102–107    |
 | 109 | [Test scenes: the client's half](./109-test-scenes-client-half.md) | pending | 101; wow-chat-2026 176a |
 | 110 | [The ceramic shape: no main loop, only render threads](./110-the-ceramic-shape.md) | paused (110a-110g) | 101, 201; soramech timers and standing tasks |
+| 110a | [The ceramic engine in the client](./110a-the-engine-in-the-client.md) | paused with 110 | 101 |
+| 110b | [The window's render thread](./110b-the-window-render-thread.md) | paused with 110 | 110a, 201 |
+| 110c | [The mailbox](./110c-the-mailbox.md) | paused with 110 | 110a |
+| 110d | [The asset table and loading as stations](./110d-the-asset-table-and-loading-stations.md) | paused with 110 | 110a, 110b |
+| 110e | [Per-frame work as stations](./110e-per-frame-work-as-stations.md) | paused with 110 | 110c, 110d |
+| 110f | [Views drawn into textures](./110f-views-drawn-into-textures.md) | paused with 110 | 110b, 110d |
+| 110g | [The clock](./110g-the-clock.md) | paused with 110 | 110a |
 
 ## Suggested order
 

@@ -1,0 +1,131 @@
+#!/usr/bin/env luajit
+-- sort-docs-feedback - sorts each message the project mailbox receives
+-- into its outbox: a copy for the owner, and for the website if public.
+--
+-- For a general audience: the project's mailbox receives readers' notes
+-- from the documentation pages (already checked and cleaned by
+-- scripts/check-docs-feedback) and occasionally other mail. Once a
+-- message is saved, the mailbox runs this. It writes a copy into the
+-- mailbox's outbox addressed to the owner's main mailbox, so the owner
+-- sees everything without opening this one. When the message is a checked
+-- note whose reader ticked "others may read this note", the same outbox
+-- file is also addressed to the website: that is what "sorted as public"
+-- means, and the site builder gathers those files when it next builds.
+-- The website has no address yet, so rmail holds those notes in the outbox
+-- rather than sending them; the owner's copy goes on its way.
+--
+-- An outbox file with two addressees is one rmail message to each: when
+-- the owner deletes their copy, rmail removes the owner's line and keeps
+-- the file for the website. A private note's file disappears once the
+-- owner has deleted it; the received note stays in this mailbox's inbox.
+--
+-- How the mailbox calls it (rmail's "on_receive" hook, in the background,
+-- after the message is on disk): the sender's contact name, the subject,
+-- and the saved file's path. Its output is not read, so everything it has
+-- to say goes to tmp/shared-memory/docs-feedback-sorting.log.
+--
+-- Usage (by rmail; the tests run it through a real mailbox):
+--   scripts/sort-docs-feedback SENDER SUBJECT INBOX_FILE
+-- The project directory is hard-coded below; rmail owns the argument list,
+-- so the override is the environment variable W_CLIENT_DIR.
+
+local DIR = os.getenv("W_CLIENT_DIR") or "/mnt/mtwo/games/azeroth-core/custom-client"
+package.path = DIR .. "/scripts/libs/?.lua;" .. package.path
+local box = require("project-mailbox")
+
+local LOG_DIR = DIR .. "/tmp/shared-memory"
+local LOG = LOG_DIR .. "/docs-feedback-sorting.log"
+
+-- {{{ local function log
+local function log(line)
+    os.execute("mkdir -p '" .. LOG_DIR .. "'")
+    local handle = io.open(LOG, "a")
+    if handle == nil then
+        io.stderr:write("sort-docs-feedback: cannot write " .. LOG .. ": " .. line .. "\n")
+        return
+    end
+    handle:write(os.date("%Y-%m-%d %H:%M:%S"), "  ", line, "\n")
+    handle:close()
+end
+-- }}}
+
+-- {{{ local function read_file
+local function read_file(path)
+    local handle = io.open(path, "rb")
+    if handle == nil then return nil end
+    local text = handle:read("*a")
+    handle:close()
+    return text
+end
+-- }}}
+
+-- {{{ local function is_public_note
+-- True for a note the gatekeeper kept (it then begins "checked: ") whose
+-- header, the lines before "---", says "public: yes". A refusal begins
+-- "refused by" and is never public, whatever the stranger wrote in it.
+local function is_public_note(text)
+    if text:sub(1, 9) ~= "checked: " then return false end
+    local head = text:match("^(.-)\n%-%-%-\n")
+    if head == nil then return false end
+    return ("\n" .. head .. "\n"):find("\npublic: yes\n", 1, true) ~= nil
+end
+-- }}}
+
+-- {{{ main
+local sender, subject, inbox_file = arg[1], arg[2], arg[3]
+if sender == nil or subject == nil or inbox_file == nil then
+    io.stderr:write("usage: sort-docs-feedback SENDER SUBJECT INBOX_FILE (rmail's on_receive)\n")
+    os.exit(2)
+end
+
+-- The owner's own messages to this mailbox are already the owner's: a copy
+-- back would be a loop.
+if sender == box.OWNER then
+    log("from the owner, not copied back: " .. inbox_file)
+    os.exit(0)
+end
+
+local text = read_file(inbox_file)
+if text == nil then
+    log("FAILED: cannot read " .. inbox_file .. " (from " .. sender .. ")")
+    os.exit(1)
+end
+
+-- The mailbox this hook serves is the one the file was saved in, so a
+-- throwaway test mailbox sorts into its own outbox, not the project's.
+local mailbox = inbox_file:match("^(.*)/inbox/[^/]+$")
+local name = inbox_file:match("([^/]+)$")
+if mailbox == nil then
+    log("FAILED: " .. inbox_file .. " is not in a mailbox's inbox folder")
+    os.exit(1)
+end
+
+local to = { "to: " .. box.OWNER }
+local public = sender == box.PAGES and is_public_note(text)
+if public then to[#to + 1] = "to: " .. box.WEBSITE end
+
+local outbox_file = mailbox .. "/outbox/" .. name
+if read_file(outbox_file) ~= nil then
+    log("FAILED: " .. outbox_file .. " already exists; " .. inbox_file .. " was not sorted")
+    os.exit(1)
+end
+
+-- Written beside the outbox, then moved in whole: rmail watches the outbox
+-- and would otherwise read a half-written file.
+local staging = mailbox .. "/.sorting-" .. name
+local handle = io.open(staging, "wb")
+if handle == nil then
+    log("FAILED: cannot write " .. staging)
+    os.exit(1)
+end
+handle:write(table.concat(to, "\n"), "\n\n", text)
+handle:close()
+
+local moved, why = os.rename(staging, outbox_file)
+if not moved then
+    log("FAILED: cannot move " .. staging .. " into the outbox: " .. tostring(why))
+    os.exit(1)
+end
+
+log(string.format("%s from %s -> outbox, to the owner%s", name, sender, public and " and the website (public)" or ""))
+-- }}}

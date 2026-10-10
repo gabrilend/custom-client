@@ -1,0 +1,173 @@
+/* docs-site.css - the look of the W client's documentation site.
+ *
+ * For a general audience: every page of the documentation shares this one
+ * style. The palette is taken from the world the client draws: night
+ * (deep blue-black ground), moonlight on stone (the text), and the gold of
+ * the original game's interface trim (links and accents). A light theme
+ * (parchment) is offered by the button at the top of the contents.
+ * Copied into docs/HTML/ by scripts/build-docs; edit it here, not there.
+ */
+
+:root {
+  --ground: #0d1016; --panel: #131822; --raise: #1a2130; --line: #273041;
+  --ink: #c6c1b3; --bright: #ede4cc; --dim: #7c8392;
+  --gold: #d6aa5c; --gold-deep: #9c7633; --violet: #9c8fd6; --warn: #d0715e; --good: #7fae7a;
+  --code-ground: #10141c;
+  --k: #b9a1e0; --s: #9fc58c; --c: #6f7787; --n: #e09a6a; --p: #6fb2c9;
+}
+:root[data-theme="light"] {
+  --ground: #f3ecda; --panel: #e9dfc7; --raise: #e0d4b8; --line: #cdbf9f;
+  --ink: #3b3326; --bright: #1d170e; --dim: #7a6c55;
+  --gold: #8a5a14; --gold-deep: #6b440c; --violet: #5a4a9c; --warn: #a33d2a; --good: #3f7a3a;
+  --code-ground: #efe6d0;
+  --k: #6a3fa8; --s: #3f7a2a; --c: #8a7d66; --n: #a5501c; --p: #1f6f8a;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--ground); color: var(--ink); scrollbar-color: var(--line) var(--panel);
+  font: 15px/1.65 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+code, pre, .mono, #contents, .chart, .note-form { font-family: ui-monospace, "DejaVu Sans Mono", Menlo, monospace; }
+
+#frame { display: flex; min-height: 100vh; }
+
+/* The contents, down the left of every page. */
+#contents { width: 21rem; flex: 0 0 21rem; background: var(--panel);
+  border-right: 1px solid var(--line); padding: 1.1rem .8rem 4rem;
+  overflow-y: auto; height: 100vh; position: sticky; top: 0; font-size: 12px; }
+#contents .site { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+#contents .site a { font-size: 14px; color: var(--gold); text-decoration: none; letter-spacing: .04em; }
+#contents button { background: var(--raise); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 8px; font: inherit; cursor: pointer; }
+#contents button:hover { color: var(--bright); border-color: var(--gold-deep); }
+#filter { width: 100%; margin: .8rem 0 .4rem; padding: 5px 8px; background: var(--ground);
+  color: var(--bright); border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+#filter:focus { outline: 1px solid var(--gold-deep); }
+#contents details { margin: .3rem 0; }
+#contents summary { cursor: pointer; color: var(--dim); text-transform: uppercase;
+  letter-spacing: .09em; font-size: 10.5px; padding: 3px 2px; list-style: none; }
+#contents summary::before { content: "▸ "; }
+#contents details[open] summary::before { content: "▾ "; }
+#contents summary .count { opacity: .7; }
+#contents a.entry { display: block; color: var(--ink); text-decoration: none;
+  padding: 1px 6px 1px 12px; border-radius: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#contents a.entry:hover { background: var(--raise); color: var(--bright); }
+#contents a.entry.here { background: var(--raise); color: var(--gold); border-left: 2px solid var(--gold); }
+#contents a.entry.hidden { display: none; }
+#contents .sub { padding-left: 22px; font-size: 11px; color: var(--dim); }
+
+main { flex: 1 1 auto; padding: 2.2rem 3rem 6rem; max-width: 64rem; min-width: 0; }
+#trail { color: var(--dim); font-size: 11px; margin-bottom: 1.4rem; font-family: ui-monospace, monospace;
+  letter-spacing: .05em; }
+#trail a { color: var(--dim); }
+
+h1, h2, h3, h4, h5, h6 { color: var(--bright); line-height: 1.3; font-weight: 600; }
+h1 { font-size: 26px; margin: 0 0 1.2rem; }
+h2 { font-size: 20px; margin: 2.4rem 0 .7rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+h3 { font-size: 16.5px; margin: 1.8rem 0 .4rem; }
+h4, h5, h6 { font-size: 15px; margin: 1.4rem 0 .3rem; color: var(--ink); }
+.here-link { margin-left: .4rem; color: var(--line); text-decoration: none; font-size: .8em; opacity: 0; }
+h1:hover .here-link, h2:hover .here-link, h3:hover .here-link, h4:hover .here-link { opacity: 1; }
+.here-link:hover { color: var(--gold); }
+:target { scroll-margin-top: 1rem; }
+h2:target, h3:target, h4:target { color: var(--gold); }
+
+p { margin: .75rem 0; }
+a { color: var(--gold); }
+a:hover { color: var(--bright); }
+.dead { color: var(--warn); text-decoration: underline wavy var(--warn); cursor: help; }
+strong { color: var(--bright); }
+blockquote { border-left: 3px solid var(--gold-deep); margin: 1rem 0; padding: .1rem 1rem; color: var(--dim); }
+hr { border: 0; border-top: 1px solid var(--line); margin: 2rem 0; }
+ul, ol { margin: .6rem 0; padding-left: 1.5rem; }
+li { margin: .2rem 0; }
+
+code { background: var(--code-ground); color: var(--bright); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+a code { color: var(--gold); }
+pre.code { position: relative; background: var(--code-ground); border: 1px solid var(--line); border-radius: 5px;
+  padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+pre.code code { background: none; padding: 0; color: var(--ink); }
+pre.code .lang { position: absolute; top: 4px; right: 8px; font-size: 10px; color: var(--dim);
+  text-transform: uppercase; letter-spacing: .08em; }
+/* A source page: line numbers in their own column, each an anchor (#L120). */
+.numbered-code { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--code-ground); overflow-x: auto; }
+.numbered-code pre { margin: 0; border: 0; border-radius: 0; font-size: 13px; line-height: 1.5; }
+.numbered-code pre.code { flex: 1 1 auto; overflow: visible; }
+pre.gutter { padding: 12px 8px 12px 12px; text-align: right; color: var(--dim); user-select: none;
+  border-right: 1px solid var(--line); }
+pre.gutter a { color: var(--line); text-decoration: none; }
+pre.gutter a:hover, pre.gutter a:target { color: var(--gold); }
+a.tile:hover { border-color: var(--gold-deep); }
+.k { color: var(--k); } .s { color: var(--s); } .c { color: var(--c); font-style: italic; }
+.n { color: var(--n); } .p { color: var(--p); }
+
+.table-wrap { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--raise); color: var(--bright); }
+
+.pointer { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+  padding: .5rem .9rem; font-size: 13.5px; }
+
+/* Charts and their controls (the progress page, the module map, the front page). */
+.chart { margin: 1rem 0 1.6rem; font-size: 12px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .bar-label { fill: var(--ink); }
+.chart .bar-value { fill: var(--dim); }
+.chart .axis { stroke: var(--line); }
+.controls { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; margin: .6rem 0;
+  font-family: ui-monospace, monospace; font-size: 12px; }
+.controls button { background: var(--raise); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 10px; font: inherit; cursor: pointer; }
+.controls button.on { color: var(--ground); background: var(--gold); border-color: var(--gold); }
+.controls input[type=range] { accent-color: var(--gold); width: 12rem; }
+.legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: 12px; font-family: ui-monospace, monospace; }
+.legend span::before { content: ""; display: inline-block; width: .8em; height: .8em; margin-right: .35em;
+  border-radius: 2px; background: var(--swatch); vertical-align: -1px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .7rem; margin: 1rem 0; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .7rem .9rem; }
+.tile .big { font-size: 26px; color: var(--bright); font-family: ui-monospace, monospace; }
+.tile .what { font-size: 12px; color: var(--dim); }
+.tooltip { position: fixed; pointer-events: none; background: var(--raise); color: var(--bright);
+  border: 1px solid var(--gold-deep); border-radius: 4px; padding: 4px 8px; font: 12px ui-monospace, monospace;
+  display: none; z-index: 10; max-width: 26rem; }
+
+/* Readers' public notes: at the foot of a page, and the browser on notes.html. */
+.reader-note { border-left: 2px solid var(--gold-deep); padding: .2rem 0 .2rem .9rem; margin: 1rem 0; }
+.reader-note-head { font: 12px ui-monospace, monospace; color: var(--dim); }
+.reader-note-text { white-space: pre-wrap; word-break: break-word; font: inherit; margin: .3rem 0; color: var(--ink); }
+.note-browser { display: flex; gap: 1rem; align-items: flex-start; }
+.note-tree { flex: 0 0 22rem; max-width: 45%; font: 12px ui-monospace, monospace; }
+.note-tree summary { cursor: pointer; color: var(--bright); padding: 2px 0; }
+.note-file { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--ink);
+  padding: 2px 6px 2px 16px; font: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-file:hover, .note-file.on { background: var(--raise); color: var(--gold); }
+.note-view { flex: 1 1 auto; min-width: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 5px; padding: .7rem 1rem; min-height: 6rem; color: var(--dim); }
+@media (max-width: 900px) { .note-browser { flex-direction: column; } .note-tree { max-width: none; flex: none; width: 100%; } }
+
+/* The note box at the foot of every page. */
+.note-form { margin-top: 4rem; padding: 1rem 1.2rem 1.2rem; border: 1px solid var(--line);
+  border-top: 2px solid var(--gold-deep); border-radius: 6px; background: var(--panel); font-size: 13px; }
+.note-form h2 { border: 0; margin: 0 0 .3rem; padding: 0; font-size: 15px; font-family: inherit; }
+.note-form p { margin: .3rem 0 .7rem; color: var(--dim); }
+.note-form textarea { width: 100%; min-height: 7rem; resize: vertical; background: var(--ground);
+  color: var(--bright); border: 1px solid var(--line); border-radius: 4px; padding: 8px; font: inherit; }
+.note-form .boxes { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: .6rem 0; }
+.note-form label { cursor: pointer; }
+.note-form input[type=checkbox] { accent-color: var(--gold); }
+.note-form .row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.note-form button { background: var(--gold); color: var(--ground); border: 0; border-radius: 4px;
+  padding: 5px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+.note-form button:disabled { opacity: .5; cursor: default; }
+.note-form .status { color: var(--dim); }
+.note-form .status.bad { color: var(--warn); }
+.note-form .status.good { color: var(--good); }
+.note-form .count { margin-left: auto; color: var(--dim); }
+
+@media (max-width: 900px) {
+  #frame { flex-direction: column; }
+  #contents { width: auto; flex: none; height: auto; max-height: 50vh; position: static; }
+  main { padding: 1.2rem 16px 4rem; }
+}
