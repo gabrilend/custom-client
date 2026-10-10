@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:16:12
+Generated on: 2026-10-09 20:29:11
 Models: claude-opus-5-5
 
 ## Contents
@@ -30,6 +30,14 @@ Models: claude-opus-5-5
    open design questions, now on how a server's assets reach players. Next, you
    decide whether "fetch at next login" is enough when a server adds an asset
    mid-game.
+7. 2026-10-09 20:19, after Request 19 - We're working through the project's open
+   questions one by one, recording each answer in its issue or document and
+   committing it. Next: decide whether the editor keeps its own dozen drawing
+   calls on the new engine, or is rebuilt on phase 7's XML-and-Lua interface.
+8. 2026-10-09 20:24, after Request 20 - We're working through the project's open
+   questions one at a time, recording and committing each answer as we go. Next,
+   answer the clock question: should a 240 Hz screen update animations every
+   frame, or on fixed timing like everyone else's?
 
 --------------------------------------------------------------------------------
 
@@ -2004,6 +2012,113 @@ rectangles, frames, images, models, ground, and its flat-shaded designs.
 From the other side: when someone adds a new panel to the editor in a year,
 should they write it the way addon authors write WoW interface code, or the way
 the editor's Lua is written today?
+
+--------------------------------------------------------------------------------
+
+### User Request 20
+
+We can push the editor to phase 7. It's important that WoW addons work as-is.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 20
+
+> Recording both: the editor is built on phase 7's interface, and "WoW addons
+> work as-is" is a requirement on phase 7 itself. First, where those two things
+> are written today:
+
+> Now the question itself in issue 1109, plus the plan's step that mentions the
+> drawing calls:
+
+*[commit] 34fcd8263 in custom-client - The editor waits for the interface runtime, and WoW addons must run unchanged*
+
+Recorded and committed as `34fcd82`:
+- **The UI document, `docs/006`:** it now states the requirement in your words.
+  An addon written for the original 3.3.5a client must load and run here
+  unchanged.
+- **Issue 1109:** the editor's panels get rebuilt on phase 7's XML-and-Lua
+  interface. The editor's own dozen drawing calls aren't carried over.
+- **Phase 11's progress table:** it now shows phase 7 as a firm blocker of the
+  editor.
+
+One check on your wording: I read "push the editor to phase 7" as "the editor
+waits until phase 7 exists". It still lives in phase 11 as issue 1109. If you
+meant it should become a phase 7 issue, with a 7xx number, tell me and I'll move
+it.
+
+**Next: the clock (issue 110g).** The engine's clock lets work be scheduled
+"every 16 ms" or "once, at 12.5 seconds". The render thread moves the clock's
+hand once per drawn frame. A fixed 16 ms period only matches a 60 Hz screen:
+- at 144 Hz, frames come every 7 ms, so a 16 ms entry fires on roughly every
+  second or third frame
+- at 240 Hz, it fires on only one frame in four
+
+The question: should the clock have a second kind of entry, "every frame", that
+fires each time the hand moves, whatever the screen's rate? Animation and camera
+smoothing want that; network polling and game timers want fixed periods.
+
+Here's the other side of it: if someone has a 240 Hz monitor, should their
+animations update 240 times a second, or the same number of times as everyone
+else's?
+
+--------------------------------------------------------------------------------
+
+### User Request 21
+
+I'm not sure about the clock. We shouldn't attach it to the render speed. It
+should have a fixed value. I think... I think we might be able to attach it to
+the render frame IF we measure the absolute time that has passed. But that'll
+slow down every single frame, so it might be better to use a different way to
+update the clock.
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 21
+
+> You're thinking about the clock's mechanism, so let me reread what the clock
+> issue already settled about how the hand moves before I answer:
+
+Measured on this machine, one read of the system clock takes about 17
+nanoseconds. A 240 Hz frame lasts 4.17 milliseconds, about 250,000 times longer,
+so the read costs 0.0004% of the frame. Linux answers this read without entering
+the kernel: the time sits in memory the kernel shares with every program, and
+the read is a few instructions. So attaching the clock to the frame while
+measuring absolute time wouldn't slow frames down in any way you could detect.
+
+That's already the settled shape, and it matches your instinct:
+- **Fixed values.** Every entry lives on a fixed 1 ms grid: "every 50 ms", "at
+  12.5 seconds". Nothing is counted in frames.
+- **The frame only moves the hand.** Each frame, the render thread reads the
+  absolute time and runs every millisecond that passed since its last turn, in
+  order. A faster screen means work starts less late (at most 4 ms late at 240
+  Hz, versus 17 ms at 60 Hz). It never means work runs more often.
+
+So for the first clock question, your answer reads as: no "every frame" kind of
+entry; everything runs on fixed time. Animation still looks smooth at 240 Hz,
+because whatever draws a frame reads the time itself and places each model where
+it should be at that instant. The clock schedules work; it doesn't pace drawing.
+I'll record that as your answer unless you say otherwise.
+
+Your "different way to update the clock" lands on the second clock question,
+which is the real weak spot. If the window is minimized, the system may slow or
+stop the render thread's frames. The hand stops with them, and so does
+everything the clock runs, including reading the server's socket. Messages pile
+up until the window comes back.
+
+Two ways to keep the hand moving, and I'd like your thinking on which fits "no
+thread asleep waiting":
+- **(a)** While the window is hidden, the render thread keeps looping at a floor
+  rate, say 20 times a second, moving the hand and drawing nothing. That's one
+  thread, already there, waking more slowly.
+- **(b)** The kernel gives the clock its own wake-up. Linux can turn a timer
+  into something a program waits on alongside its other inputs. A worker that's
+  idle anyway would be woken by it and move the hand. No thread exists just for
+  the clock, but the hand then has two possible movers, and only one may move it
+  at a time.
+
+And from another angle: when the window is hidden, what should still be
+happening? Just staying connected to the server, or the whole world going on, so
+that when you come back everything has caught up?
 
 --------------------------------------------------------------------------------
 

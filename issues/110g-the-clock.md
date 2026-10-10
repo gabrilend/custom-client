@@ -77,6 +77,10 @@ idea, with the 'ring of buckets'". So the leaning is:
 
   The clock gets finer as the screen gets faster, at no cost: the hand
   moves the same way, through fewer buckets each time.
+- **While the window is hidden** (2026-10-09) the render thread keeps
+  looping at a floor rate, moving the hand and drawing nothing, so the
+  world goes on in the background (answered question 4). Every entry is in
+  fixed time; nothing fires "per frame" (answered question 3).
 - **The registry is a timing wheel**: a ring of buckets like a clock
   face, one bucket per increment. Something due 5 increments from now
   goes into the bucket 5 past the hand. Each time the hand moves on a
@@ -90,20 +94,36 @@ idea, with the 'ring of buckets'". So the leaning is:
 
 ## Open questions
 
-1. **"Every frame" as its own kind of entry?** A fixed period (16 ms) is
-   right only at 60 Hz: at 144 Hz it skips frames, and at 240 Hz it runs
-   on one frame in four. An entry that fires once each time the hand
-   moves, whatever the rate, would follow the screen. Add it?
-2. **A window that stops drawing.** When the window is minimized or
-   hidden, the system may slow or pause its frames, and the clock (and
-   with it the socket polling) would slow or stop with them, so the
-   server's messages pile up. Keep the render thread's loop turning at a
-   floor rate (moving the hand, drawing nothing) while it isn't shown?
+1. **The floor rate.** How often the render thread turns while the window
+   is hidden (answered question 4): 20 times a second was the number
+   offered (the hand then runs at most 50 ms late, and socket polling
+   waits at most that long), not yet chosen.
 
 ## Answered
 
 1. ~~Is a frame's lateness acceptable?~~ Yes (2026-10-07).
 2. ~~The increment~~ One millisecond, the hand moved once a frame.
+3. ~~"Every frame" as its own kind of entry?~~ No (2026-10-09). The owner:
+   "We shouldn't attach it to the render speed. It should have a fixed
+   value. I think... I think we might be able to attach it to the render
+   frame IF we measure the absolute time that has passed. But that'll slow
+   down every single frame". Every entry is in fixed time; the frame only
+   moves the hand, by the absolute time measured, which is the shape
+   above. The cost was measured on the owner's machine: one read of the
+   monotonic clock (`clock_gettime`, answered by the kernel's shared page
+   without entering the kernel) takes about 17 ns, 0.0004% of a 240 Hz
+   frame. Drawing stays smooth at any rate because whatever draws a frame
+   reads the time itself and places things where they are at that
+   instant; the clock schedules work, it does not pace drawing.
+4. ~~A window that stops drawing.~~ Keep turning (2026-10-09). The owner:
+   "it should be processing in the background. I think option (a) is
+   probably the best shape." While the window is hidden or minimized the
+   whole world goes on, not only the connection: the render thread keeps
+   looping at a floor rate, moving the hand and drawing nothing, so the
+   clock, the socket polling and everything they hand in carry on. Chosen
+   over the other shape offered, a kernel timer (Linux's `timerfd`) waking
+   an idle worker to move the hand, which would give the hand two movers
+   and need them never to move it at once.
 
 ## Suggested implementation steps
 
