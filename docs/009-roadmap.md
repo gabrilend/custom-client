@@ -64,6 +64,7 @@ human male idle in Northshire; a WC3 footman-class unit walking and dying on
 WC3 timing.
 
 Issues (2026-10-07): [401](../issues/401-m2-reader.md), [402](../issues/402-skeletons-and-animation.md), [403](../issues/403-particles.md), [404](../issues/404-characters-and-equipment.md).
+Later (2026-10-16, after 404): [409](../issues/409-other-games-bodies.md), a Final Fantasy XIV body and its equipment as a player-side look.
 
 Capstone: [408-phase-demo](../issues/408-phase-demo.md).
 

@@ -4,6 +4,11 @@
 173j (figures standing around, completed there) and 173t (creatures from
 the world database), moved 2026-10-07.*
 
+## Blocks
+
+- [409](./409-other-games-bodies.md): another game's bodies drawn in place
+  of these characters.
+
 ## Current behavior
 
 Built:

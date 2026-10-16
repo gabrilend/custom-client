@@ -1,6 +1,6 @@
 # Conversation Summary: d069eaaa-2889-4667-b5f4-b02b18c09b6f
 
-Generated on: 2026-10-09 20:37:40
+Generated on: 2026-10-09 20:45:44
 Models: claude-opus-5-5
 
 ## Contents
@@ -42,6 +42,10 @@ Models: claude-opus-5-5
    questions, now the engine clock, after settling the docs site and its rmail
    mailbox. Next, I need your answer on how the clock keeps moving while the
    window is minimized: a slow render loop, or a kernel timer.
+10. 2026-10-09 20:40, after Request 22 - We're working through the project's
+    open questions one at a time and recording each answer in its issue, with
+    everything committed. Next: choose the clock's speed while the window is
+    hidden; I suggest 20 times a second.
 
 --------------------------------------------------------------------------------
 
@@ -2167,6 +2171,52 @@ tenths of a second, 20 is my suggestion. Do you have a number in mind, or does
 20 sound right?
 
 After that, the next question is the gamma slider, in issue 1001.
+
+--------------------------------------------------------------------------------
+
+### User Request 23
+
+yeah 20 a second sounds... fine I guess?
+
+--------------------------------------------------------------------------------
+
+### Assistant Response 23
+
+> Recording 20 as the starting value. You said "fine I guess", so I'll write it
+> down as a knob to tune, not a fixed decision. Any later change to it goes in
+> the balance-updates log your rules keep for knob turns.
+
+*[commit] f197d5b41 in custom-client - A hidden window's clock turns 20 times a second, as a starting value*
+
+*[commit] 033a3ed22 in custom-client - The clock issue's last answer gets back its number and the line before it*
+
+Recorded: 20 turns a second while the window is hidden, kept as a single named
+value. Any later change to it goes in the balance-updates log with its reason.
+The clock issue has no open questions left. My text substitution dropped a line
+and a number in that issue; I caught it and restored them in a separate commit,
+`033a3ed`.
+
+**Next: the gamma slider (issue 1001, the options menu).** The original's video
+options have a Gamma slider from -0.5 to 0.5. In the original it changes the
+graphics card's gamma ramp: a lookup table the card applies to every pixel on
+its way to the monitor. So it affects the whole screen, not just the game. This
+client would instead do it inside its own drawing, as a last step on each
+pixel's colour. That way it only touches the game window, and works the same
+windowed or fullscreen.
+
+The question is what the slider should mean:
+- **(a) A formula.** Each colour channel, as a value from 0 to 1, is raised to
+  the power 1 / (1 + gamma). Slider at 0 changes nothing, +0.5 brightens the
+  dark tones, -0.5 darkens them. It's simple and predictable, but may not look
+  exactly like the original at the same slider position.
+- **(b) Matched by eye.** Put both clients side by side, set both sliders to a
+  few positions such as -0.5, -0.25, 0.25 and 0.5, and adjust our curve until
+  the pictures match. That takes some of your time at the original client, but
+  players moving over from the original get what they expect.
+
+The question from the other side: is this slider a faithful copy of the
+original's setting, or just this client's own brightness control that happens to
+sit where the original's did?
 
 --------------------------------------------------------------------------------
 

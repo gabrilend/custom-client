@@ -25,6 +25,7 @@ custom-client/
 │   ├── 047-optimization-checklist.md     # the frame made fast, item by item, measured
 │   ├── 048-stock-options.md              # the original's whole settings menu (generated)
 │   ├── 055-the-documentation-site.md     # the site's build, and a reader's note from page to inbox
+│   ├── 057-what-the-original-program-decides.md  # the clean-room describer's checklist: values and behaviors only the original program holds
 │   └── HTML/                             # the browsable site, built by scripts/build-docs (git-ignored)
 │
 ├── issues/                               # tracked work, see naming below
@@ -79,4 +80,4 @@ Sub-issues for a large piece of work append a letter: `105a-...`, `105b-...`.
 
 `.file-index-counter` holds the current highest index across **all** indexed
 files in the project (docs, source, tests, scripts). Reads before
-creation, writes after. Read it: `cat .file-index-counter` (it was 56 on 2026-10-08: docs 000 to 012, source 013 to 043, the test program 044, docs 045 to 048, the JPEG reader 049, tests 050 to 054, doc 055, test 056).
+creation, writes after. Read it: `cat .file-index-counter` (it was 57 on 2026-10-16: docs 000 to 012, source 013 to 043, the test program 044, docs 045 to 048, the JPEG reader 049, tests 050 to 054, doc 055, test 056, doc 057).
