@@ -21,7 +21,7 @@ choices separately so each gets its own beat.
 
 ## I want to ask about the existing AzerothCore setup
 
-The user invoked me inside `/mnt/mtwo/games/azeroth-core/custom-client/`
+The user invoked me inside `/mnt/kaun/custom-client/`
 — there's an `azeroth-core/` parent directory. I never looked at it.
 There may be an existing local AzerothCore deployment that the demos
 should target from day one. I assumed "configure this in client.ini"

@@ -16,7 +16,7 @@
 # Needs: lua5.4, luajit, rmail checked out (its daemon and its test contact).
 # Usage: tests/056-test-mailbox-sorting.sh [PROJECT_DIR]
 
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 if [ -n "$1" ]; then
     DIR="$1"
 fi

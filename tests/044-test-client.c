@@ -228,7 +228,7 @@ static void run(Mover *m, MoverInput in, double seconds, MoverGround g)
 
 int main(int argc, char **argv)
 {
-    const char *dir = argc > 1 ? argv[1] : "/mnt/mtwo/games/azeroth-core/wow-chat-2026";
+    const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
     const char *client = argc > 2 ? argv[2] : "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data";
     Settings *st = settings_new();                        /* the tests' settings store (014-settings.h), renewed where a test needs defaults */
     char path[700], line[300];

@@ -9,7 +9,7 @@
 -- world-edit-to-execute (docs/001, "The reader library").
 --
 -- Usage:
---   local W = dofile("/mnt/mtwo/games/azeroth-core/custom-client/scripts/libs/wreaders.lua")
+--   local W = dofile("/mnt/kaun/custom-client/scripts/libs/wreaders.lua")
 --   local chain = W.chain(CLIENT_DATA_DIR, "enUS")     -- errors with the reader's sentence if it can't
 --   local bytes, from = chain:read("DBFilesClient\\Map.dbc")   -- nil when no archive holds it
 --   chain:close()
@@ -24,7 +24,7 @@ local lib
 -- {{{ W.load: the library and its declarations, once
 function W.load(build_dir)
     if lib then return lib end
-    build_dir = build_dir or "/mnt/mtwo/games/azeroth-core/custom-client/tmp/tmp/build"
+    build_dir = build_dir or "/mnt/kaun/custom-client/tmp/tmp/build"
     local f = io.open(build_dir .. "/wreaders.h", "r")
     if not f then error("wreaders: no " .. build_dir .. "/wreaders.h: run the W client's scripts/build first") end
     ffi.cdef(f:read("*a"))

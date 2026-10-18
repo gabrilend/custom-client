@@ -24,13 +24,13 @@
 # The mailbox is private: git ignores it.
 #
 # Usage: scripts/make-project-mailbox [PROJECT_DIR] [--mailbox FOLDER] [--port N]
-#   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+#   PROJECT_DIR       default /mnt/kaun/custom-client
 #   --mailbox FOLDER  make the mailbox there instead of PROJECT_DIR/project-rmail
 #                     (the tests make throwaway copies this way)
 #   --port N          listen on N instead of the project's port (5557)
 # Then start it: scripts/run-project-mailbox
 
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 MAILBOX=""
 PORT=""
 while [ $# -gt 0 ]; do

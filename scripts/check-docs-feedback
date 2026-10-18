@@ -29,7 +29,7 @@
 -- so the override is the environment variable W_CLIENT_DIR rather than an
 -- argument.
 
-local DIR = os.getenv("W_CLIENT_DIR") or "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = os.getenv("W_CLIENT_DIR") or "/mnt/kaun/custom-client"
 package.path = DIR .. "/scripts/libs/?.lua;" .. package.path
 local form = require("feedback-form")
 

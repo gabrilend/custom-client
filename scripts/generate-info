@@ -12,11 +12,11 @@
 -- pages are never edited by hand.
 --
 -- Usage: scripts/generate-info [PROJECT_DIR]
---   default: /mnt/mtwo/games/azeroth-core/custom-client
+--   default: /mnt/kaun/custom-client
 --   reads:   PROJECT_DIR/src/*.h
 --   writes:  PROJECT_DIR/src/<name>.info.md
 
-local DIR = arg[1] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = arg[1] or "/mnt/kaun/custom-client"
 local SRC = DIR .. "/src"
 
 -- {{{ local function read

@@ -38,7 +38,7 @@
 #   --no-read-ahead (with or without --shot) no second thread reading tiles ahead
 
 # {{{ set_dir
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 if [[ -n "$1" && "$1" != --* ]]; then
     DIR="$1"
     shift

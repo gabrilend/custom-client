@@ -1412,7 +1412,7 @@ something...?
 *[commit] 8392538e8 in ai-stuff - world-edit-to-execute: the W client has code now, and WC3 maps go to AzerothCore*
 
 The merge is done: the client now lives in the W client
-(`/mnt/mtwo/games/azeroth-core/custom-client/`) and is built, run and tested
+(`/mnt/kaun/custom-client/`) and is built, run and tested
 there. All 211 checks pass, pictures match the old client, and the memory- and
 race-checked builds run clean. The one thing left in 173v is copying the
 conversations.
@@ -1469,7 +1469,7 @@ has code, and that converted maps go to AzerothCore with the server in charge.
 
 Networking is next on the roadmap, and 176 decided it gets built in the W client
 after the move. To start the server connection, open a session in
-`/mnt/mtwo/games/azeroth-core/custom-client/`.
+`/mnt/kaun/custom-client/`.
 
 --------------------------------------------------------------------------------
 

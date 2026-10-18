@@ -23,7 +23,7 @@
 #   --real-mailbox  a throwaway rmail mailbox with the real daemon and the
 #                   real gatekeeper, kept away from the router (see below)
 
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 MODE="stand_in"
 for given in "$@"; do
     case "${given}" in

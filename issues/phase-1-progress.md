@@ -50,7 +50,7 @@ _(append entries here as issues complete, newest at the bottom)_
 
 2026-10-07: the code from wow-chat-2026's custom client arrived (its issue
 173v). "Partly built" marks an issue whose Current behavior now describes
-built code; each says what is left. Counts: `lua /home/ritz/programming/ai-stuff/scripts/progress-dashboard.lua /mnt/mtwo/games/azeroth-core/custom-client -m`.
+built code; each says what is left. Counts: `lua /home/ritz/programming/ai-stuff/scripts/progress-dashboard.lua /mnt/kaun/custom-client -m`.
 
 2026-10-07: 107a completed: WC3's pictures (BLP1, with a JPEG reader of
 the client's own) are read, the same bytes as world-edit-to-execute's

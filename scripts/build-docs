@@ -23,7 +23,7 @@
 -- A dead link found here is a documentation bug found for free.
 --
 -- Usage: scripts/build-docs [PROJECT_DIR] [--host HOST] [--mailbox FOLDER] [--out FOLDER]
---   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+--   PROJECT_DIR       default /mnt/kaun/custom-client
 --   --host HOST       where readers' browsers send notes: the address of the
 --                     machine the project mailbox runs on, as readers reach
 --                     it (default 127.0.0.1, this machine; a server's name or
@@ -35,7 +35,7 @@
 --            the mailbox's config, contacts and outbox
 --   writes:  *.html, docs-site.css, docs-seal.js, docs-site.js, site-config.js
 
-local DIR = "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = "/mnt/kaun/custom-client"
 local MAILBOX_HOST = "127.0.0.1"
 local MAILBOX, OUT
 

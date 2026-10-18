@@ -11,7 +11,7 @@
 # Installed by scripts/install-git-hooks (a link from .git/hooks/).
 # Usage: run by git; by hand: scripts/git-hooks/post-commit [PROJECT_DIR]
 
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 if [ -n "$1" ]; then
     DIR="$1"
 fi
