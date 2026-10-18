@@ -6,6 +6,15 @@ and named this client as one of the three places the model can run
 using a library running either on the server, on a separate program
 running on the user's computer, or in the custom-client."*
 
+*It is also the issue the owner asked for on 2026-10-04 (wow-chat-2026
+916o, its Origin): "could we add an issue file for the custom client that
+packages llama.cpp or similar into the client? then, we can "shard" or
+"distribute" llm compute tasks to all the players who wanted to
+contribute." 916o built that plan around a separate companion program,
+because the stock client cannot run a model; this client can, so here the
+companion program is not needed. 916o's rules and its gizmo apply as
+written.*
+
 ## Blocked by
 
 - The world connection (Phase 5, not yet written as issues): the
@@ -18,9 +27,11 @@ running on the user's computer, or in the custom-client."*
 
 ## Blocks
 
-- wow-chat-2026 916d's in-client placement, and through it the bots'
-  chat (916k), guidance (916h) and the mirror companions (918) for any
-  player who lends their GPU.
+- wow-chat-2026 916d's in-client placement, and through it, for any
+  player who lends their GPU: the bots' chat lines (916k, 916l), that
+  player's own plain-text commands to their own bots (917c), and a seat
+  for one of the mirror companions (918). Never the guidance that steers
+  bots' tactics (916h): see "What the server sends here", below.
 
 ## Current behavior
 
@@ -35,6 +46,49 @@ on the player's own GPU (or processor), and sends the text back. The
 server still decides everything ([001](../docs/001-architecture-overview.md),
 "Who holds the truth"): the client returns words, and the server checks
 them exactly as it checks an answer from its own model.
+
+### What the server sends here
+
+A player's machine is a *contributed* place (wow-chat-2026 916o): the
+server cannot vouch for it, and the player could change the client. So
+the server sends it only work whose worst answer is harmless:
+
+- **Chat lines** for any bot (916k, 916l): one sentence, said once.
+  Before sending, the server scrubs the prompt of player names, account
+  data and anything typed in a whisper (916o's scrubber), because the
+  player will see it. The reply passes the server's full filter whatever
+  the grammar said, because this client could ignore the grammar.
+- **This player's own commands** for their own bots (917c): built only
+  from their words and their state, so whatever comes back they could
+  have typed themselves. Never another player's.
+- **Never guidance** (916h), which sets the tactics of bots other
+  players fight beside; and, as proposed in 916k, never a bot's origin
+  story, which is stored and reused forever.
+
+A client whose replies keep failing the server's checks is quarantined
+like a dead machine (916f). The trust rule lives on the server (916e's
+separate inboxes); this client does nothing to enforce it and cannot
+weaken it.
+
+### The gizmo
+
+916o's in-game window, drawn by this client itself rather than as an
+addon: what the player's machine is doing right now, abstracted to
+who-and-where ("an orc in Stranglethorn is talking to a night elf", no
+character or player names), the text as it streams, and the dials:
+
+| Shows | Type | From |
+|-------|------|------|
+| tokens per second | number | the station's own count over the last few seconds |
+| prompt length against the context window | two integers, as a gauge | the job record and the context size |
+| time to first token | milliseconds | the job record |
+| jobs done this session | integer | the thinker handle |
+| recent job lengths and speeds | bar chart and sparkline | the last N job records |
+
+and two sliders the player owns: jobs at once (integer; 0 = paused, the
+`slots` field) and the longest job they'll accept (tokens). The scene
+summary arrives with each request, written by the server; the client
+never sees more of the conversation than the prompt itself.
 
 ### The library
 
@@ -106,14 +160,33 @@ server side is in wow-chat-2026 916d (it sends with ALE's
   client sends `SOREN` / `offer <slots> <model file name>`. The server
   then creates a worker for this player (wow-chat-2026 916e). Turning it
   off sends `withdraw`.
-- **Request.** A 3.3.5a chat packet holds about 250 bytes, so a prompt
-  arrives in numbered pieces: `req <request> <piece> <of> <text>`, and a
-  grammar the same way under `gram`. The client joins pieces by request
-  number; a request whose pieces stop arriving is dropped after a
-  timeout, with a line in the log saying how many pieces came.
+- **Request.** The server's side checks no length when it sends an
+  addon message (ALE's `SendAddonMessage` writes the length into the
+  packet as it is; read in wow-chat-2026's `source-beta/`, 2026-10-17),
+  so a prompt and its grammar can arrive whole:
+  `req <request> <scene summary> <text>` and `gram <request> <text>`.
+  The client's chat decoder accepts addon messages up to a limit of its
+  own choosing (open question below). The piece format
+  (`<piece> <of>`) is kept for prompts longer than that limit; the
+  client joins pieces by request number, and a request whose pieces stop
+  arriving is dropped after a timeout, with a line in the log saying how
+  many came.
 - **Reply.** `ans <request> <piece> <of> <text>` back to the server, and
   `err <request> <sentence>` when generation failed (model not loaded,
-  context full, the grammar rejected by the library).
+  context full, the grammar rejected by the library). This direction is
+  bound by the server's rules, read from its source:
+  - the server **drops any chat message over 255 bytes without a word**
+    (`ChatHandler.cpp`), addon messages included, so each piece, header
+    and prefix included, is at most 255 bytes;
+  - each addon message a client sends within one second of its previous
+    one adds to a count, and at 100 the player is **muted for ten
+    seconds**, their own chat included (`ChatFlood.AddonMessageCount`,
+    `ChatFlood.AddonMessageDelay`, `ChatFlood.MuteTime`;
+    `Player::UpdateSpeakTime`). A gap of a second resets the count. The
+    client counts its own sends (its addons' too, since they share the
+    budget) and waits out a one-second gap before the count would reach
+    100. A one-sentence chat reply is one piece, so this matters only to
+    a player contributing steadily.
 - These messages are handled in C, below the interface layer. They are
   never shown in chat and never passed to addons as `CHAT_MSG_ADDON`, so
   an addon cannot read or forge them.
@@ -137,19 +210,28 @@ how many pieces?) so the reader knows where it stopped.
    temperature and grammar, the stop at an end token or `max_tokens`.
 4. The piece joiner and splitter, and the five message kinds (`offer`,
    `withdraw`, `req`/`gram`, `ans`, `err`).
-5. The settings: on or off, model file, slots, layers on the card
-   ([014-settings](../src/014-settings.h), [1001](./1001-the-options-menu.md)).
-6. Tests in `tests/044-test-client.c`:
+5. The settings: on or off, model file, slots, layers on the card,
+   longest job accepted ([014-settings](../src/014-settings.h),
+   [1001](./1001-the-options-menu.md)).
+6. The sender's pacing: a count of this client's addon messages (its
+   own and its addons'), and the one-second wait before it would reach
+   the server's flood limit.
+7. The gizmo window, drawn from the thinker handle and the job records.
+8. Tests in `tests/044-test-client.c`:
    - the joiner: pieces out of order join into the right prompt; a
      missing piece drops the request after the timeout and says how many
      arrived;
-   - the splitter: a 1,000-byte reply becomes pieces that each fit one
-     packet and join back to the same bytes;
+   - the splitter: a 1,000-byte reply becomes pieces of at most 255
+     bytes each, prefix and header included, that join back to the same
+     bytes;
+   - the pacing: 150 replies queued at once go out with a one-second gap
+     before the hundredth message, and never 100 in a row closer than a
+     second;
    - with a model file present: a one-word prompt produces at least one
      token, and with a grammar of `root ::= "yes" | "no"` produces exactly
      one of the two.
-7. A picture: the frame time chart with a reply in progress, kept in
-   `development-history/`.
+9. A picture: the gizmo and the frame time chart with a reply in
+   progress, kept in `development-history/`.
 
 ## Open questions
 
@@ -167,16 +249,30 @@ how many pieces?) so the reader knows where it stopped.
   server name the model it expects (so every in-client place answers in
   the same voice), with the client refusing to offer if it doesn't have
   it?
-- **The player's own bots only, or anyone's?** Should a player's GPU
-  think only for the bots in their own party, or for any bot the server
-  assigns to it?
+- **Whose bots?** Partly settled by 916o's rules ("What the server sends
+  here"): chat lines for any bot, commands only for the player's own.
+  Still open there (916o's second question): should a player's *nature
+  prompt* shape only the characters their machine performs, only their
+  own buddies, or everyone's?
+- **How long an addon message does this client accept from the server?**
+  The server sends any length; the stock client's limit is not known
+  here. A generous limit (say 4 KB) lets a whole prompt arrive in one
+  message; the piece format covers anything longer.
+- **This route or 916o's broker?** Addon messages ride the game
+  connection the client already has. 916o's companion program instead
+  holds its own outgoing connection to a job broker, with no 255-byte or
+  flood limits. Should this client use the broker too, so every
+  contributed place looks the same to the server (wow-chat-2026 916d,
+  Open Questions)?
 
 ## Related
 
 - wow-chat-2026 issues 916 (mod-soren-chat), 916d (the model runner, the
-  server half of this), 916e (workers), 916f (an in-client worker that
-  stops answering is retired), 918 (the mirror companions: the player's
-  GPU as a fourth seat).
+  server half of this), 916e (workers and the two inboxes that keep
+  guidance off players' machines), 916f (an in-client worker that stops
+  answering is retired), 916o (player-contributed compute: the trust
+  rules, the gizmo, the nature prompts), 917c (a player's own commands),
+  918 (the mirror companions: the player's GPU as a fourth seat).
 - [001](../docs/001-architecture-overview.md) (who holds the truth,
   threads, handles), [002](../docs/002-technology-stack.md) (the library
   row), [110](./110-the-ceramic-shape.md) (stations).
