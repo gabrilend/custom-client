@@ -20,7 +20,7 @@
 -- (internal: --part I N runs one worker and prints its counts)
 
 -- {{{ set_dir
-local DIR = "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = "/mnt/kaun/custom-client"
 local WETE = "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute"
 local ARCHIVES = { "war3.mpq", "War3x.mpq" }   -- WC3's base and Frozen Throne art
 local args, i = { workers = nil, limit = nil }, 1

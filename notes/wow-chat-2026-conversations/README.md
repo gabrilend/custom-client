@@ -13,7 +13,7 @@ wow-chat-2026. The days' conversations also hold that project's other
 work (buddies, profiles, caves), mixed in.
 
 **For the living versions, look there:**
-`/mnt/mtwo/games/azeroth-core/wow-chat-2026/llm-transcripts/`. That is
+`/mnt/kaun/wow-chat-2026/llm-transcripts/`. That is
 where they are kept current (the last day's were still being written
 when copied), rebuilt when the exporter improves, linked from the
 completed issues, and turned into HTML pages by the transcript-care

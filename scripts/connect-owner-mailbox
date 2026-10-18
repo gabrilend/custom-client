@@ -16,11 +16,11 @@
 # file change; nothing needs restarting.
 #
 # Usage: scripts/connect-owner-mailbox [PROJECT_DIR] [--mailbox FOLDER] [--owner FOLDER]
-#   PROJECT_DIR       default /mnt/mtwo/games/azeroth-core/custom-client
+#   PROJECT_DIR       default /mnt/kaun/custom-client
 #   --mailbox FOLDER  the project's mailbox (default PROJECT_DIR/project-rmail)
 #   --owner FOLDER    the owner's mailbox (default /home/ritz/mail)
 
-DIR="/mnt/mtwo/games/azeroth-core/custom-client"
+DIR="/mnt/kaun/custom-client"
 MAILBOX=""
 OWNER_BOX="/home/ritz/mail"
 while [ $# -gt 0 ]; do

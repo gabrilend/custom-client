@@ -11,7 +11,7 @@
 --
 -- Usage: tests/051-test-docs-feedback-checker.lua [PROJECT_DIR]
 
-local DIR = arg[1] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = arg[1] or "/mnt/kaun/custom-client"
 local CHECKER = DIR .. "/scripts/check-docs-feedback"
 
 -- {{{ local function quote

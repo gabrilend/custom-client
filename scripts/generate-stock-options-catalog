@@ -14,13 +14,13 @@
 -- is written fresh each run, so it is never edited by hand.
 --
 -- Usage: scripts/generate-stock-options-catalog [PROJECT_DIR] [CLIENT_DATA_DIR]
---   defaults: /mnt/mtwo/games/azeroth-core/custom-client,
+--   defaults: /mnt/kaun/custom-client,
 --             /mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data
 --   writes:   PROJECT_DIR/docs/048-stock-options.md
 -- It reads the archives through the client's own reader library
 -- (scripts/libs/wreaders.lua over libwreaders.so: run scripts/build first).
 
-local DIR    = arg[1] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR    = arg[1] or "/mnt/kaun/custom-client"
 local CLIENT = arg[2] or "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data"
 local OUT    = DIR .. "/docs/048-stock-options.md"
 

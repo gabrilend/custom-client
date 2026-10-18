@@ -18,7 +18,7 @@
 
 local RMAIL = "/home/ritz/programs/r-mail"
 local capture_path, token = arg[1], arg[2]
-local DIR = arg[3] or "/mnt/mtwo/games/azeroth-core/custom-client"
+local DIR = arg[3] or "/mnt/kaun/custom-client"
 package.cpath = RMAIL .. "/libs/?.so;" .. package.cpath
 package.path = RMAIL .. "/libs/?.lua;" .. package.path
 
