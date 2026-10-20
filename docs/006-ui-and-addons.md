@@ -82,4 +82,15 @@ debug frame, not silently swallowed.
 The UI framework lands in Phase 7 once the world is renderable and
 networking is up. Before then, the only on-screen text is rendered by C.
 
+The original's behaviour the runtime must match (what the program, not
+the interface's files, decides) is collected in the clean-room
+checklist, [057](./057-what-the-original-program-decides.md): section 1
+(anchors and rectangles, scale, strata and levels, drawing against
+input order, the per-frame update, who hears an event and in what
+order) with its quirks and their correction switches; section 7 (the
+spell-description tokens tooltips are built from); section 8 (tab
+targeting, the range check behind `IsActionInRange`, nameplate
+distance). Phase 7's issues build from those notes when they are
+written.
+
 See [009-roadmap.md](./009-roadmap.md).

@@ -52,3 +52,7 @@ asked for further out.
 ## Related
 
 - world-edit-to-execute 515e; [303](./303-wdt-and-streaming.md), [105](./105-mpq-reader.md).
+
+## Blocks
+
+- [606](./606-the-loading-screen.md) (waiting for every read to finish).

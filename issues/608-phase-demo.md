@@ -38,4 +38,4 @@ Sketch:
 
 ## Related
 
-- Blocked by: Phase 4, Phase 5.
+- **Blocked by:** Phase 4, Phase 5, [609](./609-losing-the-connection.md), [602](./602-login-results.md), [606](./606-the-loading-screen.md).

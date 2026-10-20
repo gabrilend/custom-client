@@ -92,6 +92,29 @@ idea, with the 'ring of buckets'". So the leaning is:
   onto the bucket's list with one compare-and-swap, so adding takes no
   lock. A repeating entry puts itself back one period on when fired.
 
+## What the original's clock does
+
+From [docs/057](../docs/057-what-the-original-program-decides.md)
+(filled 2026-10-16). These shape the clock's first users:
+
+- **Time** is measured each frame in milliseconds from the system clock,
+  and timers whose time has come fire first in the frame (note 11.1).
+- **Movement** moves at most 250 ms at once; time beyond that in a long
+  frame is skipped, and for the player's own unit reported to the
+  server as a skip (note 2.1). So the mover's entry does **not** catch
+  up a long frame bucket by bucket the way other entries do.
+- **The interface's time-since-last-update** is the real time since the
+  screen was last drawn. While the window can't be drawn it keeps adding
+  up, so the first update after it returns receives the whole hidden
+  time in one value: a **quirk**, built as written, with a correction
+  switch (off by default). docs/057 suggests the correction start again
+  from zero or a cap; this client's correction instead keeps the scripts
+  turning while minimised (answer 6), which never builds a lump at all.
+- **In the background** with background sleep on, the original sleeps
+  between frames for its background-sleep time, in 25 ms steps, keeping
+  sound running (note 1.4). This client's 20 turns a second while hidden
+  (answer 5) is its own choice and stays one.
+
 ## Open questions
 
 None.
@@ -126,6 +149,28 @@ None.
    at most 50 ms late and the socket waits at most that long. A starting
    value, kept as one named constant beside the clock so it can be turned;
    any change goes in docs/011-balance-updates.md with its reason.
+6. ~~The lump of minimised time~~ Built for parity, with a correction
+   beside it (2026-10-16). First asked as "should interface scripts pause
+   with drawing while the window is hidden?"; the owner: "that's... a
+   different kind of 'hidden', not sure if I can answer that because the
+   premises don't make sense." The premise came from the original's
+   shape, where interface scripts run inside drawing; here they are their
+   own work on the clock. Asked again as "should a switch recreate the
+   lump?", the owner: "sure fine let's build it for parity first, but
+   while we're doing so, add a patch file that we can enable or disable
+   if we want to remove or fix that functionality." So:
+   - **The original's behavior (the default):** while the window is
+     minimised, the world keeps turning at the hidden floor rate, but the
+     interface's update scripts are not handed in. Their elapsed time
+     keeps adding up, and the first update after the window returns gets
+     the whole minimised time as one value.
+   - **The correction** (a switch the player can turn on, built at the
+     same time, as docs/057 "The original's quirks" sets out): the
+     interface's update scripts keep turning with everything else, each
+     getting the small step since its last turn, so no lump arrives.
+   - Both are tested: correction off, a 10-second minimise hands one
+     update about 10 s; correction on, no update gets more than one
+     hidden turn's time (about 50 ms).
 
 ## Suggested implementation steps
 

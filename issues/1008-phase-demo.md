@@ -40,5 +40,5 @@ Sketch:
 
 ## Related
 
-- Blocked by: Phase 9.
+- **Blocked by:** Phase 9, [1002](./1002-zone-music-and-ambience.md), [1003](./1003-sounds-in-the-world.md).
 - Final issue in the v1 plan.

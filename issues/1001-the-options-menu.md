@@ -52,6 +52,29 @@ setting appears in its panel without screen code. One table of panels:
 
 1. The menu screen, drawn from the store (with the interface, Phase 7).
 2. Each panel with its feature, as the table says.
+3. Every setting the original registers, menu or not (docs/057
+   Appendix A, filled 2026-10-16: 435 names with their defaults and the
+   original's own help text), declared in the store by a generator that
+   reads that table, as `scripts/generate-stock-options-catalog` builds
+   docs/048 from the interface files. Declared with its name, default
+   and help text even before its feature exists, so a `Config.wtf` from
+   the original reads without a warning for each setting this client
+   doesn't use yet, and the console's help shows the original's text.
+   A setting whose feature isn't built is marked so, and says so when
+   changed. The few whose default is computed at start-up (camera view
+   and smoothing style, mouse speed, sound effects on one-processor
+   machines) get that rule, not a number.
+4. The project's own settings, which the original doesn't have, each
+   marked as the project's in its panel so a player can tell them from
+   the original's:
+   - **Model detail** (Effects panel; [401](./401-m2-reader.md),
+     answered question 1): the bone limit a model's detail file is
+     chosen by, one of 256, 64, 53 or 21, default 64 as on a typical
+     player's machine. Applies to models loaded after the change.
+   - **Selection colours** (Names and nameplates panel;
+     [809](./809-targeting-and-range.md), answered question 1): the
+     original's colours by default, with the fuller set of party,
+     friend and dead colours as a switch.
 
 ## Open questions
 
@@ -63,4 +86,5 @@ setting appears in its panel without screen code. One table of panels:
 
 ## Related
 
-- docs/048 (the original's menu), [207](./207-camera.md), [310](./310-shadows-and-live-light.md).
+- docs/048 (the original's menu), [207](./207-camera.md), [310](./310-shadows-and-live-light.md),
+  [401](./401-m2-reader.md), [809](./809-targeting-and-range.md).

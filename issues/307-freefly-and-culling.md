@@ -6,7 +6,27 @@
 
 Built: the view's six walls from the camera's matrix and a ball test
 (`src/032-sight.c`), used by the ground's quarters, doodad copies, water
-layers and horizon tiles. Not built: the free-fly camera.
+layers and horizon tiles. Not built: the free-fly camera; fading
+doodads out by size and distance.
+
+The original fades placed doodads by size (the longest side of the
+placed bounding box), from the clean-room checklist
+([docs/057](../docs/057-what-the-original-program-decides.md), row
+"small objects stop being drawn", filled 2026-10-16); "× detail" means
+scaled by `environmentDetail` (default 1.0, held to 0.5 to 1.5):
+
+| Size | Fade starts | Gone at |
+|---|---|---|
+| up to 1 yd | 25 yd | 30 yd |
+| 1 to 4 yd | 10 yd before gone | 100 × detail |
+| 4 to 15 yd | 15 yd before gone | 200 × detail |
+| 15 to 100 yd | 20 yd before gone | 750 × detail |
+| larger | 1200 yd | 1250 yd |
+
+`objectFade` (default 1) turns the fading off (they pop instead). Models
+never swap detail levels with distance in the original (docs/057 note
+4.8; [401](./401-m2-reader.md) step 1): fading is the only distance
+rule.
 
 ## Intended behavior
 
@@ -82,6 +102,11 @@ even that corner is behind the plane, the whole box is outside.
      inside box returns true; a box crossing one plane returns true.
    - Free-fly: simulate 60 frames of WASD input and assert the camera
      position moved in the expected direction.
+7. Doodads faded by size and distance from the table above, with
+   `environmentDetail` and `objectFade`. Tests: a 0.5-yard doodad is
+   fully drawn at 24 yards, half faded at 27.5, gone at 30; a 3-yard one
+   is gone at 100 yards with detail 1.0 and at 150 with 1.5; with
+   `objectFade` 0 nothing is half faded.
 
 ## Acceptance
 

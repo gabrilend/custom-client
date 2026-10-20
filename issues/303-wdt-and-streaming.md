@@ -158,3 +158,4 @@ once the demo exists and we can feel a thrash.
   (SPSC ring strategem)
 - Blocked by: 301, 302.
 - Blocks: [308](./308-phase-demo.md).
+- **Blocks:** [1002](./1002-zone-music-and-ambience.md), [606](./606-the-loading-screen.md).

@@ -33,6 +33,28 @@ running, so a slow machine updates less often but never queues up work:
 - **What is in view**, per view (each render thread's camera).
 - **The mover** (the player's own prediction) and **Lua** as stations.
 
+**What a station may see, by the original's frame order**
+([docs/057](../docs/057-what-the-original-program-decides.md) note 11.1,
+filled 2026-10-16). Stations run side by side, but the original's frame
+has an order, and the interface and addons see its results. So the
+order is kept as **what each station reads**, not as when it runs:
+
+1. Timers, then keyboard and mouse, then **every packet waiting**, in
+   arrival order, with the interface events each one causes fired as it
+   is handled. A packet that arrives after that waits for the next frame.
+2. Movement: transports first, then every moving unit, then the
+   player's own queued inputs; then the game clock and the zone check.
+3. The interface's per-frame update (anchors, every update script in
+   strata, level and shown order, each frame's animations; note 1.4).
+4. Then, just before the world is drawn: the camera's target,
+   passengers, the camera, the projection, day and night, the sound
+   listener, object effects, **every visible unit's animation**,
+   missiles, the world's loading, smooth turning.
+
+So an interface script reads units and the camera as **last frame drew
+them**, plus this frame's movement; posing (step 4) comes after the
+scripts, not before. Work of equal rank runs newest-registered first.
+
 ## Suggested implementation steps
 
 1. Posing as a station over chunks; the bone data written into the
@@ -40,7 +62,12 @@ running, so a slow machine updates less often but never queues up work:
 2. Particles likewise.
 3. What is in view, per view.
 4. The mover and the input argument.
-5. Measure: 500 and 5,000 figures (515k's crowd sizes), frame time and
+5. The reading order above: Lua's stations read the mailbox record of
+   last frame's poses and camera, and this frame's movement; posing and
+   the camera write the record the next frame's scripts read. A test
+   that a script reading a unit's position during an update sees the
+   moved position, and the pose from the frame before.
+6. Measure: 500 and 5,000 figures (515k's crowd sizes), frame time and
    render-thread time, against the single-thread frame; written into 110.
 
 ## Acceptance

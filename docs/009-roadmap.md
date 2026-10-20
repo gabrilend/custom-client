@@ -72,11 +72,15 @@ Capstone: [408-phase-demo](../issues/408-phase-demo.md).
 
 SRP6 auth handshake, world session crypto, packet codec, opcode table.
 
+Issues (2026-10-16, from [057](./057-what-the-original-program-decides.md)): [509](../issues/509-the-cache-files.md).
+
 Capstone: [508-phase-demo](../issues/508-phase-demo.md).
 
 ## Phase 6 — Login & Character Selection
 
 Login UI, realm list, character list, character create. Drawn in C.
+
+Issues (2026-10-16, from [057](./057-what-the-original-program-decides.md)): [602](../issues/602-login-results.md), [606](../issues/606-the-loading-screen.md), [609](../issues/609-losing-the-connection.md).
 
 Capstone: [608-phase-demo](../issues/608-phase-demo.md).
 
@@ -85,13 +89,15 @@ Capstone: [608-phase-demo](../issues/608-phase-demo.md).
 XML + Lua, FrameXML API surface, sandboxing, saved variables. By the end: the
 default UI loads; so does a test addon.
 
+Issues (2026-10-16, from the clean-room checklist [057](./057-what-the-original-program-decides.md)): [702](../issues/702-the-xml-reader.md), [703](../issues/703-frames-anchors-and-layers.md), [704](../issues/704-events-and-the-per-frame-update.md), [705](../issues/705-interface-functions.md), [707](../issues/707-saved-variables.md), [709](../issues/709-taint-and-combat-lockdown.md).
+
 Capstone: [708-phase-demo](../issues/708-phase-demo.md).
 
 ## Phase 8 — Gameplay
 
 Movement, spellcasting, inventory, quests, NPC interaction, looting.
 
-Issues (2026-10-07): [801](../issues/801-movement-by-the-servers-rules.md), [802](../issues/802-collision.md).
+Issues (2026-10-07): [801](../issues/801-movement-by-the-servers-rules.md), [802](../issues/802-collision.md); (2026-10-16, from [057](./057-what-the-original-program-decides.md)) [809](../issues/809-targeting-and-range.md), [810](../issues/810-spell-description-text.md), [804](../issues/804-floating-combat-text.md), [811](../issues/811-spell-visuals.md), [812](../issues/812-other-units-movement.md), [813](../issues/813-auto-loot.md).
 
 Capstone: [808-phase-demo](../issues/808-phase-demo.md).
 
@@ -106,7 +112,7 @@ Capstone: [908-phase-demo](../issues/908-phase-demo.md).
 Audio mixer, overlays, key binding UI, settings, video options. Sounds go
 through the resolver like everything else, once it exists.
 
-Issues (2026-10-07): [1001](../issues/1001-the-options-menu.md).
+Issues (2026-10-07): [1001](../issues/1001-the-options-menu.md); (2026-10-16, from [057](./057-what-the-original-program-decides.md)) [1002](../issues/1002-zone-music-and-ambience.md), [1003](../issues/1003-sounds-in-the-world.md).
 
 Capstone: [1008-phase-demo](../issues/1008-phase-demo.md).
 

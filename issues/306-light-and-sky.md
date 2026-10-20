@@ -11,6 +11,53 @@ colours as shader values; skybox models (Northrend's auroras). Not
 built: weather and the ghost world's light (the sets are read the same
 way), the original's clouds, sun and moon discs.
 
+Measured against the clean-room checklist
+([docs/057](../docs/057-what-the-original-program-decides.md) notes 4.1,
+4.2 and 4.4, and section 4's fog and light rows, filled 2026-10-16):
+- **Already the original's:** inches to yards (÷ 36); the outdoor
+  position (17066.67 minus the record's third and first coordinates);
+  time as 2880 half-minutes, blended in straight lines across midnight;
+  colour band 18 × set − 17 + band and number band 6 × set − 5 + band;
+  full strength inside the inner radius, a straight fade to the outer;
+  fog end ÷ 36 and start as a share of the end.
+- **Not yet the original's:**
+  - lights are laid **farthest first** by distance from the point (two
+    within 1/3 yard by the smaller inner radius); this client sorts by
+    outer radius;
+  - after blending between two times, the original cuts each colour
+    channel down to a whole step of 255; this client keeps the
+    fraction;
+  - fog end is never below 10 yards nor beyond the far clip; the start
+    multiplier is held to −1 to 1. This client sets a negative start to
+    0 in every mode, while the original does that only in the second fog
+    mode;
+  - fog colour is sky colour 6;
+  - **the second fog mode** on maps numbered 530 and above when shaders
+    are available: fog end pushed to the far clip when it's at least
+    27.78 yards, a rate from 1.5 to 7 by how short the fog band is, the
+    rate doubled under water; the curve itself is in the original's
+    shipped shader files, which are data to read (note 4.2);
+  - indoors, outdoor fog blends into a building group's own fog over the
+    first 25 yards past its boundary (its underwater fog in liquid);
+  - storm sets blended over the normal set by the storm's strength;
+    up to 5 zone lights by percentage; override lights with their own
+    fades;
+  - a map with no global light uses light record 1. This client instead
+    falls back to fixed greys, a fog of 125 to 500 yards and water at
+    0.75 when a light or its rows are missing, without saying so: three
+    silent fallbacks, which the house rules count as warnings;
+  - **the sky dome** (note 4.4): seven rings of 24 points (single points
+    at top and bottom) at 0°, 30.6°, 36°, 41.4°, 43.2°, 45° (the horizon,
+    sky colour 6, the fog colour) and 180° from straight up, taking sky
+    colours 1 to 6, on a sphere scaled by 6.67 and lowered by 0.707 of
+    its radius; dawn and dusk tint by a day curve (peaks at 06:30 and
+    21:30) times the light's "highlight sky", spread round the dome by a
+    curve from the sun's direction (darker away from the sun); lightning
+    and glow blends; a cloud dome (density 0.6); stars as
+    `Environments\Stars\stars.mdl` when the star colour's alpha is at
+    least 2. This client's dome has six rings at its own angles with
+    five colours.
+
 ## Intended behavior
 
 Three pieces, glued by a small lighting state struct.
@@ -112,6 +159,22 @@ uniforms.
 7. Tests: standing at Northshire's spawn point produces a
    `lighting_t` whose sun color matches the well-known "Elwynn green"
    tint (eyeball + reference screenshot).
+8. The original's light, fog and sky (docs/057 notes 4.1, 4.2, 4.4; link
+   back when done), each difference listed under Current behavior:
+   lights laid farthest first; colours cut to whole steps; the fog end's
+   floor and cap and the start's range; the two fog modes by map number,
+   the second mode's rate and its doubling under water, the curve read
+   from the original's shipped shader files rather than step 6's
+   exponential guess (on maps below 530 the fog is plain start to end);
+   the indoor fog blend; storms, zone lights and overrides; light
+   record 1 for a map without a global light, and the three silent
+   fallbacks replaced by named errors; the seven-ring dome with its
+   dawn and dusk tint, clouds and stars.
+9. Tests: two overlapping lights at 10 and 40 yards from the point lay
+   the nearer on top; a fog end stored as 180 inches becomes 10 yards
+   (the floor), not 5; on map 0 a negative start multiplier is kept,
+   and on map 571 it counts as 0; at 06:30 the ring facing the sun
+   carries the full tint and the ring opposite the darker colour.
 
 ## Acceptance
 
@@ -144,4 +207,5 @@ poke.
 - Blocked by: [106](./106-dbc-parser.md), [302](./302-terrain-renderer.md),
   [305](./305-wmo-renderer.md), [207](./207-camera.md).
 - Blocks: [308](./308-phase-demo.md).
+- **Blocks:** [1002](./1002-zone-music-and-ambience.md).
 - Follow-up: day/night cycle (Phase 10).

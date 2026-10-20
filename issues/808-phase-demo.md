@@ -37,4 +37,4 @@ Sketch:
 
 ## Related
 
-- Blocked by: Phase 7.
+- **Blocked by:** Phase 7, [809](./809-targeting-and-range.md), [810](./810-spell-description-text.md), [804](./804-floating-combat-text.md), [811](./811-spell-visuals.md), [812](./812-other-units-movement.md), [813](./813-auto-loot.md).

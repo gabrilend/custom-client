@@ -12,6 +12,35 @@ zoom to first person; the camera comes in before walls. Not built: the
 saved views and camera key bindings (with key bindings), the WC3
 top-down camera (Phase 11).
 
+Measured against the clean-room checklist
+([docs/057](../docs/057-what-the-original-program-decides.md), section 3,
+filled 2026-10-16), the following camera differs from the original:
+- **Zoom:** this client multiplies the distance by 0.85 or 1.18 a wheel
+  click and holds a nearest distance of 2 yards before first person.
+  The original moves 1 yard a click (0.2 in the barber shop) at a steady
+  8.33 yards a second, with no nearest distance above 0; further clicks
+  the same way add to the motion under way, and a click the other way
+  stops it first (row "one wheel click").
+- **Distance:** the original's default is view 2, 5.55 yards back at
+  10° down; the farthest is 15 yards × the max-distance factor, never
+  above 50 (row "default, closest and farthest", note 3.1).
+- **Pitch range:** this client's −0.4 to 1.45 radians (about −23° to
+  83°); the original's is ±89°.
+- **Mouse look:** this client turns 0.006 radians (0.34°) a pixel at the
+  default; the original 0.225° a unit sideways and 0.15° up and down
+  (row "mouse-look").
+- **Walls:** the original pulls in to 1/9 yard short of the hit, after
+  first finding the eye height with a check upward from 0.833 yard, and
+  keeps off water surfaces (note 3.2).
+- **Smoothing:** this client's table holds the four styles the menu
+  lists (1, 4, 2, 0) as which way the camera drifts, and calls style 1
+  the default. The original has five (3, "Spline", isn't in the menu),
+  its default is **4** ("Smarter"), and each style is a delay and a
+  strength for each of seven states (Idle, Stop, Track, Move, Strafe,
+  Turn, Fear), with turning at 180° a second and pitching at 45° a
+  second (note 3.3). The style setting accepts 5, which means nothing
+  (a **quirk**: kept, with a correction switch that refuses it).
+
 ## Intended behavior
 
 A camera subsystem that:
@@ -82,6 +111,28 @@ in code, with a comment explaining why.
    through `camera2d_to_raylib` → `GetWorldToScreen2D` → our own
    inverse and confirm the same answer.
 
+### The original's camera (from docs/057 section 3)
+
+Each step links back to its row or note in docs/057 when done.
+
+8. Zoom as a steady motion at `cameraDistanceMoveSpeed`, 1 yard a click,
+   down to 0 (first person) with no nearest step; distances from the
+   eight view presets (note 3.1) and the farthest from
+   `cameraDistanceMax` × `cameraDistanceMaxFactor`, at most 50.
+9. Pitch held to ±89°, settable by `pitchLimit`.
+10. Mouse look by the original's degrees per unit (row "mouse-look").
+11. Walls and water by note 3.2: the eye height check, the pull-in to
+    1/9 yard short, water kept at 2/9 yard above or 0.833 below, the
+    diving pitch. The lowest eye height reads the body's height from
+    [802](./802-collision.md).
+12. Smoothing as five styles of seven per-state delays and strengths
+    (note 3.3), default 4; the existing drift table becomes the reading
+    of those numbers rather than its own guess.
+13. The settings in note 3.4 with their defaults and allowed ranges.
+14. Tests: one click moves 1 yard in 120 ms; two quick clicks add up;
+    the pitch stops at 89°; a wall 3 yards behind her puts the camera at
+    2.889 yards.
+
 ## Acceptance
 
 - The Phase 2 demo pans + zooms a sprite with mouse drag + wheel,
@@ -102,3 +153,4 @@ strong; resist it.
 - [docs/005-rendering-pipeline.md](../docs/005-rendering-pipeline.md)
 - Blocked by: [202](./202-math-primitives.md), [201](./201-window-and-context.md).
 - Blocks: [208](./208-phase-demo.md), all of Phase 3.
+- **Blocks:** [1003](./1003-sounds-in-the-world.md) (the listener).

@@ -100,3 +100,4 @@ First tables:
 - [docs/003-asset-formats.md](../docs/003-asset-formats.md#dbc--client-side-data-tables)
 - Blocked by: [105](./105-mpq-reader.md).
 - Blocks: [108](./108-phase-demo.md).
+- **Blocks:** [810](./810-spell-description-text.md), [1003](./1003-sounds-in-the-world.md).

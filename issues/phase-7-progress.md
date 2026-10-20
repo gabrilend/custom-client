@@ -8,10 +8,19 @@ Not started: no Lua VM is wired in, no XML parser, no addon loader.
 
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
-| 708 | [Phase 7 demo](./708-phase-demo.md) | pending | Phase 6 |
+| 702 | [The XML reader](./702-the-xml-reader.md) | not started | the Lua environment (not yet written) |
+| 703 | [Frames: anchors, scale, and layers](./703-frames-anchors-and-layers.md) | not started | 702, the Lua environment |
+| 704 | [Events and the per-frame update](./704-events-and-the-per-frame-update.md) | not started | 703 |
+| 705 | [The interface functions](./705-interface-functions.md) | not started | 703, 704 |
+| 707 | [Saved variables](./707-saved-variables.md) | not started | 704 |
+| 709 | [Taint, protected functions and combat lockdown](./709-taint-and-combat-lockdown.md) | not started | 704 |
+| 708 | [Phase 7 demo](./708-phase-demo.md) | pending | Phase 6, 702–704, 707, 709 |
 
-The phase's own issues are to be written from docs/009 and docs/006 when
-it begins; until then its capstone is its only file.
+These were written 2026-10-16 from the clean-room checklist's section 1
+([docs/057](../docs/057-what-the-original-program-decides.md)), at the
+numbers the capstone's sketch had given them where it had one. Still to
+be written from docs/009 and docs/006: the Lua environment (701) and the
+addon loader (706).
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's capstone with no progress table.

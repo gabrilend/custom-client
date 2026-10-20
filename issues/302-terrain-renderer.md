@@ -13,6 +13,35 @@ numbers on its points; the tile's blend maps one 1024 x 1024 picture;
 quarters out of sight not drawn; blob shadows under characters. 0.04 ms
 a frame at Astranaar.
 
+Measured against the clean-room checklist's note 4.5
+([docs/057](../docs/057-what-the-original-program-decides.md), filled
+2026-10-16):
+- **Already the original's:** reading the layers (big alpha by the map
+  header's flag 4, 4-bit maps low half first, run-length packing by
+  layer flag 512, the copied last row and column in unfixed 4-bit maps),
+  the shadow bits, and one combined picture per chunk with layers 2 to 4
+  in red, green and blue and the shadow in alpha (255 lit, 0 shadowed).
+- **Not yet the original's:**
+  - **the shadow:** darkened here to a fixed 60%. The original blends
+    shadowed cells towards a colour worked out each frame from the light:
+    (ambient + 3) × 85 ÷ 256 for red, green and blue (about a third of
+    the ambient), by the red part of the light's shadow-opacity band
+    ([306](./306-light-and-sky.md));
+  - **the mix of layers** with terrain shaders is in the original's
+    shipped shader files, data to read rather than guess; this client
+    lays each layer over the ones below by its strength, which is the
+    original's no-shader path for maps without big alpha (with big alpha
+    that path **adds** each layer instead, fogged towards black);
+  - **layer flags:** 128 unlit; 64 scrolling in one of eight directions
+    (the flag's lowest three bits) at a slowness from 64, 48, 32, 16, 8,
+    4, 2, 1 (bits 4 to 6); not handled here;
+  - **shine:** a chunk marked for specular gives layer 1 a reflection
+    look in the no-shader path.
+- **One quirk**, with a correction switch off by default: a scrolling
+  layer's counter wraps from 64 to 0 only when it grows, so one moving
+  towards negative numbers never wraps and loses precision over a very
+  long session. The correction wraps both ways.
+
 ## Intended behavior
 
 Two pieces, intentionally separated per CLAUDE.md ("write data
@@ -120,6 +149,15 @@ channel per layer 2..4). Layer 1 is always the base.
 8. Tests for the mesh builder: known-input → known-output bounding
    box, known triangle count, normals all unit length. Renderer tests
    are visual — covered by [308](./308-phase-demo.md).
+9. The original's shadow, layer mix, flags and shine (docs/057 note 4.5,
+   above; link back when done): the shadow colour from the light each
+   frame; the layer mix read from the original's shipped terrain
+   shaders; unlit and scrolling layers with the wrap quirk and its
+   switch. Tests: with an ambient of (96, 96, 96) the shadow colour is
+   (32, 32, 32); with a shadow opacity of 0 shadowed ground looks lit; a
+   scrolling layer with slowness 1 moves a full direction step each
+   second; the counter of one scrolling negative passes −64 without
+   wrapping, and wraps with the correction on.
 
 ## Acceptance
 

@@ -42,3 +42,7 @@ WC3 models' too, through one particle system.
 - Stepping particles runs as stations on the ceramic engine: [110e](./110e-per-frame-work-as-stations.md).
 
 - [401](./401-m2-reader.md), docs/047 (item 6).
+
+## Blocks
+
+- [811](./811-spell-visuals.md).

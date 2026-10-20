@@ -42,4 +42,4 @@ Sketch:
 ## Related
 
 - Independent of Phases 2–4; can run in parallel with them.
-- Blocked by: Phase 1.
+- **Blocked by:** Phase 1, [509](./509-the-cache-files.md).

@@ -51,6 +51,33 @@ have to make sure we're never re-encoding it on the way through.
    Unbake on shutdown.
 5. Provide measurement helpers — FrameXML's `FontString` needs to know
    width and height for layout.
+5a. Wrapping and cutting as the original does them (clean-room
+   checklist, [docs/057](../docs/057-what-the-original-program-decides.md)
+   note 1.9 and row "text that doesn't fit", filled 2026-10-16):
+   - a line's width counts kerning, the outline (2 or 4 pixels), the
+     shadow offset and embedded textures; colour and link codes count
+     nothing;
+   - breaks allowed after `-`, `;`, `/`, before `|` and spaces, and
+     between CJK characters; never after an opening mark or before a
+     closing one (both lists in note 1.9); the last allowed break that
+     fits, else mid-word; spaces at a new line's start skipped;
+   - cutting only for a string with a width and a line count or height:
+     whole UTF-8 characters removed from the end until the text plus
+     three full stops `...` fits; text over 8188 bytes cut first.
+   Codes inside text (note 7.7, 7.8): `|cAARRGGBB` colours, `|r`, `|n`,
+   links `|H…|h…|h` (capital H only), pictures `|T…|t` (capital T only)
+   with their size fields, `||` as one `|`; a code that doesn't read
+   correctly draws the `|` as a character; each kind can be switched
+   off per string. One **quirk**: a colour's alpha pair is read but
+   ignored, so text is always opaque; its correction switch (off by
+   default) uses the alpha.
+   Tests: "one-two" breaks after the hyphen; "(word" never breaks after
+   the bracket; Japanese text breaks between characters; a two-line box
+   holding three lines ends in `...` on its second line; `|cff00ff00`
+   turns text green; `|cZZ00ff00` draws its `|`; `|h` with a lower-case
+   start is not a link; `|T…:0:2|t` is twice as wide as the text is
+   tall; `|c80ff0000` is opaque red, and half see-through with the
+   correction on.
 6. Tests: render a known string with the debug font, confirm it draws
    without errors; load FRIZQT from a real MPQ chain and measure a
    known string.
@@ -77,3 +104,7 @@ locale that needs it is in scope.
 - Blocked by: [105](./105-mpq-reader.md), [203](./203-shader-pipeline.md).
 - Blocks: [208](./208-phase-demo.md), the Phase 6 login UI, Phase 7
   FrameXML.
+
+## Blocks
+
+- [804](./804-floating-combat-text.md).
