@@ -132,6 +132,10 @@ camera.
   alongside the place the player is in: its ground, buildings and
   models, at the waiting settings. The preview's own copies (a model at
   a detail limit the world isn't using) are freed when the menu closes.
+- **At the login screen there are no previews.** The menu opened there
+  is a simpler one: the same panels and the same waiting list and
+  Apply, without the preview views beside the settings (answered
+  question 4). The previews appear once a world is loaded.
 
 ## Suggested implementation steps
 
@@ -193,22 +197,26 @@ camera.
 
 ## Open questions
 
-1. **Gamma's curve** (from wow-chat-2026 173b5). The original's Gamma
-   slider (-0.5 to 0.5) changes the display's gamma ramp; this client
-   would do it in its shaders. Should the slider raise each colour to the
-   power 1 / (1 + gamma), or be matched by eye against the original at a
-   few positions?
-
-4. **Previews with no world to look into.** The menu can be opened at
-   the login screen, before any world is loaded or any server is
-   connected. The house in Arathi Highlands is the game's own map data,
-   so the client could draw it alone. The dressing room's dummies are
-   the server's, so it can't. Should a preview with nothing to show say
-   "connect to a server to see this", or should the client keep its own
-   offline copy of the dressing room (dummies it dresses itself, seen
-   only by that player)? Asked 2026-10-20.
+None.
 
 ## Answered
+
+1. ~~**Gamma's curve**~~ (from wow-chat-2026 173b5). Matched by eye
+   against the original, by a tool (2026-10-20). The original's Gamma
+   slider (-0.5 to 0.5) changes the display's gamma ramp; this client
+   does it in its shaders. Offered a formula (each colour raised to the
+   power 1 / (1 + gamma)) or matching by eye, the owner: "matched by
+   eye. We can automate that. Just, adjust the setting, then take a
+   screenshot, then adjust it again, take another screenshot, etc." So
+   a tool steps the slider through a set of positions; at each, it sets
+   the value in the original client's settings file, starts the
+   original at a fixed place and takes a screenshot, then does the same
+   with this client (`scripts/run --shot`). It measures the brightness
+   of the same patches in each pair, and fits this client's curve to
+   the original's. Every screenshot is kept and filed in the
+   development history, as the house rule says. Test: at each measured
+   position, the fitted curve puts this client's patches within a
+   small set difference of the original's.
 
 2. ~~**Closing the menu with changes still waiting.**~~ Thrown away, and
    offered back the next time the menu opens (2026-10-20). The owner:
@@ -222,6 +230,12 @@ camera.
    the owner: "those are good examples. Yes those should apply
    instantly. Only video settings I think should be queue-and-apply.
    Maybe specific exceptions in the UI or whatever, or audio..."
+4. ~~**Previews with no world to look into.**~~ A simpler menu at the
+   login screen (2026-10-20). The menu can be opened there before any
+   world is loaded or server connected, and the dressing room's dummies
+   are the server's. The owner: "let's have a simpler settings menu from
+   the login page, without the fancy galleries." So the login screen's
+   menu has the same panels, waiting list and Apply, and no previews.
 
 ## Related
 
