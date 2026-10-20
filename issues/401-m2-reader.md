@@ -121,8 +121,13 @@ None.
    - **Default: 64**, so models look as they did on a typical player's
      machine (original first). 256 gives the fullest file.
    - **When it takes effect:** a model keeps its file once loaded, as in
-     the original, so a change applies to models loaded afterwards. The
-     menu says so rather than reloading everything.
+     the original. A change waits in the options menu's list until
+     Apply, which unloads and reloads every model, and a turning,
+     animated preview beside the setting shows the waiting limit first
+     (the owner, 2026-10-20; [1001](./1001-the-options-menu.md)). So the
+     reader needs to unload all models and load them again with a new
+     limit, and to load one model on its own, for the preview, at a
+     limit the world isn't using.
    - **Tests:** a model with four files loads `…01.skin` at 64 and
      `…00.skin` at 256; a model with two files loads `…01.skin` at 21.
 

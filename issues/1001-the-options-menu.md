@@ -126,6 +126,7 @@ changes in real-time before they hit apply."
      answered question 1): the bone limit a model's detail file is
      chosen by, one of 256, 64, 53 or 21, default 64 as on a typical
      player's machine. Its apply action reloads every model; its
+     preview is the turning model (step 5).
    - **Selection colours** (Names and nameplates panel;
      [809](./809-targeting-and-range.md), answered question 1): the
      original's plainer colour variant by default (until docs/057 says
@@ -152,4 +153,4 @@ changes in real-time before they hit apply."
 ## Related
 
 - docs/048 (the original's menu), [207](./207-camera.md), [310](./310-shadows-and-live-light.md),
-  [401](./401-m2-reader.md), [809](./809-targeting-and-range.md).
+  [401](./401-m2-reader.md), [402](./402-skeletons-and-animation.md), [809](./809-targeting-and-range.md).
