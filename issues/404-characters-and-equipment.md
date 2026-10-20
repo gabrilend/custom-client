@@ -166,8 +166,9 @@ client turns ids into models and pictures from its own assets).
    a character shows those pieces only for a tabard. Two ways to learn
    which flag it is, neither of them a builder reading the
    decompilation:
-   - the describer names it in docs/057 (the owner passes the request
-     on; builders don't write there);
+   - the finished docs/057 names it. Nobody asks the describer to: the
+     describer works uninterrupted and unsteered, and builders use what
+     the finished checklist gives (the owner, 2026-10-20);
    - watching the original 3.3.5a client against the project's
      AzerothCore server while the server sets a character's flags one at
      a time, and seeing which one makes the tabard pieces appear with no

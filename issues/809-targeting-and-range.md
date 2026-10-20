@@ -125,8 +125,9 @@ the hand.
 ## Open questions
 
 None for the owner. Which of the original's two colour variants it uses
-where is the describer's to find (answered question 1); docs/057 note
-8.5 says it wasn't checked.
+where waits on the finished docs/057 (answered question 1); note 8.5
+says it wasn't checked. Nobody asks the describer: builders use what
+the finished checklist gives (the owner, 2026-10-20).
 
 ## Answered
 

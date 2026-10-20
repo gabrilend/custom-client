@@ -122,9 +122,11 @@ None.
      machine (original first). 256 gives the fullest file.
    - **When it takes effect:** a model keeps its file once loaded, as in
      the original. A change waits in the options menu's list until
-     Apply, which unloads and reloads every model, and a turning,
-     animated preview beside the setting shows the waiting limit first
-     (the owner, 2026-10-20; [1001](./1001-the-options-menu.md)). So the
+     Apply, which unloads and reloads every model. Beforehand, a
+     preview beside the setting shows the waiting limit on the dummies
+     in the options menu's dressing room, a camera view into a void in
+     the world (the owner, 2026-10-20;
+     [1001](./1001-the-options-menu.md)). So the
      reader needs to unload all models and load them again with a new
      limit, and to load one model on its own, for the preview, at a
      limit the world isn't using.

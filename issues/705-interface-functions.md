@@ -202,8 +202,10 @@ None.
      with a one-file test addon that makes the call, and writing down
      what happens. That watches the program from outside and reads none
      of its code, so it stays clean-room. If the game disagrees with
-     docs/057, the difference is taken to the owner, who passes it to
-     the describer; the builder never writes in docs/057.
+     docs/057, the difference is written into this issue's quirk table
+     and the client follows the game. Nothing is sent to the describer:
+     the describer works uninterrupted and unsteered, and builders use
+     what the finished checklist gives (the owner, 2026-10-20).
 
 2. ~~**Unbuilt names: a loud error, or left out?**~~ The loud error
    (2026-10-20). Every name exists from the start and an unbuilt one

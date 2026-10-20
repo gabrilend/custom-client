@@ -48,7 +48,7 @@ setting appears in its panel without screen code. One table of panels:
 | 173b15 social and chat | bubbles, filters | Phase 9 |
 | 173b16 features, help, languages | tooltips, tips, language | Phase 7 |
 
-### Changes wait for Apply, and each one is previewed first
+### Video changes wait for Apply, each previewed in the world first
 
 The owner, 2026-10-20: "we should have a list of changes that are
 applied when the user hits 'apply' or whatever. One of these might
@@ -56,38 +56,82 @@ unload and re-load all the models in the game. We should have a display
 next to the option that allows the user to see the effect of their
 changes in real-time before they hit apply."
 
-- **The waiting list.** Changing a setting in the menu doesn't change
-  the store. It adds a line to a list of waiting changes, shown in the
-  menu: the setting, its value now, its new value, and what applying it
-  will do. Changing the same setting again replaces its line; changing
-  it back to its value now removes the line. **Apply** carries out the
-  whole list, then writes the store and `Config.wtf`.
-- **Each setting declares its apply action**, beside its name, kind and
-  default in the store, chosen from a short table of actions: nothing
-  beyond reading the new value; rebuild the textures; unload and reload
-  every model; rebuild the shadow maps; recreate the window; only after
-  a restart. Apply runs each action once, however many waiting changes
-  need it, in that table's order. The list shows the cost before the
-  player commits to it, for example "reloads every model".
-- **A preview beside the setting** shows its effect live while the
-  change is still waiting. It's a small view drawn by the client's own
-  renderer with the waiting value, not a picture of the effect, so what
-  it shows is what Apply will give. Each preview scene is described as
-  data (which model, which ground, where the camera and the sun are) and
-  drawn by one preview viewer, keeping the scenes apart from the
-  drawing:
-  - **Model detail:** one model, playing an animation, which the player
-    can turn with the mouse, with a pause button just below it. The
-    model is chosen by a tool that searches the game's archives for the
-    model whose four detail files differ most, so every bone limit
-    looks different.
-  - **Texture size:** the same textures shown at each size the setting
-    offers, the waiting one marked.
-  - **Shadows:** a little piece of ground with a house on it, the camera
-    on the house's shadow. Moving a shadow setting redraws the scene at
-    once.
-  - Other settings get previews the same way as their features are
-    built. A setting with no preview yet says so beside it.
+- **Which settings wait.** Only the video panels' settings wait for
+  Apply. Everything else, such as mouse speed or how fast the camera
+  turns, takes effect the moment it changes, because it's judged by
+  using it. A setting outside the video panels may be declared to wait
+  when applying it is costly, for example switching the sound output
+  device, which restarts the sound system.
+- **Nothing needs a restart.** The owner: "we should have none that
+  require a restart." Every setting applies inside the running client.
+  The store's "needs a restart" mark is replaced by the apply action
+  below, and a setting that can't yet apply live isn't finished.
+- **The waiting list.** Changing a waiting setting doesn't change the
+  store. It adds a line to a list shown in the menu: the setting, its
+  value now, its new value, and what applying it will do. Changing the
+  same setting again replaces its line; changing it back removes the
+  line. **Apply** carries out the whole list, then writes the store and
+  `Config.wtf`.
+- **Each setting declares its apply action** in the store, beside its
+  name, kind and default, chosen from a short table: nothing beyond
+  reading the new value; rebuild the textures; unload and reload every
+  model; rebuild the shadow maps; recreate the window. Apply runs each
+  action once, however many waiting changes need it, in that table's
+  order. The list shows the cost before the player commits, for example
+  "reloads every model".
+- **Closing the menu with changes still waiting** throws them away and
+  leaves the store as it was. The owner: "The user might be in combat or
+  something!" The thrown-away list is kept in memory until the client
+  exits. The next time the menu opens, a box says "You have changes you
+  didn't apply. Bring them back, or clear them?" The rest of the menu is
+  dimmed and takes no input until one is chosen.
+
+#### Previews are camera views into the world
+
+Beside each waiting setting, a small view shows the effect of the
+waiting value. It isn't a picture: it's a second camera looking at a
+real place in the world, drawn by the client's own renderer with the
+waiting value, so what it shows is what Apply will give. Each preview is
+described as data (which place, where its camera starts, what it looks
+at) and drawn by one preview viewer, keeping the places apart from the
+drawing. Dragging in a preview moves only the viewer's own preview
+camera.
+
+- **The dressing room** (model detail, texture size): a dark, endless
+  void, something like the Twisting Nether, where dressing-room dummies
+  stand, characters of a random race and sex in random clothes, playing
+  an animation.
+  - **Pause**, a button just below the view, freezes the viewer's own
+    picture. The dummies keep moving in the void, so **play** snaps
+    back to where they are now.
+  - **Redress**, a button beside it, gives the dummy a new random race,
+    sex and outfit. The void is a place in the world, so everyone
+    looking at it sees the new dummy at once. It can be pressed at most
+    once every 5 seconds.
+  - **The server holds it.** World changes come only from the server
+    (docs/001), so the void, its dummies and each redress are the
+    server's. The client asks for a redress, and the server picks the
+    new look, keeps the 5-second limit and sends the result to everyone
+    watching. That half is server work, not yet planned.
+  - **The dummy is drawn by the dressing-up model**, the same interface
+    piece the original uses for its dressing room (trying an item on)
+    and its character window. The original has one family for all of
+    these: a player model, and the dressing-up model, which is a player
+    model that can also dress, try on and undress (docs/057
+    Appendix B). This client builds that piece once
+    ([703](./703-frames-anchors-and-layers.md),
+    [705](./705-interface-functions.md)) over the character drawing
+    ([404](./404-characters-and-equipment.md)), and the dressing room,
+    the character window and this preview all use it.
+- **Shadows:** a real place, such as a house somewhere in Arathi
+  Highlands, with the camera on the house's shadow. Moving a shadow
+  setting redraws it at once.
+- **Other settings** get previews the same way as their features are
+  built. A setting with no preview yet says so beside it.
+- **What a preview costs.** The second camera's place must be loaded
+  alongside the place the player is in: its ground, buildings and
+  models, at the waiting settings. The preview's own copies (a model at
+  a detail limit the world isn't using) are freed when the menu closes.
 
 ## Suggested implementation steps
 
@@ -105,20 +149,34 @@ changes in real-time before they hit apply."
    changed. The few whose default is computed at start-up (camera view
    and smoothing style, mouse speed, sound effects on one-processor
    machines) get that rule, not a number.
-4. The waiting list and Apply: each setting's apply action declared in
-   the store, the list drawn in the menu, Apply running each action
-   once. Tests: changing view distance twice and then back leaves the
-   list empty; two waiting model-detail changes reload the models once;
-   closing the menu leaves the store unchanged until Apply.
-5. The preview viewer, which draws a preview scene (data) with waiting
-   values in a small view; then the three first scenes: the turning
-   model with its pause button (needs [401](./401-m2-reader.md) and
-   [402](./402-skeletons-and-animation.md)), the textures at each size,
-   and the ground with a house for shadows (needs
-   [310](./310-shadows-and-live-light.md)). The tool that picks the
-   model whose detail files differ most. Test: the model-detail preview
-   at 21 bones draws a different file from the one at 256, while the
-   world keeps its current one.
+4. The waiting list and Apply: which settings wait (the video panels,
+   plus any declared to), each setting's apply action declared in the
+   store in place of "needs a restart", the list drawn in the menu,
+   Apply running each action once, and the "bring them back, or clear
+   them?" box over the dimmed menu. Tests:
+   - mouse speed changes at once and adds no line;
+   - changing view distance twice and then back leaves the list empty;
+   - two waiting model-detail changes reload the models once;
+   - closing the menu leaves the store unchanged; opening it again
+     shows the box, and "bring them back" restores the same list;
+   - no declared setting has an apply action of "restart".
+5. The preview viewer, which draws a second camera's view of a place
+   (data) with waiting values in a small view; the pause and play that
+   freeze and snap the viewer's picture; dragging that moves only the
+   preview camera. Then the first places: the dressing room in the void
+   with its redress button (needs the dressing-up model from
+   [705](./705-interface-functions.md), the character drawing in
+   [404](./404-characters-and-equipment.md),
+   [401](./401-m2-reader.md) and
+   [402](./402-skeletons-and-animation.md), and the server's half), and
+   the house in Arathi Highlands for shadows (needs
+   [310](./310-shadows-and-live-light.md)). Tests:
+   - the model-detail preview at 21 bones draws a different detail file
+     from the one at 256, while the world keeps its own;
+   - after pause, five seconds, then play, the dummy's animation is
+     where the void's is, not five seconds behind;
+   - a second redress within 5 seconds is refused by the server, and
+     the client says so.
 6. The project's own settings, which the original doesn't have, each
    marked as the project's in its panel so a player can tell them from
    the original's:
@@ -126,7 +184,7 @@ changes in real-time before they hit apply."
      answered question 1): the bone limit a model's detail file is
      chosen by, one of 256, 64, 53 or 21, default 64 as on a typical
      player's machine. Its apply action reloads every model; its
-     preview is the turning model (step 5).
+     preview is the dressing room (step 5).
    - **Selection colours** (Names and nameplates panel;
      [809](./809-targeting-and-range.md), answered question 1): the
      original's plainer colour variant by default (until docs/057 says
@@ -141,16 +199,33 @@ changes in real-time before they hit apply."
    power 1 / (1 + gamma), or be matched by eye against the original at a
    few positions?
 
-2. **Closing the menu with changes still waiting.** Throw them away,
-   apply them, or ask? Asked 2026-10-20.
+4. **Previews with no world to look into.** The menu can be opened at
+   the login screen, before any world is loaded or any server is
+   connected. The house in Arathi Highlands is the game's own map data,
+   so the client could draw it alone. The dressing room's dummies are
+   the server's, so it can't. Should a preview with nothing to show say
+   "connect to a server to see this", or should the client keep its own
+   offline copy of the dressing room (dummies it dresses itself, seen
+   only by that player)? Asked 2026-10-20.
 
-3. **Which panels wait for Apply.** The waiting list as written covers
-   every panel, so even mouse speed waits. A camera setting is easiest
-   judged by moving the camera with it. Should cheap settings whose
-   apply action is "nothing" take effect at once, or should every
-   panel wait for Apply? Asked 2026-10-20.
+## Answered
+
+2. ~~**Closing the menu with changes still waiting.**~~ Thrown away, and
+   offered back the next time the menu opens (2026-10-20). The owner:
+   "thrown away. The user might be in combat or something! But the next
+   time we open the settings menu before the client restarts, we should
+   say 'You have unsaved changes because you didn't click "apply" -
+   reload them, or clear?' and we can dim out the rest of the menu except
+   that box so they know where to focus their attention."
+3. ~~**Which panels wait for Apply.**~~ Only video (2026-10-20). Offered
+   mouse speed and camera turning as things best judged by using them,
+   the owner: "those are good examples. Yes those should apply
+   instantly. Only video settings I think should be queue-and-apply.
+   Maybe specific exceptions in the UI or whatever, or audio..."
 
 ## Related
 
 - docs/048 (the original's menu), [207](./207-camera.md), [310](./310-shadows-and-live-light.md),
-  [401](./401-m2-reader.md), [402](./402-skeletons-and-animation.md), [809](./809-targeting-and-range.md).
+  [401](./401-m2-reader.md), [402](./402-skeletons-and-animation.md),
+  [404](./404-characters-and-equipment.md), [703](./703-frames-anchors-and-layers.md),
+  [705](./705-interface-functions.md), [809](./809-targeting-and-range.md).
