@@ -33,6 +33,7 @@ No C++. One language at module boundaries, faster builds, one ABI.
 | Math | our own | Exactly what the renderer and the mover need; raylib's `raymath` where it fits. |
 | XML (FrameXML) | our own pull parser | FrameXML uses a small subset of XML. |
 | Lua VM | LuaJIT | Above. |
+| Language model (planned) | llama.cpp (`libllama` and its `ggml` libraries), built at a pinned tag | So a player can lend their GPU to the server's bots (wow-chat-2026 916d, "in-client"; [907](../issues/907-the-model-in-the-client.md)). Chosen 2026-10-17 when wow-chat-2026 replaced Ollama with it. Its interface `llama.h` is C; the library itself is C++, built separately with CMake and linked finished, so it brings the C++ runtime into the process but none into our code. Whether that sits inside "No C++" is an open question in 907. Model files are `.gguf`, the player's own, in `assets/models/`. |
 
 ## Graphics
 

@@ -63,6 +63,7 @@ shape as built today, until 110 lands.
 | **Main** | input, the frame's simulation, Lua, every OpenGL call | built |
 | **Reading ahead** | reads the next tiles' files out of the archives and prepares their ground (points, light, blend pictures, unpacked pictures), so the main thread only sends them to the card | built (wow-chat-2026 173u) |
 | **Network** | the server sessions, their ciphers, the packet codec, a queue of decoded packets | planned (Phase 5) |
+| *(no thread of its own)* **Thinking** | a language model (llama.cpp) answering the server's prompts for its bots, one token per turn as a station on 110's workers, so it never holds a thread for seconds; the reply goes back to the server, which checks it | planned ([907](../issues/907-the-model-in-the-client.md)) |
 
 The reading-ahead thread never touches OpenGL: it hands finished arrays
 to the main thread. What it shares (the archive reader's memory, the

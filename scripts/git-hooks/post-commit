@@ -16,8 +16,16 @@ if [ -n "$1" ]; then
     DIR="$1"
 fi
 
+# tmp/ is a link into RAM, so after a reboot it points at nothing and
+# mkdir cannot make a folder through it; the house helper rebuilds both RAM
+# folders behind the link first, as scripts/build does (docs/008).
+source /home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers
+if ! ensure_ram_tiers "${DIR}"; then
+    echo "post-commit: the documentation site did NOT rebuild: its log folder ${DIR}/tmp/shared-memory could not be made (the line above says why)"
+    exit 1
+fi
+
 LOG_DIR="${DIR}/tmp/shared-memory"
-mkdir -p "${LOG_DIR}"
 LOG="${LOG_DIR}/build-docs.log"
 
 "${DIR}/scripts/build-docs" > "${LOG}" 2>&1

@@ -105,6 +105,8 @@ Capstone: [808-phase-demo](../issues/808-phase-demo.md).
 
 Chat, party, raid, guild, friends, who, mail, trade.
 
+Issues (2026-10-17, from wow-chat-2026's switch to llama.cpp): [907](../issues/907-the-model-in-the-client.md), the player's GPU lent to the server's bots.
+
 Capstone: [908-phase-demo](../issues/908-phase-demo.md).
 
 ## Phase 10 — Audio & Polish
