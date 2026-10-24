@@ -395,6 +395,33 @@ int main(int argc, char **argv)
         for (size_t i = 3; i < (size_t)hair.width * hair.height * 4; i += 4) if (hair.rgba[i] < 128) { cut = 1; break; }
     check(cut, "her hair picture has see-through strands (alpha)");
     free(b); blp_free(&hair);
+    /* an item's icon (410): the Stormwind tabard's look names a 64 x 64
+     * icon the archives hold; a look the table lacks is refused, named */
+    {
+        char icon[300] = "";
+        BlpImage ic = { 0 };
+        int named = character_item_icon(&chain, 59981, icon, sizeof icon, &why) == W_OK;
+        unsigned char *ib = named ? mpq_chain_read(&chain, icon, &len, NULL) : NULL;
+        int decoded = ib && blp_decode(ib, len, &ic, &why) == 0;
+        snprintf(line, sizeof line, "the Stormwind tabard's icon (%s) is in the archives and is 64 x 64 (%d x %d)", icon, ic.width, ic.height);
+        check(decoded && ic.width == 64 && ic.height == 64, line);
+        free(ib);
+        if (decoded) blp_free(&ic);
+        check(character_item_icon(&chain, 999999999, icon, sizeof icon, &why) == W_ERR_NOT_FOUND, "an item look not in the table has no icon, and says so");
+        /* a worn item whose pictures the archives lack is counted, so the
+         * dressing room can refuse it: look 3864 (the "Unused Tabard of
+         * Chow") names two torso pictures no archive holds */
+        CharacterLook lk = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
+        Character worn;
+        lk.items[SLOT_TABARD] = 59981;
+        int whole = character_build(&chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+        if (whole >= 0) character_free(&worn);
+        lk.items[SLOT_TABARD] = 3864;
+        int lacking = character_build(&chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+        if (lacking >= 0) character_free(&worn);
+        snprintf(line, sizeof line, "the Stormwind tabard is worn whole (%d missing); the Tabard of Chow lacks its 2 pictures (%d)", whole, lacking);
+        check(whole == 0 && lacking == 2, line);
+    }
     /* }}} */
 
     /* {{{ WC3's pictures (BLP1, issue 107): one built here, then WC3's own */

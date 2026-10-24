@@ -16,3 +16,5 @@ compile_commands.json
 project-rmail/
 # Built by scripts/build-docs, never edited; each page carries the mailbox key.
 docs/HTML/
+# The goodbye receipt each program run rewrites (issue 410): a run artifact, not source.
+output/goodbye

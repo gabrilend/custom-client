@@ -1,0 +1,55 @@
+#!/bin/bash
+# item-pictures - makes pictures of the game's items for pages outside the game.
+#
+# For a general audience: given a list of items (each a name for the files
+# and the item's look, the number the game's own tables know it by), this
+# writes each item's icon, as the game shows it in bags, and a character
+# wearing it seen from the front and from behind, all from the original
+# client's own files. A page generator elsewhere (the first:
+# wow-chat-2026's page of the tabards a death knight's oath accepts) embeds
+# them. It runs the dressing room (src/058-dressing-room.c, issue 410), which
+# draws off-screen in a hidden window; rebuilt first when any source is
+# newer than it. It ends by writing a goodbye receipt (output/goodbye) with
+# what it made, and fails when any item could not be pictured.
+#
+# Usage: scripts/item-pictures [PROJECT_DIR] LIST [OUT_DIR] [--race ID] [--sex 0|1] [--class ID] [--hair N] [--hair-color N]
+#   LIST     one picture per line: NAME SLOT:LOOK, e.g. "45574 tabard:59981"
+#            (blank lines and lines starting with # are skipped)
+#   OUT_DIR  where the pictures go (default tmp/shared-memory/item-pictures/):
+#            NAME-icon.png, NAME-front.png, NAME-back.png
+#   --race, --sex, --class  who wears them (ChrRaces id; 0 male, 1 female;
+#            ChrClasses id, whose starting outfit is worn underneath). The
+#            default is the client's night elf woman, a fresh hunter.
+#   --hair, --hair-color  her hair style and colour (default style 3: hair
+#            up, so a tabard's back shows; owner, 2026-10-23)
+#   CLIENT   (environment) the 3.3.5a client's Data folder, as scripts/run
+
+# {{{ set_dir
+DIR="/mnt/kaun/custom-client"
+if [[ -n "$1" && -d "$1" ]]; then
+    DIR="$1"
+    shift
+fi
+# }}}
+
+source /home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers
+ensure_ram_tiers "${DIR}" || exit 1
+
+LIST="${1:-}"
+[[ -n "${LIST}" && -f "${LIST}" ]] || { echo "ERROR: give the list file (NAME SLOT:LOOK lines) first; \"${LIST}\" isn't one"; exit 1; }
+shift
+OUT="${DIR}/tmp/shared-memory/item-pictures"
+if [[ -n "${1:-}" && "${1}" != --* ]]; then
+    OUT="$1"
+    shift
+fi
+mkdir -p "${OUT}"
+CLIENT="${CLIENT:-/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data}"
+[[ -f "${CLIENT}/common.MPQ" ]] || { echo "ERROR: ${CLIENT} has no common.MPQ: set CLIENT to the 3.3.5a client's Data folder"; exit 1; }
+mkdir -p "${DIR}/output"
+
+BIN="${DIR}/tmp/tmp/build/dressing-room"
+if [[ ! -x "${BIN}" ]] || [[ -n "$(find "${DIR}/src" -newer "${BIN}" -name '*.[ch]' -print -quit)" ]]; then
+    "${DIR}/scripts/build" "${DIR}" || exit 1
+fi
+exec "${BIN}" --client "${CLIENT}" --list "${LIST}" --out "${OUT}" --receipt "${DIR}/output/goodbye" "$@"

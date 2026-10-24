@@ -33,5 +33,17 @@ the same for one character's choices, and dresses it in its items
   as they were. Ranged weapons (bows, guns, thrown), ammunition, bags and
   food have no slot here and are left out. W_OK, or a code with `why` (no such
   row).
+- `int character_wear_text(int items[SLOT_COUNT], const char *text, char *bad, int bad_len);`
+  Items to wear, written as text (410; the client's --wear): "slot:look"
+  pairs joined by commas, e.g. "chest:41143,hands:41138", each look (an
+  ItemDisplayInfo id) put into `items` at its slot. Slot names: shirt
+  legs feet wrists chest hands tabard waist head shoulders back mainhand
+  offhand. 0, or 1 with the part it couldn't read copied into `bad`.
+- `WErr character_item_icon(MpqChain *archives, int look, char *path, size_t path_len, WWhy *why);`
+  An item look's icon (410): the archive path of the picture the game
+  shows for the item in bags and on the character pane
+  (Interface\Icons\<name>.blp, from ItemDisplayInfo), written into
+  `path`. W_OK, or W_ERR_NOT_FOUND with `why` (no such look; a look with
+  no icon).
 - `WErr character_build(MpqChain *archives, const CharacterLook *look, Character *out, WWhy *why);`
 - `void character_free(Character *c);`

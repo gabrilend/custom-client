@@ -68,6 +68,9 @@ typedef struct Figure {
     float        scale;               /* the display's size (1 for characters) */
     FigureItem   items[6];  int nitems;   /* helm, shoulders, weapons (173p) */
     int          seq;  uint32_t ms, global_ms;   /* the animation and moment it was last bent to (for the pieces' tints) */
+    int          items_missing;       /* a character's worn items drawn incomplete: item pictures the archives
+                                       * lack, and attached items (helm, shoulders, weapons) left off; each is
+                                       * also named on the terminal (410: the dressing room refuses on any) */
     Texture2D    owned[8];  int nowned;  /* pictures made for this figure alone (painted skin, hair), freed with it; pictures
                                           * read from the archives are shared through a cache and kept (173t) */
 } Figure;
@@ -91,6 +94,14 @@ void figure_bend(Figure *f, const MovesState *moves, uint32_t global_ms);
  * (an eye's glow, a weapon's shine), each tinted by its animated colour
  * and opacity (anim_unit_tint) at the moment it was bent to. */
 void figure_draw(const Figure *f, Shader shader, Matrix place);
+/* The shader figure_draw expects (410: shared by the client and the
+ * dressing room): bends the points by the figure's bones on the card,
+ * lights them by one sun, fades them into the fog. Its uniforms: `eye`
+ * (vec3, the camera, for the fog's distance), and those 037-sky.c's
+ * sky_light_shader sets (sun_dir, sun_col, shade_col, fog_col,
+ * fog_range); `tint`, `mode` and `unlit` are set per piece by
+ * figure_draw. Needs the window open; freed with UnloadShader. */
+Shader figure_shader(void);
 
 void figure_free(Figure *f);
 

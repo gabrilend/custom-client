@@ -13,7 +13,7 @@
 --
 -- Usage: scripts/generate-info [PROJECT_DIR]
 --   default: /mnt/kaun/custom-client
---   reads:   PROJECT_DIR/src/*.h
+--   reads:   PROJECT_DIR/src/*.h, and each src/*.c with no header (a program)
 --   writes:  PROJECT_DIR/src/<name>.info.md
 
 local DIR = arg[1] or "/mnt/kaun/custom-client"
@@ -110,5 +110,23 @@ for path in listing:lines() do
     written = written + 1
 end
 listing:close()
+-- programs (a .c with no header beside it: the client's main, the dressing
+-- room): what they offer is how they're run, so the page is the file's
+-- opening comment, which holds the usage
+local programs = io.popen('ls "' .. SRC .. '"/*.c')
+for path in programs:lines() do
+    local name = path:match("([^/]+)%.c$")
+    local has_header = io.open(SRC .. "/" .. name .. ".h", "r")
+    if has_header then has_header:close() else
+        local head = read(path):match("^%s*(/%*.-%*/)")
+        local out = { "# " .. name, "", "*Written by `scripts/generate-info` from `" .. name .. ".c`'s opening comment (a program: it offers no functions, only how it is run); don't edit, re-run it.*", "" }
+        if head then out[#out + 1] = strip(head); out[#out + 1] = "" end
+        local f = assert(io.open(SRC .. "/" .. name .. ".info.md", "w"))
+        f:write(table.concat(out, "\n"))
+        f:close()
+        written = written + 1
+    end
+end
+programs:close()
 print("generate-info: wrote " .. written .. " pages beside the code in " .. SRC)
 -- }}}

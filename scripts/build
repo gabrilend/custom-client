@@ -61,6 +61,8 @@ echo "building the test program"
 cc "${CFLAGS[@]}" "${CORE_C[@]}" "${DIR}/tests/044-test-client.c" -lz -lm -lpthread -o "${OUT}/w-client-test"
 echo "building the client"
 cc "${CFLAGS[@]}" "${CORE_C[@]}" "${DRAWING_C[@]}" "${SRC}/043-main.c" "${LINK[@]}" -o "${OUT}/w-client"
+echo "building the dressing room"           # item pictures for pages outside the game (issue 410; scripts/item-pictures)
+cc "${CFLAGS[@]}" "${CORE_C[@]}" "${DRAWING_C[@]}" "${SRC}/058-dressing-room.c" "${LINK[@]}" -o "${OUT}/dressing-room"
 echo "building the reader library"
 cc "${CFLAGS[@]}" -fPIC -shared "${READERS_C[@]}" -lz -lm -lpthread -o "${OUT}/libwreaders.so"
 # its header for LuaJIT's ffi.cdef: every reader's declarations, flattened
@@ -71,7 +73,7 @@ cc "${CFLAGS[@]}" -fPIC -shared "${READERS_C[@]}" -lz -lm -lpthread -o "${OUT}/l
     for r in "${READERS[@]}"; do echo "#include \"${SRC}/${r}.h\""; done
 } > "${OUT}/wreaders-all.h"
 cc -E -P -I/usr/local/include "${OUT}/wreaders-all.h" | grep -v '^\s*$' > "${OUT}/wreaders.h"
-echo "built: ${OUT}/w-client, ${OUT}/w-client-test, ${OUT}/libwreaders.so (+ wreaders.h)"
+echo "built: ${OUT}/w-client, ${OUT}/w-client-test, ${OUT}/dressing-room, ${OUT}/libwreaders.so (+ wreaders.h)"
 
 SECONDS_TAKEN=$(( $(date +%s) - START ))
 LOG="${DIR}/tmp/shared-memory/build-times.log"

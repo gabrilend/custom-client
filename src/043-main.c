@@ -85,76 +85,6 @@
  * a stand-in for the ids the server will send (173d, 617r5) */
 #define HER_CLASS 3                                       /* she wears a fresh hunter's outfit (CharStartOutfit; 3 hunter, 11 druid ...); --wear changes single slots over it */
 
-/* {{{ static wear_option: "--wear chest:41143,hands:41138": slot names to
- * item looks (ItemDisplayInfo ids); 0 on success, else the bad part */
-static const char *const SLOT_NAMES[SLOT_COUNT] = {
-    "shirt", "legs", "feet", "wrists", "chest", "hands", "tabard", "waist", "head", "shoulders", "back", "mainhand", "offhand",
-};
-static int wear_option(int *WEAR_OVER, const char *text, char *bad, int bad_len)
-{
-    char copy[600];
-    snprintf(copy, sizeof copy, "%s", text);
-    for (char *part = strtok(copy, ","); part; part = strtok(NULL, ",")) {
-        char *colon = strchr(part, ':');
-        int slot = -1;
-        if (colon) { *colon = '\0'; for (int k = 0; k < SLOT_COUNT; ++k) if (!strcmp(part, SLOT_NAMES[k])) slot = k; }
-        if (slot < 0 || atoi(colon + 1) <= 0) { snprintf(bad, bad_len, "%s", part); return 1; }
-        WEAR_OVER[slot] = atoi(colon + 1);
-    }
-    return 0;
-}
-/* }}} */
-/* }}} */
-
-/* {{{ shaders
- * The figures' (her, bystanders, creatures, their items): bent on the
- * graphics card (173u). Each point carries its four bone numbers (in the
- * colour slot, a byte each: Raylib 5.1 has no bone slots) and their
- * weights (in the tangent slot); each figure's bone poses arrive as a
- * one-row picture of floats (`bones`), four texels a bone, one column of
- * its matrix each (041-figure.c). A point tied to no bone stays where made.
- * Then lit by the sun from one direction, faded into the sky with
- * distance, see-through pixels (hair strands) cut out. GLSL 330, with
- * Raylib's own attribute and uniform names. The ground has its own, in
- * 038-ground.c. */
-static const char *FIGURE_VS =
-    "#version 330\n"
-    "in vec3 vertexPosition; in vec3 vertexNormal; in vec4 vertexColor; in vec2 vertexTexCoord; in vec4 vertexTangent;\n"
-    "uniform mat4 mvp; uniform mat4 matModel; uniform vec3 eye; uniform sampler2D bones;\n"
-    "out vec3 n; out vec4 col; out vec2 uv; out float dist;\n"
-    "mat4 bone(int i) {\n"
-    "  return mat4(texelFetch(bones, ivec2(i * 4, 0), 0), texelFetch(bones, ivec2(i * 4 + 1, 0), 0),\n"
-    "              texelFetch(bones, ivec2(i * 4 + 2, 0), 0), texelFetch(bones, ivec2(i * 4 + 3, 0), 0));\n"
-    "}\n"
-    "void main() {\n"
-    "  ivec4 id = ivec4(vertexColor * 255.0 + 0.5);\n"
-    "  vec4 w = vertexTangent;\n"
-    "  float total = w.x + w.y + w.z + w.w;\n"
-    "  mat4 skin = total > 0.001 ? bone(id.x) * w.x + bone(id.y) * w.y + bone(id.z) * w.z + bone(id.w) * w.w : mat4(1.0);\n"
-    "  vec4 p = skin * vec4(vertexPosition, 1.0);\n"
-    "  vec4 wp = matModel * p;\n"
-    "  n = mat3(matModel) * (mat3(skin) * vertexNormal); col = vec4(1.0); uv = vertexTexCoord;\n"
-    "  dist = length(wp.xyz - eye);\n"
-    "  gl_Position = mvp * p;\n"
-    "}\n";
-/* `mode` (041-figure.c): 0 solid, pixels under half opacity cut out; 1
- * see-through, the picture's opacity times the tint's; 2 added light,
- * which the fog dims to nothing rather than tinting (as particles,
- * 173o). `tint` is the piece's animated colour and opacity, `unlit` skips
- * the sun (glows). */
-static const char *MODEL_FS =
-    "#version 330\n"
-    "in vec3 n; in vec4 col; in vec2 uv; in float dist; out vec4 frag; uniform sampler2D texture0;\n"
-    "uniform vec3 sun_dir, sun_col, shade_col, fog_col; uniform vec2 fog_range;\n"
-    "uniform vec4 tint; uniform int mode, unlit;\n"
-    "void main() {\n"
-    "  vec4 t = texture(texture0, uv) * tint;\n"
-    "  if (mode == 0 && t.a < 0.5 * tint.a) discard;\n"
-    "  vec3 light = unlit != 0 ? vec3(1.0) : shade_col + sun_col * max(dot(normalize(n), sun_dir), 0.0);\n"
-    "  float fog = clamp((dist - fog_range.x) / max(fog_range.y - fog_range.x, 1.0), 0.0, 1.0);\n"
-    "  if (mode == 2) frag = vec4(t.rgb * light * (1.0 - fog), t.a);\n"
-    "  else frag = vec4(mix(t.rgb * light, fog_col, fog), mode == 1 ? t.a : 1.0);\n"
-    "}\n";
 /* }}} */
 
 /* {{{ the figures: her, and the models standing around her (173j)
@@ -495,7 +425,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--wait") && i + 1 < argc) wait_s = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--wear") && i + 1 < argc) {
             char bad[200];
-            if (wear_option(app->WEAR_OVER, argv[++i], bad, sizeof bad)) {
+            if (character_wear_text(app->WEAR_OVER, argv[++i], bad, sizeof bad)) {
                 fprintf(stderr, "--wear: \"%s\" isn't slot:look (slots: shirt legs feet wrists chest hands tabard waist head shoulders back mainhand offhand)\n", bad);
                 return 2;
             }
@@ -542,8 +472,7 @@ int main(int argc, char **argv)
     InitWindow(win_w, win_h, "Everland Ghostsong");
     textures_init(&app->textures, (int)settings_num(app->settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
-    Shader model_sh  = LoadShaderFromMemory(FIGURE_VS, MODEL_FS);
-    model_sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(model_sh, "bones");   /* 041-figure.c puts each figure's bone picture in that material slot */
+    Shader model_sh  = figure_shader();                  /* the figures' bending and lighting (041-figure.h) */
     if (mpq_chain_open(&app->chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
     app->figures = figures_new(&app->chain, &app->textures);                      /* makes her, the bystanders and the creatures (041-figure.h) */

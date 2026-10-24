@@ -21,6 +21,67 @@
 
 static uint32_t u32le(const unsigned char *s, size_t at) { return s[at] | s[at + 1] << 8 | s[at + 2] << 16 | (uint32_t)s[at + 3] << 24; }
 
+/* {{{ shaders (moved here from 043-main.c for 410, so every program that
+ * draws figures draws them the same way)
+ * The figures' (her, bystanders, creatures, their items): bent on the
+ * graphics card (173u). Each point carries its four bone numbers (in the
+ * colour slot, a byte each: Raylib 5.1 has no bone slots) and their
+ * weights (in the tangent slot); each figure's bone poses arrive as a
+ * one-row picture of floats (`bones`), four texels a bone, one column of
+ * its matrix each (figure_bend). A point tied to no bone stays where made.
+ * Then lit by the sun from one direction, faded into the sky with
+ * distance, see-through pixels (hair strands) cut out. GLSL 330, with
+ * Raylib's own attribute and uniform names. The ground has its own, in
+ * 038-ground.c. */
+static const char *FIGURE_VS =
+    "#version 330\n"
+    "in vec3 vertexPosition; in vec3 vertexNormal; in vec4 vertexColor; in vec2 vertexTexCoord; in vec4 vertexTangent;\n"
+    "uniform mat4 mvp; uniform mat4 matModel; uniform vec3 eye; uniform sampler2D bones;\n"
+    "out vec3 n; out vec4 col; out vec2 uv; out float dist;\n"
+    "mat4 bone(int i) {\n"
+    "  return mat4(texelFetch(bones, ivec2(i * 4, 0), 0), texelFetch(bones, ivec2(i * 4 + 1, 0), 0),\n"
+    "              texelFetch(bones, ivec2(i * 4 + 2, 0), 0), texelFetch(bones, ivec2(i * 4 + 3, 0), 0));\n"
+    "}\n"
+    "void main() {\n"
+    "  ivec4 id = ivec4(vertexColor * 255.0 + 0.5);\n"
+    "  vec4 w = vertexTangent;\n"
+    "  float total = w.x + w.y + w.z + w.w;\n"
+    "  mat4 skin = total > 0.001 ? bone(id.x) * w.x + bone(id.y) * w.y + bone(id.z) * w.z + bone(id.w) * w.w : mat4(1.0);\n"
+    "  vec4 p = skin * vec4(vertexPosition, 1.0);\n"
+    "  vec4 wp = matModel * p;\n"
+    "  n = mat3(matModel) * (mat3(skin) * vertexNormal); col = vec4(1.0); uv = vertexTexCoord;\n"
+    "  dist = length(wp.xyz - eye);\n"
+    "  gl_Position = mvp * p;\n"
+    "}\n";
+/* `mode` (figure_draw): 0 solid, pixels under half opacity cut out; 1
+ * see-through, the picture's opacity times the tint's; 2 added light,
+ * which the fog dims to nothing rather than tinting (as particles,
+ * 173o). `tint` is the piece's animated colour and opacity, `unlit` skips
+ * the sun (glows). */
+static const char *MODEL_FS =
+    "#version 330\n"
+    "in vec3 n; in vec4 col; in vec2 uv; in float dist; out vec4 frag; uniform sampler2D texture0;\n"
+    "uniform vec3 sun_dir, sun_col, shade_col, fog_col; uniform vec2 fog_range;\n"
+    "uniform vec4 tint; uniform int mode, unlit;\n"
+    "void main() {\n"
+    "  vec4 t = texture(texture0, uv) * tint;\n"
+    "  if (mode == 0 && t.a < 0.5 * tint.a) discard;\n"
+    "  vec3 light = unlit != 0 ? vec3(1.0) : shade_col + sun_col * max(dot(normalize(n), sun_dir), 0.0);\n"
+    "  float fog = clamp((dist - fog_range.x) / max(fog_range.y - fog_range.x, 1.0), 0.0, 1.0);\n"
+    "  if (mode == 2) frag = vec4(t.rgb * light * (1.0 - fog), t.a);\n"
+    "  else frag = vec4(mix(t.rgb * light, fog_col, fog), mode == 1 ? t.a : 1.0);\n"
+    "}\n";
+/* }}} */
+
+/* {{{ figure_shader */
+Shader figure_shader(void)
+{
+    Shader sh = LoadShaderFromMemory(FIGURE_VS, MODEL_FS);
+    sh.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(sh, "bones");   /* figure_draw puts each figure's bone picture in that material slot */
+    return sh;
+}
+/* }}} */
+
 /* {{{ static texture_of: a decoded picture onto the graphics card */
 static Texture2D texture_of(const Textures *tx, const BlpImage *img)
 {
@@ -218,6 +279,7 @@ static WErr from_character(Figure *f, Figures *fs, const CharacterLook *look, co
         }
     }
     int bad = build(f, fs, &ch.model, ch.shown, pics, ch.base, why);
+    f->items_missing = ch.items_unpainted;
     /* the attached items (173p): each its own figure, hung from the
      * attachment point it names (header 240: count, 244: offset; 40 bytes
      * each: 0 id, 4 bone, 8 position); one that can't be read is named and
@@ -229,11 +291,12 @@ static WErr from_character(Figure *f, Figures *fs, const CharacterLook *look, co
         int found = -1;
         for (uint32_t k = 0; k < na && (uint64_t)oa + (k + 1) * 40 <= f->anim.m2_len; ++k)
             if ((int)u32le(m2, oa + k * 40) == a->point) { found = (int)k; break; }
-        if (found < 0) { fprintf(stderr, "character: the model has no attachment point %d; %s is left off\n", a->point, a->model); continue; }
+        if (found < 0) { fprintf(stderr, "character: the model has no attachment point %d; %s is left off\n", a->point, a->model); ++f->items_missing; continue; }
         Figure *it = calloc(1, sizeof *it);
         WWhy inner;
         if (figure_from_item(fs, it, a->model, a->picture, &inner)) {
             fprintf(stderr, "character: %s; left off\n", inner.text);
+            ++f->items_missing;
             free(it);
             continue;
         }

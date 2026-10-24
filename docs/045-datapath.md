@@ -110,6 +110,26 @@ The mover (`029-mover.c`) only asks. `043-main.c` answers from the readers:
   (`028-collide.c`).
 - **Water:** the surface above her (`027-liquid.c`). Deep enough, she swims.
 
+## 4a. A second program: pictures of items (issue 410)
+
+The dressing room (`058-dressing-room.c`, run by `scripts/item-pictures`)
+uses the same path without the world:
+- a list file in: one line per item, a name for its files and the slot
+  and item look it is worn by (`45574 tabard:59981`);
+- **the icon**: the item-look table names its icon picture
+  (`025-character.c`), read from the archives and decoded (`017-blp.c`),
+  saved as a PNG; no window needed;
+- **as worn**: her look with the item over her starting outfit, built as
+  a figure (`025-character.c`, `041-figure.c`, the same shader the client
+  uses), posed standing, drawn front and back into a picture on the
+  graphics card that is always the same size (a hidden window only
+  supplies the card), saved as PNGs with see-through backgrounds;
+- anything of the outfit missing from the archives refuses that line;
+- out: the pictures in a folder (default `tmp/shared-memory/item-pictures/`)
+  and a goodbye receipt in `output/goodbye` with the counts made and
+  refused. Who uses them (wow-chat-2026's oath tabard page) is outside
+  this project.
+
 ## 5. Checking
 
 - `scripts/build --test` builds the client and the test

@@ -56,4 +56,12 @@ Where a figure's pictures come from:
   (2) and added-light (3 and up) pieces over them without writing depth
   (an eye's glow, a weapon's shine), each tinted by its animated colour
   and opacity (anim_unit_tint) at the moment it was bent to.
+- `Shader figure_shader(void);`
+  The shader figure_draw expects (410: shared by the client and the
+  dressing room): bends the points by the figure's bones on the card,
+  lights them by one sun, fades them into the fog. Its uniforms: `eye`
+  (vec3, the camera, for the fog's distance), and those 037-sky.c's
+  sky_light_shader sets (sun_dir, sun_col, shade_col, fog_col,
+  fog_range); `tint`, `mode` and `unlit` are set per piece by
+  figure_draw. Needs the window open; freed with UnloadShader.
 - `void figure_free(Figure *f);`

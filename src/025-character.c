@@ -213,7 +213,7 @@ static WErr wear(MpqChain *archives, const CharacterLook *look, Character *out, 
                 snprintf(path, sizeof path, "Item\\TextureComponents\\%s\\%s_U.blp", ITEM_REGION[r].folder, name);
                 got = picture(archives, path, &img, &w2);
             }
-            if (got == W_ERR_NOT_FOUND) { fprintf(stderr, "character: item look %d's %s picture %s is in no archive; left unpainted\n", look->items[s], ITEM_REGION[r].folder, name); continue; }
+            if (got == W_ERR_NOT_FOUND) { fprintf(stderr, "character: item look %d's %s picture %s is in no archive; left unpainted\n", look->items[s], ITEM_REGION[r].folder, name); ++out->items_unpainted; continue; }
             if (got) { free(t); w_fail(why, w2.code, "%s", w2.text); return why->code; }
             paste(out->skin.rgba, out->skin.width, &img, REGION[ITEM_REGION[r].region], k);
             blp_free(&img);
@@ -342,6 +342,56 @@ WErr character_start_outfit(MpqChain *archives, int race, int class_id, int sex,
     free(t);
     if (!found) { w_fail(why, W_ERR_CORRUPT, "no starting outfit for race %d class %d sex %d in CharStartOutfit", race, class_id, sex); return why->code; }
     return 0;
+}
+/* }}} */
+
+/* {{{ character_wear_text (moved here from 043-main.c for 410: the
+ * client's --wear and the dressing room's list lines read the same text) */
+static const char *const SLOT_NAMES[SLOT_COUNT] = {
+    "shirt", "legs", "feet", "wrists", "chest", "hands", "tabard", "waist", "head", "shoulders", "back", "mainhand", "offhand",
+};
+int character_wear_text(int items[SLOT_COUNT], const char *text, char *bad, int bad_len)
+{
+    char copy[600];
+    snprintf(copy, sizeof copy, "%s", text);
+    char *rest = NULL;
+    for (char *part = strtok_r(copy, ",", &rest); part; part = strtok_r(NULL, ",", &rest)) {
+        char *colon = strchr(part, ':');
+        int slot = -1;
+        /* a known slot's name before the colon: that slot; anything else (no colon, an unknown name, a look not above 0) is refused */
+        if (colon) { *colon = '\0'; for (int k = 0; k < SLOT_COUNT; ++k) if (!strcmp(part, SLOT_NAMES[k])) slot = k; }
+        if (slot < 0 || atoi(colon + 1) <= 0) { snprintf(bad, bad_len, "%s", part); return 1; }
+        items[slot] = atoi(colon + 1);
+    }
+    return 0;
+}
+/* }}} */
+
+/* {{{ character_item_icon
+ * ItemDisplayInfo (3.3.5a), counted from 1: field 6 is the look's first
+ * icon name, a picture in Interface\Icons\ without its extension (field
+ * 7 is a second name, not read here). Two ways it fails: the
+ * look isn't a row of the table (W_ERR_NOT_FOUND: a page asked for a
+ * look this client's tables don't hold), or the row names no icon
+ * (W_ERR_NOT_FOUND too: an item that is only ever worn, never held). */
+WErr character_item_icon(MpqChain *archives, int look, char *path, size_t path_len, WWhy *why)
+{
+    size_t len;
+    unsigned char *t = mpq_chain_read(archives, "DBFilesClient\\ItemDisplayInfo.dbc", &len, NULL);
+    Dbc d;
+    WWhy w2;
+    if (!t || dbc_open(&d, t, len, &w2)) { free(t); w_fail(why, t ? w2.code : W_ERR_NOT_FOUND, "ItemDisplayInfo: %s", t ? w2.text : "not in the archives"); return why->code; }
+    int row = -1;
+    for (uint32_t r = 0; r < d.rows; ++r) if ((int)dbc_u32(&d, r, 1) == look) { row = (int)r; break; }
+    /* no row: the look is unknown here; a row: its icon name, which may be empty */
+    /* the name lies inside the table's bytes: the answer is settled before they are freed */
+    const char *name = row < 0 ? NULL : dbc_text(&d, (uint32_t)row, 6);
+    WErr rc = W_OK;
+    if (row < 0) rc = w_fail(why, W_ERR_NOT_FOUND, "no item look %d in ItemDisplayInfo", look);
+    else if (!name[0]) rc = w_fail(why, W_ERR_NOT_FOUND, "item look %d names no icon", look);
+    else snprintf(path, path_len, "Interface\\Icons\\%s.blp", name);
+    free(t);
+    return rc;
 }
 /* }}} */
 

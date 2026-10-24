@@ -32,7 +32,15 @@ Built:
   `assets/world/`), built as they come within 110 yards and freed beyond
   130, each breathing in its standing animation from its own moment.
 - A picture the archives lack for one layer of a character is left
-  unpainted and named, rather than refusing the character.
+  unpainted and named, rather than refusing the character. An item's
+  missing pictures are also counted on the character, and its attached
+  items left off are counted on the figure. The client draws on; the
+  dressing room
+  ([410](./completed/410-item-pictures-icons-and-as-worn.md)) refuses that
+  picture instead.
+- Items pictured outside the game: 410's dressing room draws an item
+  worn by a character and its icon. Its tabards show the long piece
+  (1202) until the piece rules below are built.
 
 Measured against the clean-room checklist
 ([docs/057](../docs/057-what-the-original-program-decides.md), section 5,
