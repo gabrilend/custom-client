@@ -1409,7 +1409,7 @@ something...?
 
 *[commit] fc3c3fc74 in custom-client - The one-off conversion and migration tools are removed*
 
-*[commit] 8392538e8 in ai-stuff - world-edit-to-execute: the W client has code now, and WC3 maps go to AzerothCore*
+*[commit] d02044e54 in ai-stuff - world-edit-to-execute: the W client has code now, and WC3 maps go to AzerothCore*
 
 The merge is done: the client now lives in the W client
 (`/mnt/kaun/custom-client/`) and is built, run and tested
