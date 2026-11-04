@@ -75,6 +75,27 @@ in `src/`.
   card bends the points (built, wow-chat-2026 173u). Pre-3.3.5 era models stay well under any
   reasonable bone budget.
 
+## MDX — Warcraft III's models
+
+- Read since 2026-11-04 (issue 401 step 2; the C twin of
+  world-edit-to-execute's `src/parsers/mdx.lua`), from `war3.mpq` by
+  `015-mpq.c` like any other file. One file: `MDLX`, then chunks of a
+  four-letter tag and a byte count (version 800 as shipped): sequences
+  in milliseconds, pictures (named, or replaceable: team colour, team
+  glow, cliffs, trees), materials as stacks of layers (filter mode,
+  shading flags, animated alpha), geosets (points, normals, faces,
+  matrix groups, picture positions), geoset animations, nodes (bones,
+  helpers, attachments, lights, emitters, ribbons, events, collision
+  shapes) with their pivots, texture animations.
+- `src/061-mdx.c` fills the M2 model structure (`022-m2.h`) with the
+  drawable part, so one renderer draws both games' models, and keeps the
+  rest (skeleton, sequences, tracks) beside it for posing (402). The
+  mapping, decided in issue 401: a piece a geoset, a unit a geoset and
+  layer, WC3's filter modes as M2's blends one for one, its shading flags
+  as M2's material flags, replaceable pictures as their own kinds.
+- Held field by field to the Lua reader by
+  `tests/062-mdx-matches-lua.lua`.
+
 ## WMO — world map objects (buildings, dungeons)
 
 - Root file describes groups (sub-meshes) and portals.
