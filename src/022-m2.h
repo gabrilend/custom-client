@@ -21,14 +21,21 @@
 #include <stdint.h>
 
 typedef struct { float x, y, z, nx, ny, nz, u, v, u2, v2; } M2Vertex; /* model space: +x front, +y left, +z up; two sets of picture positions */
-typedef struct { uint32_t kind; char file[260]; } M2Texture;          /* kind 0 named file; 1 skin; 2 cape; 6 hair; ... */
+/* A picture: kind 0 a file it names; 1 skin; 2 cape; 6 hair; ... chosen
+ * at run time; M2_TEXTURE_WC3 + n Warcraft III's replaceable picture n
+ * (1 team colour, 2 team glow, 11 cliff, 31-37 trees; 061-mdx.c), kept
+ * apart so no WC3 picture reads as one of the game's. flags 1 wrap
+ * across, 2 wrap down (both games' files keep these two the same). */
+enum { M2_TEXTURE_WC3 = 0x100 };
+typedef struct { uint32_t kind; char file[260]; uint32_t flags; } M2Texture;
 typedef struct { uint32_t id, first, count; } M2Piece;                 /* id = group * 100 + variant; first/count: triangle indices */
 /* A unit: one piece drawn with one picture, and how (its material, from
  * the model's render-flag table, header offset 112):
  *   blend  0 opaque, 1 cut-out (see-through below an alpha threshold:
  *          leaves, hair), 2 alpha blended, 3 added without alpha,
  *          4 added, 5 multiplied, 6 multiplied twice (glows, glass ...)
- *   flags  0x1 unlit, 0x2 no fog, 0x4 two-sided, 0x10 no depth writing
+ *   flags  0x1 unlit, 0x2 no fog, 0x4 two-sided, 0x8 no depth test,
+ *          0x10 no depth writing
  * and its animated tint: a colour track pair (colour, then opacity: 40
  * bytes at header 76) and a transparency track (20 bytes at header 92),
  * both read through 023-anim.c (173n: an aurora's faint, shifting curtains) */
@@ -46,6 +53,8 @@ typedef struct {
      * unit +2), saying how layer 2 joins layer 1 (022-m2.c's m2_combine) */
     int      tex[2], uvset[2], uvanim[2];
     uint16_t shader;
+    float    alpha;                   /* its opacity at rest, before any track: 1 for the game's models; a WC3
+                                       * model's from its layer and geoset animation (061-mdx.h) */
 } M2Unit;
 
 /* How a unit's second layer joins its first, from its combine code.

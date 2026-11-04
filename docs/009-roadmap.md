@@ -250,7 +250,7 @@ tables are still read by WETE through StormLib, before conversion.
 | WETE part | What it is | Here |
 |-----------|------------|------|
 | `parsers/blp.lua`, `parsers/jpeg.lua` | WC3's pictures (BLP1: JPEG inside, or a palette) | C twin in 017 and a JPEG reader beside it (049): [107a](../issues/completed/107a-wc3-pictures-blp1.md). **Done 2026-10-07**, byte for byte with the Lua |
-| `parsers/mdx.lua`, `assets/gpu.lua` | WC3 models into drawable parts | C twin filling 022's model structure: [401](../issues/401-m2-reader.md) step 2 |
+| `parsers/mdx.lua`, `assets/gpu.lua` | WC3 models into drawable parts | C twin filling 022's model structure (`src/061-mdx.c`): [401](../issues/401-m2-reader.md) step 2. **Reading built 2026-11-04**, field by field with the Lua on models made by its check (`tests/062-mdx-matches-lua.lua`); the run over `war3.mpq`'s own models waits for the owner's machine |
 | `assets/anim.lua` | WC3 sequences posed (node matrices) | the same posing as M2: [402](../issues/402-skeletons-and-animation.md) step 1 |
 | particle and ribbon emitters inside `mdx.lua`; spell art (WETE 530, 538) | WC3 particles, ribbons, lightning | one particle system: [403](../issues/403-particles.md) |
 | `render/models.c` | draws Lua-built meshes with team colour | replaced by 041 (figure) and 042 (doodads), which learn team colour (404) |

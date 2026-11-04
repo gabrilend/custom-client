@@ -38,6 +38,7 @@ picture options; this page doesn't copy numbers that go stale.
 | `017-blp.c` (with `049-jpeg.c` for WC3's JPEG pictures) | pictures (`.blp`): the game's BLP2, and Warcraft III's BLP1 (from `war3.mpq`, read by `015-mpq.c` too) | RGBA images, at any of their smaller sizes |
 | `020-adt.c` | ground files (`World\Maps\<map>\<map>_<ty>_<tx>.adt`) | chunks (heights, layers, blend maps, shadows, tints), water layers, placements of doodads and buildings |
 | `022-m2.c` | models (`.m2` + `00.skin`) | points, pieces, units (pictures, layers, blends, tints), solid shapes |
+| `061-mdx.c` | Warcraft III's models (`.mdx`, from `war3.mpq`) | the same points, pieces and units as `022-m2.c` gives, and beside them its sequences, skeleton (bones, helpers, pivots) and animated values (for 402); not yet drawn by any part |
 | `023-anim.c` | the same models (and `.anim` files) | skeletons, animations, poses, bent points, picture animations |
 | `024-particles.c` | the same models | particle emitters, and their particles run over time |
 | `021-wmo.c` | buildings (root + group files) | materials, furniture sets, parts' points and batches, solid flags, pools |
