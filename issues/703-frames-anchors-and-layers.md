@@ -7,8 +7,8 @@ in C, scriptable from Lua".*
 
 ## Blocked by
 
-- [702](./702-the-xml-reader.md); and the Lua environment, Phase 7's
-  first piece, sketched in its capstone and not yet written as an issue.
+- [702](./702-the-xml-reader.md) and [701](./701-the-lua-environment.md)
+  (the Lua environment).
 
 ## Blocks
 
