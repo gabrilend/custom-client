@@ -24,7 +24,8 @@ view with its own camera and its own mailbox:
   world-edit-to-execute W04's comparisons, the test scenes of 109): the
   texture's pixels are read back and handed to a station that writes the
   file, so the render thread never waits on the disk.
-- **The map browser's HTML page** arrives the same way: drawn into a
+- **The map browser's HTML page** (since 2026-11-04 opened by the web
+  browser addon, [710](./710-a-web-browser-addon.md)) arrives the same way: drawn into a
   texture and shown on a pane.
 
 A process with no visible window (a tool making previews) opens a hidden
