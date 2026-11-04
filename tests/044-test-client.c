@@ -52,6 +52,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#undef W_OK                              /* <unistd.h>'s access() mode (2) would hide 013-errors.h's W_OK (0): every == W_OK below would test for 2 */
 
 static int checks, fails;
 
