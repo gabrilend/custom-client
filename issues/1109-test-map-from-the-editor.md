@@ -18,7 +18,10 @@ again after each stroke, and plays the edited map with F5 through the
 same viewer, the game's rules run by that project's Lua simulation.
 
 This client has no way to be handed a map by the editor and play it.
-It reads no WC3 ground or WC3 models yet (pictures, yes: 107a).
+It draws no WC3 ground and reads no WC3 models yet (pictures, yes:
+107a). WC3 ground is read and prepared since 2026-11-04
+([302a](./302a-wc3-ground-read-and-prepared.md)); drawing it on the
+one mesh is 302's.
 
 ## Intended behavior
 

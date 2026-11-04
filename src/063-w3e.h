@@ -1,0 +1,222 @@
+/*
+ * 063-w3e.h (issue 302a; the C twin of world-edit-to-execute's
+ * src/parsers/w3e.lua and the reading half of its src/assets/ground.lua)
+ * - Warcraft III's ground, read and made ready to draw, without the window
+ *
+ * For a general audience: a Warcraft III map keeps its ground in one
+ * file, war3map.w3e: a grid of "tile points" 128 units apart, each with
+ * its height, its water, which ground picture it wears (grass, dirt,
+ * rock ...), its cliff level and a few marks (a ramp between levels,
+ * blight, the map's unwalkable edge). The ground between four tile points
+ * is a cell. This reads the file into a grid in memory, then works out
+ * what a renderer needs from it: each point's height and water surface
+ * in the world, and for each cell which ground pictures to lay and which
+ * piece of each, so the pictures blend into each other the way the game
+ * blends them. Cells on a cliff or under blight are marked so the
+ * renderer can paint them its own way. After an edit (in an editor,
+ * through the FFI) only the changed area is worked out again.
+ *
+ * File layout (little-endian; version 11, the only version Blizzard's
+ * editors write; any other version is read with the same layout, as the
+ * Lua reader does, and kept in `version` for the caller to name):
+ *   "W3E!", version (i32), main tileset (one letter), custom tilesets
+ *   (i32, 0 or not), ground tileset count (i32) and that many four-letter
+ *   ids ("Ldrt", "Lgrs" ...), cliff tileset count (i32) and their ids,
+ *   width and height (i32: tile points across and up, one more than the
+ *   cells), the south-west corner (two floats: x, y, world units), then
+ *   width x height tile points of 7 bytes, a row at a time from the south,
+ *   west to east in each row.
+ * A tile point, by byte:
+ *   0  height (i16): world height = (raw - 8192) / 4
+ *   2  water (u16): the low 14 bits the water's level, read as the height
+ *      is; the top two bits the "boundary" marks of the map's edge
+ *   4  low 4 bits: the ground tileset (into the ground ids); high bits:
+ *      0x10 ramp, 0x20 blight, 0x40 water, 0x80 boundary
+ *   5  low 5 bits: the picture's variation; high 3 bits: the cliff's
+ *   6  low 4 bits: the cliff level (2 is the usual ground); high 4 bits:
+ *      the cliff tileset (15: none)
+ * These nibbles were read the other way round in the Lua until its issue
+ * 517; both readers now read them as above.
+ *
+ * In the world (the Lua's w3e.ground_z, water_z, is_wet):
+ *   ground z  height + (cliff level - 2) x 128
+ *   water z   water level - 89.6 (the drop map tools use between the
+ *             stored level and the drawn surface: issue 517 there)
+ *   wet       the water mark is set and water z is above ground z
+ *
+ * A cell's pictures (the Lua's assets/ground.lua, issue 526 there): the
+ * distinct tilesets of its four corners, lowest number first. The lowest
+ * is laid whole; each higher one as the piece ("subtile") of its tileset
+ * picture whose alpha covers only the corners it is on, numbered by the
+ * corner bits: south-east 1, south-west 2, north-east 4, north-west 8
+ * (the published map viewers' reading, checked there against stand-ins
+ * only). A tileset picture is 4 x 4 subtiles, or 8 x 4 when "extended"
+ * (twice as wide, its right half 16 whole variations); which ones are
+ * extended is known only once their pictures are read, so the caller
+ * says. The whole piece the lowest tileset is laid with comes from the
+ * cell's south-west point's variation (w3e_variation). A cell is left
+ * bare (to the renderer's own colours) when any corner is blighted, or
+ * when its corners are on different cliff levels and none is a ramp.
+ *
+ * Every function here is safe on any thread: each touches only the
+ * handles it is given.
+ */
+#ifndef EG_W3E_H
+#define EG_W3E_H
+
+#include "013-errors.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define W3E_POINT_BYTES  7
+#define W3E_WATER_DROP   89.6        /* stored water level to drawn surface (world units) */
+#define W3E_NONE         255         /* in a cell's list: no more layers */
+
+/* One tile point, as read. Field by field:
+ *   height          float: world units, (height_raw - 8192) / 4
+ *   water_level     float: the water's stored level, (water_raw - 8192) / 4
+ *   height_raw      int16_t: as stored
+ *   water_raw       uint16_t: the low 14 bits of the water word
+ *   water_flags     uint16_t: its top two bits, in place (0, 0x4000, 0x8000, 0xC000)
+ *   boundary        1 when water_flags isn't 0 (the Lua's `boundary`)
+ *   ground_texture  0-15: the ground tileset, into W3eGround's ground ids
+ *   is_ramp, is_blight, has_water, is_boundary   1 or 0: byte 4's marks
+ *   texture_details 0-31: the picture's variation
+ *   cliff_variation 0-7
+ *   layer_height    0-15: the cliff level, 2 the usual ground
+ *   cliff_texture   0-15: the cliff tileset, 15 none */
+typedef struct {
+    float    height, water_level;
+    int16_t  height_raw;
+    uint16_t water_raw, water_flags;
+    uint8_t  boundary, ground_texture, is_ramp, is_blight, has_water, is_boundary;
+    uint8_t  texture_details, cliff_variation, layer_height, cliff_texture;
+} W3ePoint;
+
+/* A map's ground, as read. Field by field:
+ *   version         int: the file's (11)
+ *   tileset_code    char: the main tileset's letter ('L' Lordaeron summer ...)
+ *   tileset         char[24]: its name as the Lua names it ("lordaeron_summer"),
+ *                   or "unknown_" and the letter
+ *   custom_tileset  int: 1 when the map picks its own tilesets
+ *   nground, ncliff int: how many tileset ids of each kind
+ *   ground_ids, cliff_ids  char *: 4 bytes an id, one after another, not
+ *                   ended by a zero (id k at ground_ids + 4 * k)
+ *   width, height   int: tile points across (west to east) and up (south
+ *                   to north); the cells are one fewer each way
+ *   offset_x, offset_y  float: the south-west tile point's world place
+ *   points          W3ePoint *: width x height, point (x, y) at y * width + x
+ * The points may be changed in place (an editor's stroke); then
+ * w3e_prep_area works out what changed. */
+typedef struct {
+    int       version;
+    char      tileset_code;
+    char      tileset[24];
+    int       custom_tileset;
+    int       nground, ncliff;
+    char     *ground_ids, *cliff_ids;
+    int       width, height;
+    float     offset_x, offset_y;
+    W3ePoint *points;
+} W3eGround;
+
+/* Counts over every point (the Lua's Terrain:stats). boundary counts a
+ * point with either kind of boundary mark. */
+typedef struct {
+    int    total, water, blight, ramp, boundary;
+    double min_height, max_height;
+    int    layers[16];                /* points on each cliff level */
+} W3eStats;
+
+/* Reads war3map.w3e's bytes into a new W3eGround (freed by w3e_free).
+ * W_OK, or W_ERR_CORRUPT with `why` when the file is not one: no "W3E!",
+ * cut short (in the head, or fewer points than width x height), a
+ * tileset count below 0, or a width or height below 1. Bytes after the
+ * last point are not read. */
+WErr  w3e_read(const unsigned char *s, size_t len, W3eGround **out, WWhy *why);
+void  w3e_free(W3eGround *g);
+
+/* The point at (x, y), or NULL outside the grid. */
+const W3ePoint *w3e_point(const W3eGround *g, int x, int y);
+
+/* The four bytes of the ground tileset id the point at (x, y) wears
+ * ("Ldrt"; not ended by a zero), or NULL outside the grid or when its
+ * number is past the map's list. */
+const char *w3e_texture_name(const W3eGround *g, int x, int y);
+
+/* 1 when the point at (x, y) is inside the grid, has no water mark and
+ * no boundary mark of either kind (the Lua's is_walkable: cliffs are not
+ * looked at). */
+int   w3e_walkable(const W3eGround *g, int x, int y);
+
+/* The point's ground and water heights in the world, and whether water
+ * shows over it (see "In the world" above). Worked out in doubles, as
+ * the Lua does. */
+double w3e_ground_z(const W3ePoint *p);
+double w3e_water_z(const W3ePoint *p);
+int   w3e_is_wet(const W3ePoint *p);
+
+/* Tile point (x, y) to its world place, and a world place to the tile
+ * point at or south-west of it (floored: whole numbers, kept as doubles
+ * so a place far off the map can't overflow). */
+void  w3e_tile_to_world(const W3eGround *g, int x, int y, double *wx, double *wy);
+void  w3e_world_to_tile(const W3eGround *g, double wx, double wy, double *x, double *y);
+
+void  w3e_stats(const W3eGround *g, W3eStats *out);
+
+/* The subtile a cell's lowest tileset is laid with, from its south-west
+ * point's variation v (0-31): plain tilesets, 15 (the whole tile) for 0
+ * and 0 otherwise; extended ones, 16 + v for v under 16 (the right
+ * half's whole variations), 15 for 16, 0 beyond. */
+int   w3e_variation(int extended, int v);
+
+/* What a cell is, for the renderer (W3ePrep's cell_kind). */
+enum { W3E_CELL_TEXTURED = 0, W3E_CELL_BLIGHT = 1, W3E_CELL_CLIFF = 2 };
+
+/* The ground made ready to draw. Field by field:
+ *   width, height   int: the ground's tile points (cells one fewer)
+ *   nextended       int; extended uint8_t *: per ground tileset, 1 when
+ *                   its picture is in the extended layout (as given)
+ *   ground_z        float *: per point, its ground height in the world
+ *   water_z         float *: per point, its water surface, or -1e30 where
+ *                   it has no water mark (the Lua's terrain_arrays, read by
+ *                   world-edit-to-execute's land_build)
+ *   wet             uint8_t *: per point, w3e_is_wet
+ *   cells           uint8_t *: per cell (rows from the south, (width - 1)
+ *                   a row), 8 bytes: up to four (tileset, subtile) pairs,
+ *                   lowest tileset first, W3E_NONE after the last and
+ *                   throughout a bare cell (the Lua's ground.lay hands the
+ *                   renderer exactly these bytes)
+ *   cell_kind       uint8_t *: per cell, W3E_CELL_TEXTURED, _BLIGHT or _CLIFF
+ *   used            int: the textured cells */
+typedef struct {
+    int      width, height;
+    int      nextended;
+    uint8_t *extended;
+    float   *ground_z, *water_z;
+    uint8_t *wet;
+    uint8_t *cells;
+    uint8_t *cell_kind;
+    int      used;
+} W3ePrep;
+
+/* The cells an area's preparation touched: columns x0 to x1 and rows y0
+ * to y1, both ends counted; empty (x1 < x0) when none. */
+typedef struct { int x0, y0, x1, y1; } W3eArea;
+
+/* Works out the whole ground. `extended`: `nextended` flags, one per
+ * ground tileset (a tileset past them is plain); may be NULL with 0.
+ * W_OK with `*out` (freed by w3e_prep_free), or a code with `why`. */
+WErr  w3e_prep(const W3eGround *g, const uint8_t *extended, int nextended, W3ePrep **out, WWhy *why);
+
+/* Works out again only what tile points x0 to x1, y0 to y1 (both ends
+ * counted, cut to the grid) reach: those points, and the cells that have
+ * one of them as a corner. The same bytes w3e_prep would give for the
+ * whole ground, in time that grows with the area, not the map. `touched`,
+ * when given, gets the cells redone. W_ERR_REFUSED when `g` isn't the
+ * size `p` was prepared at, or the area misses the grid. */
+WErr  w3e_prep_area(W3ePrep *p, const W3eGround *g, int x0, int y0, int x1, int y1, W3eArea *touched, WWhy *why);
+void  w3e_prep_free(W3ePrep *p);
+
+#endif
