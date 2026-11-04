@@ -181,6 +181,12 @@ void maps_world_init(MapWorld *w, const char *dir, int map_id)
     w->map_id = map_id;
     pthread_mutex_init(&w->lock, NULL);
 }
+void maps_world_init_source(MapWorld *w, int map_id, MapTileSource source, void *ctx, const char *what)
+{
+    maps_world_init(w, what, map_id);
+    w->source = source;
+    w->source_ctx = ctx;
+}
 /* Two threads ask (the main one, and the reading-ahead one preparing
  * ground: 173u). A tile once in its slot never changes or goes until
  * maps_world_free, so a filled slot is read without the lock; an empty
@@ -195,7 +201,7 @@ MapTile *maps_world_tile(MapWorld *w, int tx, int ty)
         t = *slot;
         if (!t) {
             WWhy why;
-            t = maps_load_tile(w->dir, w->map_id, tx, ty, &why);
+            t = w->source ? w->source(w->source_ctx, w->map_id, tx, ty, &why) : maps_load_tile(w->dir, w->map_id, tx, ty, &why);
             /* none there (open sea, the map's edge): asked once, remembered,
              * quietly; a file there but broken is said, then remembered as none */
             if (!t && why.code != W_ERR_NOT_FOUND) fprintf(stderr, "maps: %s; the tile counts as having no ground\n", why.text);

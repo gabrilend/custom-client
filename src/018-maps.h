@@ -36,10 +36,19 @@ typedef struct {
     uint16_t  holes[256];         /* 16 bits per 8 x 8-square cell group */
 } MapTile;
 
+/* Where a world's tiles come from when not from the server's files: a
+ * call that makes tile (tx, ty) of `map_id`, or NULL with `why` (its code
+ * W_ERR_NOT_FOUND when there is no ground there). Asked from either
+ * thread, one tile at a time (the world's lock is held). A converted
+ * map's own ground files are one (075-adt-heights.h). */
+typedef MapTile *(*MapTileSource)(void *ctx, int map_id, int tx, int ty, WWhy *why);
+
 /* A world on one map: tiles loaded as needed and kept. */
 typedef struct {
-    char      dir[512];
+    char      dir[512];               /* the server's maps folder, or what `source` reads, for messages */
     int       map_id;
+    MapTileSource source;             /* NULL: the server's files in `dir` */
+    void     *source_ctx;
     MapTile  *tiles[64 * 64];     /* NULL: not tried; MAPS_NO_TILE: tried, none */
     pthread_mutex_t lock;         /* held while a tile is loaded into its slot: two threads ask (173u) */
 } MapWorld;
@@ -55,6 +64,10 @@ float    maps_height_in_tile(const MapTile *t, float x, float y, float *gx, floa
 void     maps_corner_position(int tx, int ty, float ix, float iy, float *x, float *y);
 
 void     maps_world_init(MapWorld *w, const char *dir, int map_id);
+/* The same world with its tiles made by `source` (with `ctx`, which must
+ * outlive it) instead of read from the server's files; `what` names
+ * where they come from in messages. */
+void     maps_world_init_source(MapWorld *w, int map_id, MapTileSource source, void *ctx, const char *what);
 MapTile *maps_world_tile(MapWorld *w, int tx, int ty);     /* NULL when there is none */
 float    maps_world_height(MapWorld *w, float x, float y, float *gx, float *gy);
 void     maps_world_free(MapWorld *w);
