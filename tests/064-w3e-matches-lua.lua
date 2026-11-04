@@ -25,7 +25,8 @@
 --   PROJECT_DIR  the W client (default below)
 --   --build DIR  where libwreaders.so and wreaders.h are (default PROJECT_DIR/tmp/tmp/build)
 --   --wete DIR   world-edit-to-execute (default below)
---   --maps DIR   a folder of WC3 maps (default: world-edit-to-execute's assets/)
+--   --maps DIR   a folder of WC3 maps, searched with its folders (default:
+--                world-edit-to-execute's assets/; an install's Maps folder works too)
 --   --made-only  only the grounds made here
 -- Exit status 0 when everything agrees. With maps compared, the report
 -- also goes to PROJECT_DIR/tmp/shared-memory/w3e-matches-lua.txt.
@@ -377,9 +378,10 @@ end
 
 -- {{{ local function maps_run: every map in the folder, its war3map.w3e both ways
 local function maps_run(lines)
-    local p = io.popen(string.format("ls -1 %q 2>/dev/null", args.maps))
+    -- the folder and every folder in it (an install's Maps\ holds several)
+    local p = io.popen(string.format("cd %q 2>/dev/null && find . -type f \\( -iname '*.w3x' -o -iname '*.w3m' \\) | sort", args.maps))
     local names = {}
-    for f in p:lines() do if f:lower():match("%.w3[xm]$") then names[#names + 1] = f end end
+    for f in p:lines() do names[#names + 1] = f:gsub("^%./", "") end
     p:close()
     if #names == 0 then return nil end
     local mpq = require("mpq")
