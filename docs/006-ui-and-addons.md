@@ -7,9 +7,11 @@ works, we get the addon ecosystem essentially for free.
 
 **WoW addons must work as-is** (the owner, 2026-10-09: "It's important
 that WoW addons work as-is"): an addon written for the original 3.3.5a
-client loads and runs here without being changed. The map editor's own
-panels are built on this same runtime, so it is the one way interface is
-made in this client (issue 1109).
+client loads and runs here without being changed. It is the one way
+interface is made in this client. (Until 2026-11-04 the map editor's
+panels were to be built on it too; the editor now stays in
+world-edit-to-execute with its own Lua renderer, and opens its map here
+with Test Map: issue 1109.)
 
 ## What an addon is
 
