@@ -22,11 +22,12 @@ first column).
 
 - `typedef struct Horizon Horizon;`
   A horizon (the handle: docs/001, "Handles") from the map's low-detail
-  heights; the chain may be closed afterwards. Always a horizon: when the
+  heights, read through `assets` (NULL: the chain alone); the chain and
+  resolver may be closed afterwards. Always a horizon: when the
   heights can't be had (W_ERR_NOT_FOUND: a map with no .wdl) it draws
   nothing, and `why` says why (W_OK when all is well); a map without one
   is not a failure. Freed with horizon_free.
-- `Horizon *horizon_new(MpqChain *chain, const char *map_name, double ox, double oy, WWhy *why);`
+- `Horizon *horizon_new(MpqChain *chain, Resolver *assets, const char *map_name, double ox, double oy, WWhy *why);`
 - `void horizon_free(Horizon *h);`
 - `void horizon_draw(Horizon *h, int tx, int ty, const char *loaded, Vector3 eye, const LightNow *light);`
   Draws every low-detail tile within reach of tile (tx, ty) whose full

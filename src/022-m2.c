@@ -64,6 +64,7 @@ WErr m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, 
         size_t at = ot + (size_t)i * 16;
         uint32_t len = u32(m2, at + 8), off = u32(m2, at + 12);
         out->textures[i].kind = u32(m2, at);
+        out->textures[i].flags = u32(m2, at + 4);
         if (len > 1 && len < sizeof out->textures[i].file && (uint64_t)off + len <= m2_len) memcpy(out->textures[i].file, m2 + off, len - 1);
     }
     uint32_t nl = u32(m2, 128), ol = u32(m2, 132);
@@ -111,6 +112,7 @@ WErr m2_read(const unsigned char *m2, size_t m2_len, const unsigned char *skin, 
          * position sets 136/140, animations 152/156) */
         uint32_t coord_look = u16(skin, at + 18), anim_look = u16(skin, at + 22);
         out->units[i].shader = (uint16_t)u16(skin, at + 2);
+        out->units[i].alpha = 1;
         for (int l = 0; l < 2; ++l) {
             out->units[i].tex[l] = (look + l < nl) ? (int)u16(m2, ol + (size_t)(look + l) * 2) : -1;
             out->units[i].uvset[l] = (coord_look + l < u32(m2, 136)) ? (int)(int16_t)u16(m2, u32(m2, 140) + (size_t)(coord_look + l) * 2) : 0;

@@ -13,7 +13,7 @@
  * after that (the settings store, 173b1) are checked here on their own,
  * with no Lua twin.
  *
- * Usage: test-client PROJECT_DIR CLIENT_DATA_DIR
+ * Usage: test-client PROJECT_DIR CLIENT_DATA_DIR [CONVERTED_BUILD_FOLDER]
  */
 #include "../src/020-adt.h"
 #include "../src/013-errors.h"
@@ -43,6 +43,10 @@
 #include "../src/060-resolver.h"
 #include "../src/067-test-map.h"
 #include "../src/068-goodbye.h"
+#include "../src/061-mdx.h"
+#include "../src/073-converted-map.h"
+#include "../src/074-tables.h"
+#include "../src/075-adt-heights.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -53,6 +57,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #undef W_OK                              /* <unistd.h>'s access() mode (2) would hide 013-errors.h's W_OK (0): every == W_OK below would test for 2 */
@@ -227,6 +232,104 @@ static void check_vmap_placements(const char *dir, const AdtTile *t, int *pairs,
 }
 /* }}} */
 
+/* {{{ a small WC3 model written here (401 step 2): the writer's pieces.
+ * A chunk is its tag, its byte count and its body; a record with a size
+ * of its own counts itself; both are counted when closed. */
+typedef struct { unsigned char b[4096]; size_t n; } Bytes;
+static void put32(Bytes *o, uint32_t v) { for (int i = 0; i < 4; ++i) o->b[o->n++] = (unsigned char)(v >> (8 * i)); }
+static void put16(Bytes *o, uint16_t v) { o->b[o->n++] = (unsigned char)v; o->b[o->n++] = (unsigned char)(v >> 8); }
+static void putf(Bytes *o, float f) { uint32_t v; memcpy(&v, &f, 4); put32(o, v); }
+static void puttag(Bytes *o, const char *t) { memcpy(o->b + o->n, t, 4); o->n += 4; }
+static void putname(Bytes *o, const char *s, size_t len) { memset(o->b + o->n, 0, len); memcpy(o->b + o->n, s, strlen(s)); o->n += len; }
+static void putext(Bytes *o, float r) { putf(o, r); for (int i = 0; i < 3; ++i) putf(o, -r); for (int i = 0; i < 3; ++i) putf(o, r); }
+static void patch32(Bytes *o, size_t at, uint32_t v) { for (int i = 0; i < 4; ++i) o->b[at + i] = (unsigned char)(v >> (8 * i)); }
+static size_t open_chunk(Bytes *o, const char *t) { puttag(o, t); put32(o, 0); return o->n; }
+static void close_chunk(Bytes *o, size_t body) { patch32(o, body - 4, (uint32_t)(o->n - body)); }
+static size_t open_record(Bytes *o) { put32(o, 0); return o->n - 4; }
+static void close_record(Bytes *o, size_t at) { patch32(o, at, (uint32_t)(o->n - at)); }
+static unsigned char *find_tag(Bytes *o, const char *t) { for (size_t i = 0; i + 4 <= o->n; ++i) if (!memcmp(o->b + i, t, 4)) return o->b + i; return NULL; }
+/* a geoset: points (x y z, three a point), normals (as many as given),
+ * triangles, its material; one matrix group, all points in it */
+static void put_geoset(Bytes *o, const float *v, int nv, int nn, const uint16_t *tri, int nt, uint32_t material)
+{
+    size_t g = open_record(o);
+    puttag(o, "VRTX"); put32(o, (uint32_t)nv); for (int i = 0; i < nv * 3; ++i) putf(o, v[i]);
+    puttag(o, "NRMS"); put32(o, (uint32_t)nn); for (int i = 0; i < nn; ++i) { putf(o, 0); putf(o, 1); putf(o, 0); }
+    puttag(o, "PTYP"); put32(o, 1); put32(o, 4);
+    puttag(o, "PCNT"); put32(o, 1); put32(o, (uint32_t)nt);
+    puttag(o, "PVTX"); put32(o, (uint32_t)nt); for (int i = 0; i < nt; ++i) put16(o, tri[i]);
+    puttag(o, "GNDX"); put32(o, (uint32_t)nv); for (int i = 0; i < nv; ++i) o->b[o->n++] = 0;
+    puttag(o, "MTGC"); put32(o, 1); put32(o, 1);
+    puttag(o, "MATS"); put32(o, 1); put32(o, 0);
+    put32(o, material); put32(o, 0); put32(o, 0);
+    putext(o, 10); put32(o, 0);
+    puttag(o, "UVAS"); put32(o, 1);
+    puttag(o, "UVBS"); put32(o, (uint32_t)nv); for (int i = 0; i < nv; ++i) { putf(o, (float)i); putf(o, 0.5f); }
+    close_record(o, g);
+}
+/* The model: three sequences ("Stand Ready" first, then "Stand 1" from
+ * 1000 to 2000, "Death"); two pictures (team colour, a named one); two
+ * materials (team colour under a blended skin whose alpha is animated;
+ * one additive, unshaded, two-sided, unfogged, sphere-mapped layer);
+ * three geosets (a square, a triangle with no normals that its geoset
+ * animation hides at Stand's start, a triangle naming a material that
+ * isn't there); two bones and a helper, their pivots. */
+static void made_mdx(Bytes *o)
+{
+    o->n = 0;
+    puttag(o, "MDLX");
+    size_t c = open_chunk(o, "VERS"); put32(o, 800); close_chunk(o, c);
+    c = open_chunk(o, "MODL"); putname(o, "Made here", 80); putname(o, "", 260); putext(o, 20); put32(o, 150); close_chunk(o, c);
+    c = open_chunk(o, "SEQS");
+    static const char *const names[3] = { "Stand Ready", "Stand 1", "Death" };
+    static const uint32_t from[3] = { 0, 1000, 3000 }, to[3] = { 900, 2000, 4000 };
+    for (int i = 0; i < 3; ++i) {
+        putname(o, names[i], 80); put32(o, from[i]); put32(o, to[i]); putf(o, 0); put32(o, i == 2); putf(o, 0); put32(o, 0); putext(o, 20);
+    }
+    close_chunk(o, c);
+    c = open_chunk(o, "TEXS");
+    put32(o, 1); putname(o, "", 260); put32(o, 0);
+    put32(o, 0); putname(o, "Textures\\Made.blp", 260); put32(o, 3);
+    close_chunk(o, c);
+    c = open_chunk(o, "MTLS");
+    size_t mat = open_record(o); put32(o, 0); put32(o, 0); puttag(o, "LAYS"); put32(o, 2);
+    size_t ly = open_record(o); put32(o, 0); put32(o, 0); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); close_record(o, ly);
+    ly = open_record(o); put32(o, 2); put32(o, 0); put32(o, 1); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 0.8f);
+    puttag(o, "KMTA"); put32(o, 3); put32(o, 1); put32(o, (uint32_t)-1);
+    put32(o, 0); putf(o, 0.2f); put32(o, 1000); putf(o, 0.6f); put32(o, 2000); putf(o, 0.9f);
+    close_record(o, ly); close_record(o, mat);
+    mat = open_record(o); put32(o, 0); put32(o, 0); puttag(o, "LAYS"); put32(o, 1);
+    ly = open_record(o); put32(o, 4); put32(o, 1 | 2 | 16 | 32); put32(o, 1); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); close_record(o, ly);
+    close_record(o, mat);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOS");
+    static const float sq[12] = { 0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0 }, tr[9] = { 0, 0, 5, 5, 0, 5, 5, 5, 5 }, tr2[9] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    static const uint16_t sq_t[6] = { 0, 1, 2, 0, 2, 3 }, tr_t[3] = { 0, 1, 2 };
+    put_geoset(o, sq, 4, 4, sq_t, 6, 0);
+    put_geoset(o, tr, 3, 0, tr_t, 3, 1);
+    put_geoset(o, tr2, 3, 3, tr_t, 3, 7);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOA");
+    size_t ga = open_record(o); putf(o, 1); put32(o, 0); putf(o, 1); putf(o, 1); putf(o, 1); put32(o, 1);
+    puttag(o, "KGAO"); put32(o, 2); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); put32(o, 1000); putf(o, 0);
+    close_record(o, ga);
+    close_chunk(o, c);
+    c = open_chunk(o, "BONE");
+    size_t nd = open_record(o); putname(o, "root", 80); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 256);
+    puttag(o, "KGTR"); put32(o, 2); put32(o, 1); put32(o, (uint32_t)-1);
+    put32(o, 1000); putf(o, 0); putf(o, 0); putf(o, 0); put32(o, 2000); putf(o, 10); putf(o, 0); putf(o, 0);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    nd = open_record(o); putname(o, "arm", 80); put32(o, 1); put32(o, 0); put32(o, 256); close_record(o, nd); put32(o, 1); put32(o, (uint32_t)-1);
+    close_chunk(o, c);
+    c = open_chunk(o, "HELP");
+    nd = open_record(o); putname(o, "ref", 80); put32(o, 2); put32(o, 1); put32(o, 0); close_record(o, nd);
+    close_chunk(o, c);
+    c = open_chunk(o, "PIVT");
+    for (int i = 0; i < 9; ++i) putf(o, (float)i);
+    close_chunk(o, c);
+}
+/* }}} */
+
 /* {{{ static run: seconds of steps of 0.01 s */
 static void run(Mover *m, MoverInput in, double seconds, MoverGround g)
 {
@@ -289,7 +392,7 @@ static void t_entry(char *out, size_t n, const char *replaces, const char *file,
 }
 /* }}} */
 
-/* {{{ static t_write_mpq: a version 1 archive of whole stored files (no
+/* {{{ static t_write_mpq_n: a version 1 archive of whole stored files (no
  * compression, no scrambled files), its two tables scrambled as every
  * archive's are, so 015-mpq.c reads it as it reads the game's */
 static uint32_t t_crypt[1280];
@@ -316,12 +419,12 @@ static void t_scramble(uint32_t *w, size_t count, uint32_t key)
     }
 }
 static void t_le32(unsigned char *p, uint32_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24); }
-static void t_write_mpq(const char *path, const char *const *names, const char *const *contents, int n)
+static void t_write_mpq_n(const char *path, const char *const *names, const char *const *contents, const size_t *lens, int n)
 {
     enum { NHASH = 16 };
     t_crypt_make();
     size_t data_len = 0;
-    for (int i = 0; i < n; ++i) data_len += strlen(contents[i]);
+    for (int i = 0; i < n; ++i) data_len += lens ? lens[i] : strlen(contents[i]);
     size_t hash_at = 32 + data_len, block_at = hash_at + NHASH * 16, total = block_at + (size_t)n * 16;
     unsigned char *s = calloc(1, total);
     memcpy(s, "MPQ\x1a", 4);
@@ -332,7 +435,7 @@ static void t_write_mpq(const char *path, const char *const *names, const char *
     memset(hashes, 0xFF, sizeof hashes);
     size_t at = 32;
     for (int i = 0; i < n; ++i) {
-        size_t len = strlen(contents[i]);
+        size_t len = lens ? lens[i] : strlen(contents[i]);
         memcpy(s + at, contents[i], len);
         blocks[i * 4 + 0] = (uint32_t)at; blocks[i * 4 + 1] = (uint32_t)len; blocks[i * 4 + 2] = (uint32_t)len;
         blocks[i * 4 + 3] = 0x80000000u | 0x01000000u;      /* there, one piece */
@@ -351,6 +454,8 @@ static void t_write_mpq(const char *path, const char *const *names, const char *
     free(blocks);
     free(s);
 }
+/* files of text (`lens` NULL above: each content's own length) */
+static void t_write_mpq(const char *path, const char *const *names, const char *const *contents, int n) { t_write_mpq_n(path, names, contents, NULL, n); }
 /* }}} */
 
 /* {{{ static t_asker: a thread asking the same three assets 100 times (the
@@ -1006,6 +1111,418 @@ static void test_map_tests(const char *dir)
 }
 /* }}} */
 
+/* {{{ 1109: a converted map's folder (073, 074, 075): map.lua, its tables
+ * per row ahead of the archives', heights from its own ground files, on
+ * folders and an archive made here; then, when a converted build folder
+ * is given (the third argument, else DIR/assets/test-map-build), the
+ * real converter's output read the way a test-map run reads it. */
+
+/* {{{ static the fixtures' writers */
+/* a table (016-dbc.h): `rows` rows of `fields` cells, then its strings */
+static size_t t_dbc(unsigned char *out, uint32_t rows, uint32_t fields, const uint32_t *cells, const char *text, size_t text_len)
+{
+    memcpy(out, "WDBC", 4);
+    t_le32(out + 4, rows); t_le32(out + 8, fields); t_le32(out + 12, fields * 4); t_le32(out + 16, (uint32_t)text_len);
+    for (uint32_t i = 0; i < rows * fields; ++i) t_le32(out + 20 + i * 4, cells[i]);
+    memcpy(out + 20 + rows * fields * 4, text, text_len);
+    return 20 + rows * fields * 4 + text_len;
+}
+/* map.lua of five parts (each a line of fields, "" to leave it out), read back */
+static WErr t_conv(const char *folder, const char *format, const char *map, const char *start, const char *rule, const char *more, ConvertedMap *m, WWhy *why)
+{
+    char text[2000];
+    snprintf(text, sizeof text, "-- made by the tests\nreturn {\n    %s\n    %s\n    %s\n    %s\n    %s\n}\n", format, map, start, rule, more);
+    t_write_text(folder, "map.lua", text);
+    return converted_map_read(folder, m, why);
+}
+/* the ground at (x, y) of the made tile below: a tilted plane */
+static double t_plane(double x, double y) { return 3 + 0.01 * x - 0.02 * y; }
+/* }}} */
+
+static void converted_tests(const char *dir, const char *build)
+{
+    char root[400], path[900], line[1000];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-converted", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the converted map's fixtures"); return; }
+    t_remove_tree(root);
+
+    /* {{{ Lua data, any file of it (059's reader, public) */
+    {
+        static const char GOOD[] = "-- a note\nreturn { n = -25, t = [[a\\b]], yes = true, no = false,\n  list = { 3, \"four\", { x = 1 } },\n  [\"key with space\"] = 7 }\n";
+        LuaData *d = NULL;
+        e = lua_data_parse(GOOD, strlen(GOOD), "made.lua", &d, &why);
+        check(!e, e ? why.text : "plain Lua data reads (059's manifest reader, any file of it)");
+        if (!e) {
+            const LuaValue *top = lua_data_top(d), *list = lua_value_field(top, "list");
+            check(lua_value_type(top) == LUA_DATA_TABLE && lua_value_number(lua_value_field(top, "n")) == -25
+                  && !strcmp(lua_value_text(lua_value_field(top, "t")), "a\\b") && lua_value_true(lua_value_field(top, "yes"))
+                  && lua_value_type(lua_value_field(top, "no")) == LUA_DATA_BOOL && !lua_value_true(lua_value_field(top, "no"))
+                  && lua_value_number(lua_value_field(top, "key with space")) == 7,
+                  "numbers, long-bracket text kept as written, true and false, a bracketed key");
+            check(lua_value_listed(list) == 3 && lua_value_number(lua_value_item(list, 1)) == 3 && !strcmp(lua_value_text(lua_value_item(list, 2)), "four")
+                  && lua_value_number(lua_value_field(lua_value_item(list, 3), "x")) == 1 && lua_value_item(list, 4) == NULL,
+                  "a list's values in order from 1, a table inside it, nothing past its end");
+            check(lua_value_line(list) == 3 && lua_value_field(top, "missing") == NULL && lua_value_type(NULL) == LUA_DATA_NIL && lua_value_text(lua_value_field(top, "n")) == NULL,
+                  "each value's line; a missing field is nil; a number has no text");
+        }
+        lua_data_free(d);
+        static const char CODE[] = "return {\n  a = 1,\n  b = os.exit(),\n}\n", CUT[] = "return { a = 1,\n";
+        d = NULL;
+        e = lua_data_parse(CODE, strlen(CODE), "code.lua", &d, &why);
+        check(e == W_ERR_CORRUPT && strstr(why.text, "code.lua") && strstr(why.text, "3"), "a call is code, not data: refused, naming the file and line 3");
+        lua_data_free(d);
+        d = NULL;
+        e = lua_data_parse(CUT, strlen(CUT), "cut.lua", &d, &why);
+        check(e == W_ERR_CORRUPT, "a table never closed: corrupt");
+        lua_data_free(d);
+    }
+    /* }}} */
+
+    /* {{{ map.lua (073) */
+    {
+        char folder[600];
+        snprintf(folder, sizeof folder, "%s/build", root);
+        static const char FORMAT[] = "format = 1,";
+        static const char MAP[] = "map = { id = 900, directory = \"WC3_Test\", name = \"A Test\", area = 9000, slot = 0, later = { 1, 2 } },";
+        static const char START[] = "start = { x = -495.833, y = -441.667, z = 4.16667, player = 0, wc3 = { 13568, -15232 } },";
+        static const char RULE[] = "wc3_to_wow = { scale = 0.0325521, x0 = 0, y0 = 0, rule = \"wow_x = x0 + scale * wc3_y\" },";
+        static const char MORE[] = "creatures = \"world/creatures-900.tsv\", tiles = { first = { 31, 31 }, across = 2, down = 2 }, maps = { {} },";
+        ConvertedMap m;
+        t_mkdirs(folder);
+        e = converted_map_read(folder, &m, &why);
+        check(e == W_ERR_NOT_FOUND && strstr(why.text, "map.lua") && strstr(why.text, "W02c"), "a folder with no map.lua: not found, saying which converter writes it");
+        e = t_conv(folder, FORMAT, MAP, START, RULE, MORE, &m, &why);
+        check(!e, e ? why.text : "a map.lua as world-edit-to-execute's W02c writes it reads");
+        check(m.id == 900 && !strcmp(m.directory, "WC3_Test") && !strcmp(m.name, "A Test") && m.area == 9000
+              && near(m.start_x, -495.833, 1e-9) && near(m.start_y, -441.667, 1e-9) && m.has_z && near(m.start_z, 4.16667, 1e-9)
+              && near(m.wc3_scale, 0.0325521, 1e-12) && !strcmp(m.creatures, "world/creatures-900.tsv"),
+              "its map, folder, name, area, start (with its height), rule and creature list; fields it doesn't read passed over");
+        double x, y;
+        converted_map_from_wc3(&m, 13568, -15232, &x, &y);
+        snprintf(line, sizeof line, "WC3's start (13568, -15232) by the map's rule is the start it gives (%.3f, %.3f)", x, y);
+        check(near(x, m.start_x, 0.01) && near(y, m.start_y, 0.01), line);
+        e = t_conv(folder, FORMAT, "map = { id = 1, directory = \"x\" },", "start = { x = 0, y = 0 },", RULE, "", &m, &why);
+        check(!e && m.name[0] == 0 && m.area == 0 && !m.has_z && m.creatures[0] == 0, e ? why.text : "name, area, height and creatures may be left out");
+        static const struct { const char *format, *map, *start, *rule, *more; WErr code; const char *says; } BAD[] = {
+            { "format = 2,", MAP, START, RULE, MORE, W_ERR_UNSUPPORTED, "format 2" },
+            { "", MAP, START, RULE, MORE, W_ERR_REFUSED, "has no format" },
+            { FORMAT, "map = { id = 70000, directory = \"WC3_Test\" },", START, RULE, MORE, W_ERR_REFUSED, "map.id is 70000" },
+            { FORMAT, "map = { id = 900.5, directory = \"WC3_Test\" },", START, RULE, MORE, W_ERR_REFUSED, "map.id is 900.5" },
+            { FORMAT, "map = { id = \"900\", directory = \"WC3_Test\" },", START, RULE, MORE, W_ERR_REFUSED, "map.id is a string" },
+            { FORMAT, "map = { id = 900, directory = \"../Kalimdor\" },", START, RULE, MORE, W_ERR_REFUSED, "map.directory \"../Kalimdor\"" },
+            { FORMAT, "map = { id = 900, directory = [[World\\Maps\\X]] },", START, RULE, MORE, W_ERR_REFUSED, "never a path" },
+            { FORMAT, "map = { id = 900, directory = \"\" },", START, RULE, MORE, W_ERR_REFUSED, "map.directory" },
+            { FORMAT, "map = { id = 900, directory = \"A123456789012345678901234567890123456789012345678\" },", START, RULE, MORE, W_ERR_REFUSED, "at most 48" },
+            { FORMAT, MAP, "", RULE, MORE, W_ERR_REFUSED, "has no start" },
+            { FORMAT, MAP, "start = { x = 1 },", RULE, MORE, W_ERR_REFUSED, "start has no y" },
+            { FORMAT, MAP, "start = { x = 20000, y = 0 },", RULE, MORE, W_ERR_REFUSED, "off the world" },
+            { FORMAT, MAP, START, "wc3_to_wow = { scale = 0, x0 = 0, y0 = 0 },", MORE, W_ERR_REFUSED, "wc3_to_wow.scale is 0" },
+            { FORMAT, MAP, START, "", MORE, W_ERR_REFUSED, "has no wc3_to_wow" },
+            { FORMAT, MAP, START, RULE, "creatures = \"../../server/world.sql\",", W_ERR_REFUSED, "isn't a path inside the build folder" },
+            { FORMAT, MAP, START, RULE, "creatures = \"/etc/passwd\",", W_ERR_REFUSED, "isn't a path inside" },
+            { FORMAT, MAP, START, RULE, "creatures = [[C:\\x.tsv]],", W_ERR_REFUSED, "isn't a path inside" },
+            { FORMAT, MAP, START, RULE, "creatures = 5,", W_ERR_REFUSED, "creatures is a number" },
+        };
+        int worked = 0, n = (int)(sizeof BAD / sizeof BAD[0]);
+        for (int i = 0; i < n; ++i) {
+            e = t_conv(folder, BAD[i].format, BAD[i].map, BAD[i].start, BAD[i].rule, BAD[i].more, &m, &why);
+            if (e == BAD[i].code && strstr(why.text, BAD[i].says) && strstr(why.text, "map.lua line") && m.id == 0) ++worked;
+            else printf("  (map.lua refusal %d: code %d, \"%s\"; wanted %d, \"%s\")\n", i + 1, e, e ? why.text : "", BAD[i].code, BAD[i].says);
+        }
+        snprintf(line, sizeof line, "%d of %d broken map.lua files refused with the field and its line, nothing kept", worked, n);
+        check(worked == n, line);
+        t_write_text(folder, "map.lua", "return 900\n");
+        e = converted_map_read(folder, &m, &why);
+        check(e == W_ERR_REFUSED && strstr(why.text, "returns a number"), "a map.lua returning a number, not a table: refused");
+        t_write_text(folder, "map.lua", "return { format = 1, map = { id = 900, directory = 'x' } \n");
+        e = converted_map_read(folder, &m, &why);
+        check(e == W_ERR_CORRUPT, "a map.lua that isn't Lua data: corrupt");
+    }
+    /* }}} */
+
+    /* {{{ the tables, per row, through the resolver (074; issue 106) */
+    {
+        char data[520], overlay[520];
+        snprintf(data, sizeof data, "%s/Data", root);
+        snprintf(overlay, sizeof overlay, "%s/build", root);
+        t_mkdirs(data);
+        /* the archives' Map: Azeroth 0, Kalimdor 1, Outland 530; their AreaTable 3 fields wide */
+        static unsigned char amap[200], aarea[100], omap[200], oarea[100];
+        static const char ATEXT[] = "\0Azeroth\0Kalimdor\0Expansion01";            /* 1, 9, 18 */
+        const uint32_t acells[] = { 0, 1, 0,   1, 9, 1,   530, 18, 2 };
+        size_t amap_n = t_dbc(amap, 3, 3, acells, ATEXT, sizeof ATEXT);
+        const uint32_t aarea_cells[] = { 14, 1, 0 };
+        size_t aarea_n = t_dbc(aarea, 1, 3, aarea_cells, "", 1);
+        snprintf(path, sizeof path, "%s/patch.MPQ", data);
+        const char *const names[] = { "DBFilesClient\\Map.dbc", "DBFilesClient\\AreaTable.dbc" };
+        const char *const bytes[] = { (const char *)amap, (const char *)aarea };
+        const size_t lens[] = { amap_n, aarea_n };
+        t_write_mpq_n(path, names, bytes, lens, 2);
+        /* the map's: its own map 900, and a row 1 of its own, which wins; an AreaTable 2 fields wide */
+        static const char OTEXT[] = "\0WC3_Test\0Override";                       /* 1, 10 */
+        const uint32_t ocells[] = { 900, 1, 7,   1, 10, 8 };
+        size_t omap_n = t_dbc(omap, 2, 3, ocells, OTEXT, sizeof OTEXT);
+        const uint32_t oarea_cells[] = { 9000, 0 };
+        size_t oarea_n = t_dbc(oarea, 1, 2, oarea_cells, "", 1);
+        t_write(overlay, "DBFILESCLIENT/map.DBC", omap, omap_n);
+        t_write(overlay, "DBFilesClient/AreaTable.dbc", oarea, oarea_n);
+
+        MpqChain chain;
+        e = mpq_chain_open(&chain, data, "enUS", &why);
+        check(!e, e ? why.text : "a made-up archive of two tables opens");
+        if (e) { t_remove_tree(root); return; }
+        ResolverPlace place = { .noverlays = 1, .chain = &chain, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", overlay);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        check(!e, e ? why.text : "the resolver opens the map's folder as an overlay over the archive");
+        if (!e) {
+            AssetAnswer all[4];
+            int n = 0;
+            e = asset_resolve_all(r, "DBFilesClient\\Map.dbc", ASSET_TABLE, all, 4, &n, &why);
+            check(!e && n == 2 && all[0].source == ASSET_FROM_OVERLAY && all[0].len == omap_n && all[1].source == ASSET_FROM_BLIZZARD && all[1].len == amap_n,
+                  e ? why.text : "every place's copy of a table, the map's first, then the archives'");
+            for (int i = 0; i < n; ++i) asset_answer_free(&all[i]);
+            e = asset_resolve_all(r, "DBFilesClient\\Map.dbc", ASSET_TABLE, all, 1, &n, &why);
+            check(e == W_ERR_FULL, "more copies than room for: full, not some of them");
+            AssetAnswer a;
+            AssetCounts before, after;
+            asset_counts(r, &before);
+            e = asset_resolve(r, "DBFilesClient\\Nowhere.dbc", ASSET_TABLE, &a, &why);
+            WErr e2 = asset_read(r, NULL, "World\\Maps\\X\\X.wdt", ASSET_GROUND, &a, &why);
+            asset_counts(r, &after);
+            fflush(place.log);
+            check(e == W_ERR_NOT_FOUND && e2 == W_ERR_NOT_FOUND && after.placeholder_answers == before.placeholder_answers && (!log || !strstr(log, "stands in")),
+                  "a table or a ground file nowhere: not found, quietly; nothing stands in (a placeholder table or ground would be wrong)");
+            e = asset_read(r, NULL, "World\\Maps\\X\\X.wdt", ASSET_TEXTURE, &a, &why);
+            check(e == W_ERR_NOT_FOUND, "asset_read never gives a placeholder, of any kind");
+            e = asset_read(NULL, &chain, "DBFilesClient\\Map.dbc", ASSET_TABLE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BLIZZARD && a.len == amap_n, e ? why.text : "asset_read with no resolver: the archives alone");
+            asset_answer_free(&a);
+
+            Tables *ts = tables_new(r, &chain);
+            TableRow row;
+            e = tables_row(ts, "Map", 900, &row, &why);
+            check(!e && row.source == ASSET_FROM_OVERLAY && !strcmp(row.from, overlay) && !strcmp(dbc_text(row.dbc, row.row, 2), "WC3_Test") && dbc_u32(row.dbc, row.row, 3) == 7,
+                  e ? why.text : "the map's own row (900) from its folder");
+            e = tables_row(ts, "Map", 1, &row, &why);
+            check(!e && row.source == ASSET_FROM_OVERLAY && !strcmp(dbc_text(row.dbc, row.row, 2), "Override"), "a row both have: the map's wins (106: the pack's rows first)");
+            e = tables_row(ts, "Map", 530, &row, &why);
+            check(!e && row.source == ASSET_FROM_BLIZZARD && !strcmp(dbc_text(row.dbc, row.row, 2), "Expansion01") && row.row == 2,
+                  "a row only the archives have: still theirs, per row");
+            e = tables_row(ts, "Map", 0, &row, &why);
+            check(!e && row.source == ASSET_FROM_BLIZZARD && row.row == 0, "row 0 too");
+            e = tables_row(ts, "Map", 77, &row, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "no row 77 in Map") && strstr(why.text, "2 copies: 4 rows"), e ? why.text : "a row no copy has: not found");
+            uint32_t rows[TABLES_COPIES_MAX];
+            AssetSource places[TABLES_COPIES_MAX];
+            check(tables_copies(ts, "Map", rows, places) == 2 && rows[0] == 2 && rows[1] == 3 && places[0] == ASSET_FROM_OVERLAY && places[1] == ASSET_FROM_BLIZZARD,
+                  "two copies of Map, the map's 2 rows first, the archives' 3");
+            e = tables_row(ts, "AreaTable", 9000, &row, &why);
+            check(e == W_ERR_REFUSED && strstr(why.text, "2 fields") && strstr(why.text, "3") && strstr(why.text, "another client build"),
+                  e ? why.text : "copies of different widths: refused, naming both (106's acceptance)");
+            WWhy again;
+            check(tables_row(ts, "AreaTable", 14, &row, &again) == W_ERR_REFUSED && !strcmp(again.text, why.text) && tables_copies(ts, "AreaTable", NULL, NULL) == -1,
+                  "and refused the same way each time it is asked");
+            e = tables_row(ts, "Faction", 1, &row, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "Faction.dbc is in none"), e ? why.text : "a table no place has: not found, named");
+            e = tables_row(ts, "", 1, &row, &why);
+            check(e == W_ERR_REFUSED, "an empty table name: refused");
+            char *rep = NULL;
+            size_t rep_len = 0;
+            FILE *to = open_memstream(&rep, &rep_len);
+            tables_report(ts, to);
+            fclose(to);
+            check(rep && strstr(rep, "Map") && strstr(rep, "overlay") && strstr(rep, "blizzard") && strstr(rep, "not read"), "the report: each table's copies and places, and the one not read");
+            free(rep);
+            tables_free(ts);
+
+            ts = tables_new(NULL, &chain);
+            e = tables_row(ts, "Map", 1, &row, &why);
+            check(!e && row.source == ASSET_FROM_BLIZZARD && !strcmp(dbc_text(row.dbc, row.row, 2), "Kalimdor") && tables_copies(ts, "Map", NULL, NULL) == 1,
+                  e ? why.text : "with no resolver (every run but a test map's): the archives' rows, one copy");
+            e = tables_row(ts, "Map", 900, &row, &why);
+            check(e == W_ERR_NOT_FOUND, "and the map's rows aren't there");
+            tables_free(ts);
+            resolver_free(r);
+        }
+        fclose(place.log);
+        free(log);
+        mpq_chain_close(&chain);
+    }
+    /* }}} */
+
+    /* {{{ heights from a map's own ground files (075) */
+    {
+        AdtTile *adt = calloc(1, sizeof *adt);
+        const int tx = 31, ty = 32;
+        for (int k = 0; k < 256; ++k) {
+            AdtChunk *c = &adt->chunks[k];
+            int cy = k / 16, cx = k % 16;
+            c->ix = cx; c->iy = cy;
+            c->z = 2;                                     /* the base, under every height */
+            float x, y;
+            for (int rr = 0; rr <= 8; ++rr)
+                for (int cc = 0; cc <= 8; ++cc) {
+                    maps_corner_position(tx, ty, (float)(cy * 8 + rr), (float)(cx * 8 + cc), &x, &y);
+                    c->heights[adt_corner(rr, cc)] = (float)(t_plane(x, y) - 2);
+                }
+            for (int rr = 0; rr < 8; ++rr)
+                for (int cc = 0; cc < 8; ++cc) {
+                    maps_corner_position(tx, ty, cy * 8 + rr + 0.5f, cx * 8 + cc + 0.5f, &x, &y);
+                    c->heights[adt_centre(rr, cc)] = (float)(t_plane(x, y) - 2);
+                }
+        }
+        adt->chunks[2 * 16 + 3].holes = 0xFFFF;           /* chunk row 2, column 3: all hole */
+        MapTile *t = NULL;
+        e = adt_heights_from_tile(adt, tx, ty, &t, &why);
+        check(!e && t && t->tx == tx && t->ty == ty && !t->is_flat && t->has_holes, e ? why.text : "a ground file's tile as the server's map file would hold it");
+        if (t) {
+            float worst = 0, gx, gy;
+            int tried = 0;
+            for (int i = 0; i < 400; ++i) {
+                float x, y;
+                maps_corner_position(tx, ty, 0.37f + (float)i * 0.317f, 127.6f - (float)i * 0.311f, &x, &y);
+                int ix = (int)(0.37f + (float)i * 0.317f), iy = (int)(127.6f - (float)i * 0.311f);
+                if (maps_is_hole(t, ix, iy)) continue;
+                float z = maps_height_in_tile(t, x, y, &gx, &gy);
+                if (fabsf(z - (float)t_plane(x, y)) > worst) worst = fabsf(z - (float)t_plane(x, y));
+                ++tried;
+            }
+            snprintf(line, sizeof line, "the ground is the ground file's: a tilted plane comes back as itself at %d places (worst %.5f yards)", tried, worst);
+            check(tried > 350 && worst < 0.01f, line);
+            float x, y;
+            maps_corner_position(tx, ty, 2 * 8 + 3.5f, 3 * 8 + 4.5f, &x, &y);
+            check(maps_is_hole(t, 2 * 8 + 3, 3 * 8 + 4) && maps_height_in_tile(t, x, y, &gx, &gy) == MAPS_INVALID_HEIGHT && !maps_is_hole(t, 2 * 8 + 3, 2 * 8 + 4),
+                  "a chunk's holes are the tile's holes there, and only there");
+            maps_corner_position(tx, ty, 8, 8, &x, &y);
+            check(t->v9[8 * 129 + 8] == (float)t_plane(x, y), "a corner chunks share: the same height from either");
+            maps_free_tile(t);
+        }
+        adt->chunks[17].ix = 5;
+        e = adt_heights_from_tile(adt, tx, ty, &t, &why);
+        check(e == W_ERR_CORRUPT && !t && strstr(why.text, "chunk 17"), "a chunk out of its place: corrupt, named");
+        free(adt);
+    }
+    /* }}} */
+
+    t_remove_tree(root);
+
+    /* {{{ the converter's own output, when there is some */
+    char conv_file[700];
+    snprintf(conv_file, sizeof conv_file, "%s/map.lua", build);
+    struct stat sb;
+    if (stat(conv_file, &sb)) {
+        printf("  (no converted build folder at %s: its checks are skipped; make one with world-edit-to-execute's wow-convert.lua)\n", build);
+        return;
+    }
+    printf("  a converted build folder: %s\n", build);
+    ConvertedMap m;
+    e = converted_map_read(build, &m, &why);
+    check(!e, e ? why.text : "its map.lua reads");
+    if (e) return;
+    ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+    snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+    Resolver *r = NULL;
+    e = resolver_open(&place, &r, &why);
+    check(!e, e ? why.text : "the resolver opens the build folder as the test map's overlay (no archives)");
+    if (e) return;
+    Tables *ts = tables_new(r, NULL);
+    TableRow row;
+    e = tables_row(ts, "Map", (uint32_t)m.id, &row, &why);
+    snprintf(line, sizeof line, "its Map row %d is in its folder's Map.dbc and names its folder %s", m.id, m.directory);
+    check(!e && row.source == ASSET_FROM_OVERLAY && !strcasecmp(dbc_text(row.dbc, row.row, 2), m.directory), e ? why.text : line);
+    static const struct { const char *name; uint32_t fields; } WIDTH[] = {
+        { "Map", 66 }, { "AreaTable", 36 }, { "CreatureDisplayInfo", 16 }, { "CreatureModelData", 28 }, { "Faction", 57 }, { "FactionTemplate", 14 }, { "LoadingScreens", 4 },
+    };
+    int wide = 0, nwidth = (int)(sizeof WIDTH / sizeof WIDTH[0]);
+    for (int i = 0; i < nwidth; ++i) {
+        AssetAnswer a;
+        Dbc d;
+        snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", WIDTH[i].name);
+        if (asset_read(r, NULL, path, ASSET_TABLE, &a, &why)) { printf("  (%s: %s)\n", WIDTH[i].name, why.text); continue; }
+        if (!dbc_open(&d, a.data, a.len, &why) && d.fields == WIDTH[i].fields) ++wide;
+        else printf("  (%s: %u fields, 3.3.5a's has %u)\n", WIDTH[i].name, d.fields, WIDTH[i].fields);
+        asset_answer_free(&a);
+    }
+    snprintf(line, sizeof line, "%d of its %d tables are as wide as 3.3.5a's own, so its rows sit beside the archives' (074 refuses another width)", wide, nwidth);
+    check(wide == nwidth, line);
+
+    LuaData *d = NULL;
+    e = lua_data_read(conv_file, CONVERTED_MAP_MOST, &d, &why);
+    const LuaValue *wc3 = e ? NULL : lua_value_field(lua_value_field(lua_data_top(d), "start"), "wc3");
+    if (lua_value_listed(wc3) >= 2) {
+        double x, y;
+        converted_map_from_wc3(&m, lua_value_number(lua_value_item(wc3, 1)), lua_value_number(lua_value_item(wc3, 2)), &x, &y);
+        snprintf(line, sizeof line, "the start (%.3f, %.3f) is WC3's start by the map's own rule (%.3f, %.3f)", m.start_x, m.start_y, x, y);
+        check(near(x, m.start_x, 0.01) && near(y, m.start_y, 0.01), line);
+    }
+    lua_data_free(d);
+
+    AdtHeights *h = NULL;
+    e = adt_heights_open(r, NULL, m.directory, &h, &why);
+    check(!e, e ? why.text : "its WDT is in its folder");
+    if (!e) {
+        MapWorld *w = malloc(sizeof *w);
+        maps_world_init_source(w, m.id, adt_heights_tile, h, "the map's own ground files");
+        float gx, gy;
+        float z = maps_world_height(w, (float)m.start_x, (float)m.start_y, &gx, &gy);
+        snprintf(line, sizeof line, "the ground at the start, from its own ground files: %.3f yards (map.lua's start.z %.3f)", z, m.has_z ? m.start_z : 0.0);
+        check(z > -10000 && (!m.has_z || near(z, m.start_z, 0.5)), line);
+        SpawnList sl = { 0 };
+        snprintf(path, sizeof path, "%s/%s", build, m.creatures[0] ? m.creatures : "world/creatures.tsv");
+        e = creatures_read(path, &sl, &why);
+        int on = 0;
+        float off = 0;
+        for (int i = 0; !e && i < sl.n; ++i) {
+            float g = maps_world_height(w, (float)sl.spawns[i].x, (float)sl.spawns[i].y, &gx, &gy);
+            if (g < -10000) continue;
+            ++on;
+            if (fabsf(g - (float)sl.spawns[i].z) > off) off = fabsf(g - (float)sl.spawns[i].z);
+        }
+        snprintf(line, sizeof line, "its %d creatures (%s) read, %d of them on its ground, the farthest %.2f yards off it", sl.n, m.creatures, on, off);
+        check(!e && sl.n > 0 && on == sl.n && off < 2, e ? why.text : line);
+        creatures_free(&sl);
+        snprintf(line, sizeof line, "%d of its ground tiles made from its ADTs", adt_heights_made(h));
+        check(adt_heights_made(h) >= 1, line);
+        maps_world_free(w);
+        free(w);
+        adt_heights_free(h);
+    }
+
+    /* its own WC3 model: the creature looks that name an .mdx it brought */
+    AssetAnswer info;
+    int named = 0, read = 0, kept = 0;
+    char first[300] = "";
+    if (!asset_read(r, NULL, "DBFilesClient\\CreatureDisplayInfo.dbc", ASSET_TABLE, &info, &why)) {
+        Dbc di;
+        if (!dbc_open(&di, info.data, info.len, &why))
+            for (uint32_t i = 0; i < di.rows; ++i) {
+                uint32_t model = dbc_u32(&di, i, 2);
+                if (tables_row(ts, "CreatureModelData", model, &row, &why)) continue;
+                const char *file = dbc_text(row.dbc, row.row, 3);
+                AssetAnswer a;
+                if (asset_read(r, NULL, file, ASSET_MODEL, &a, &why)) continue;       /* a game model's .mdx name: the archives' .m2 (041) */
+                ++named;
+                if (!first[0]) snprintf(first, sizeof first, "%s", file);
+                MdxModel x;
+                if (a.len >= 4 && !memcmp(a.data, "MDLX", 4) && !mdx_read(a.data, a.len, &x, &why)) { ++read; if (x.model.nunits > 0) ++kept; mdx_free(&x); }
+                asset_answer_free(&a);
+            }
+        asset_answer_free(&info);
+    }
+    snprintf(line, sizeof line, "%d creature looks name a WC3 model the map brought (first %s); %d read as MDX by 061, %d with something to draw", named, first[0] ? first : "none", read, kept);
+    check(named > 0 && read == named && kept == named, line);
+    tables_free(ts);
+    resolver_free(r);
+    /* }}} */
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -1120,6 +1637,87 @@ int main(int argc, char **argv)
     /* {{{ the test map's launch and receipt (1109): folders made here, no game data */
     printf("the test map's launch and its goodbye receipt\n");
     test_map_tests(dir);
+    /* }}} */
+
+    /* {{{ a converted map's folder (1109): map.lua, its tables per row, its
+     * ground's heights; folders made here, and the converter's own output
+     * when there is some. No game data, so before the archives */
+    printf("a converted map's folder\n");
+    {
+        char build[700];
+        if (argc > 3) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        converted_tests(dir, build);
+    }
+    /* }}} */
+
+    /* {{{ WC3's models (MDX, issue 401 step 2): one written here. It needs
+     * none of the game's files, so it comes before the archives, which
+     * end the program when the client's files aren't there. Every WC3
+     * model in war3.mpq is held to world-edit-to-execute's Lua reader by
+     * tests/062-mdx-matches-lua.lua. */
+    printf("WC3's models (MDX)\n");
+    {
+        static Bytes fb;
+        made_mdx(&fb);
+        MdxModel x;
+        WWhy mw;
+        int read = mdx_read(fb.b, fb.n, &x, &mw) == W_OK;
+        check(read, read ? "a WC3 model written here reads" : mw.text);
+        if (read) {
+            M2Model *d = &x.model;
+            check(x.version == 800 && !strcmp(x.name, "Made here") && x.blend_time == 150 && x.nsequences == 3,
+                  "its version (800), name, blend time and three sequences");
+            check(mdx_sequence(&x, "stand") == 1 && mdx_sequence(&x, "death") == 2 && mdx_sequence(&x, "walk") == 0,
+                  "\"stand\" is Stand 1, not Stand Ready; a name it hasn't gives the first");
+            check(d->ntextures == 2 && d->textures[0].kind == M2_TEXTURE_WC3 + 1 && d->textures[1].kind == 0
+                  && !strcmp(d->textures[1].file, "Textures\\Made.blp") && d->textures[1].flags == 3,
+                  "its pictures: team colour as WC3's replaceable 1, kept apart from the game's kinds; a named one, wrapping both ways");
+            snprintf(line, sizeof line, "every geoset's points in one list (%u of 10), the triangle's after the square's", d->nvertices);
+            check(d->nvertices == 10 && x.geosets[1].vertices.first == 4 && d->vertices[5].x == 5 && d->vertices[5].z == 5, line);
+            check(d->vertices[4].nx == 0 && d->vertices[4].nz == 1 && d->vertices[0].ny == 1 && d->vertices[5].u == 1 && d->vertices[5].v == 0.5f,
+                  "a geoset with no normals faces up; normals and picture positions as given elsewhere");
+            check(d->npieces == 3 && d->pieces[0].count == 6 && d->pieces[1].first == 6 && d->pieces[1].count == 3 && d->indices[6] == 4
+                  && d->pieces[1].id == 1, "a piece a geoset, its triangles as model point numbers");
+            check(d->nunits == 4, "a unit a geoset and material layer (2 + 1), and one plain unit for a geoset whose material isn't there");
+            if (d->nunits == 4) {
+                M2Unit *u = d->units;
+                check(u[0].blend == 0 && u[0].texture == 0 && u[1].blend == 2 && u[1].texture == 1 && u[0].piece == 0 && u[1].piece == 0,
+                      "the square: team colour (opaque) under its blended skin, WC3's filter modes as M2's blends");
+                check(u[2].blend == 4 && u[2].flags == (0x1 | 0x2 | 0x4) && u[2].uvset[0] == -1,
+                      "an add-alpha layer: unshaded, unfogged and two-sided as M2's flags, sphere-mapped as a reflection");
+                snprintf(line, sizeof line, "the skin's alpha at rest is its track's at Stand 1's start (%.3f; 0.6, not 0.2 at 0 nor 0.8 unanimated)", u[1].alpha);
+                check(near(u[1].alpha, 0.6, 1e-6), line);
+                check(u[2].alpha == 0 && u[0].alpha == 1, "the triangle is hidden at rest, its geoset animation's alpha 0 at Stand's start");
+                check(x.unit_layer[3] == -1 && u[3].blend == 0 && u[3].alpha == 1 && u[3].tex[0] == 0 && u[3].piece == 2,
+                      "the geoset with no such material: one plain opaque layer, the first picture");
+            }
+            int ref = mdx_node(&x, 2);
+            check(x.nnodes == 3 && ref == 2 && x.nodes[ref].kind == MDX_HELPER && x.nodes[ref].parent == 1 && x.npivots == 3
+                  && x.nodes[0].geoset == 0 && x.nodes[1].geoset == 1 && x.pivots[2][1] == 7,
+                  "two bones and a helper, each by its id, with its parent and pivot");
+            double v[4], def[3] = { 0, 0, 0 };
+            const MdxTrack *t = mdx_track(&x, x.nodes[0].tracks, "KGTR");
+            int n = mdx_sample(&x, t, 1500, def, 3, 1, 1000, 2000, 0, v);
+            check(t && n == 3 && near(v[0], 5, 1e-12) && v[1] == 0, "the root's move halfway through Stand 1: halfway (5, 0, 0)");
+            n = mdx_sample(&x, mdx_track(&x, x.nodes[1].tracks, "KGTR"), 1500, def, 3, 1, 1000, 2000, 0, v);
+            check(n == 3 && v[0] == 0, "a node with no move track: the default");
+            mdx_free(&x);
+        }
+        static Bytes cut;
+        cut = fb;
+        check(mdx_read(cut.b, cut.n / 2, &x, &mw) == W_ERR_CORRUPT && mw.text[0], "cut in half: corrupt, with where it stopped");
+        cut.b[0] = 'X';
+        check(mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT, "no MDLX mark: corrupt");
+        cut = fb;
+        unsigned char *kg = find_tag(&cut, "KGAO");
+        if (kg) memcpy(kg, "KZZZ", 4);
+        check(kg && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "KZZZ"), "a track tag no record has: corrupt, naming it");
+        cut = fb;
+        unsigned char *nr = find_tag(&cut, "NRMS");
+        if (nr) memcpy(nr, "NRMX", 4);
+        check(nr && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "NRMS"), "a geoset whose normals are misnamed: corrupt, saying what was expected");
+    }
     /* }}} */
 
     /* {{{ the archives */
@@ -1521,7 +2119,7 @@ int main(int argc, char **argv)
         MpqChain rc;
         if (mpq_chain_open(&rc, client, "enUS", &why)) check(0, why.text);
         else {
-            Prefetch *reader = prefetch_start(&rc, "Kalimdor", 1);
+            Prefetch *reader = prefetch_start(&rc, NULL, "Kalimdor", 1);
             prefetch_tile(reader, 26, 32);
             prefetch_tile(reader, 26, 32);                        /* asked twice: read once */
             prefetch_wait(reader);
@@ -1559,7 +2157,7 @@ int main(int argc, char **argv)
             MapWorld gw;
             maps_world_init(&gw, maps_dir, 1);
             GroundPlace gp;
-            if (ground_place_init(&gp, &rc, "Kalimdor", &gw, 2700, -400, &why)) check(0, why.text);
+            if (ground_place_init(&gp, &rc, NULL, "Kalimdor", &gw, 2700, -400, &why)) check(0, why.text);
             else {
                 prefetch_prepare_ground(reader, &gp, test_on_card, NULL);
                 prefetch_tile(reader, 26, 31);

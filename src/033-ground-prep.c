@@ -15,22 +15,22 @@
 #include <string.h>
 
 /* {{{ ground_place_init */
-WErr ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why)
+WErr ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why)
 {
     memset(p, 0, sizeof *p);
     p->chain = chain;
+    p->assets = assets;
     p->world = world;
     p->ox = ox; p->oy = oy;
     snprintf(p->map_name, sizeof p->map_name, "%s", map_name);
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", map_name, map_name);
-    size_t len;
-    const char *from;
-    unsigned char *wdt = mpq_chain_read(chain, path, &len, &from);
-    if (!wdt) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", path); return why->code; }
-    p->big_alpha = adt_wdt_big_alpha(wdt, len, why);
-    free(wdt);
-    return p->big_alpha < 0;
+    AssetAnswer wdt;
+    WErr rc = asset_read(assets, chain, path, ASSET_GROUND, &wdt, why);
+    if (rc) return rc == W_ERR_NOT_FOUND ? w_fail(why, rc, "%s is in none of the %s", path, assets ? "places asked (the test map's folder, overlays, the archives)" : "client's archives") : rc;
+    p->big_alpha = adt_wdt_big_alpha(wdt.data, wdt.len, why);
+    asset_answer_free(&wdt);
+    return p->big_alpha < 0 ? why->code : W_OK;
 }
 /* }}} */
 
@@ -139,10 +139,13 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
     if (tx < 0 || tx > 63 || ty < 0 || ty > 63) return w_fail(why, W_ERR_NOT_FOUND, "tile (%d, %d) is off the map's 64 x 64 grid", tx, ty);
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", p->map_name, p->map_name, ty, tx);   /* west-east number first */
-    size_t len;
-    const char *from;
-    unsigned char *s = mpq_chain_read(p->chain, path, &len, &from);
-    if (!s) return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the archives (open sea: no ground there)", path);
+    AssetAnswer file;
+    WErr rc = asset_read(p->assets, p->chain, path, ASSET_GROUND, &file, why);
+    if (rc == W_ERR_NOT_FOUND) return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the %s (open sea: no ground there)", path, p->assets ? "places asked" : "archives");
+    if (rc) return rc;
+    unsigned char *s = file.data;
+    size_t len = file.len;
+    const char *from = file.from ? file.from : asset_source_name(file.source);
     GroundPrep *g = calloc(1, sizeof *g);
     g->tx = tx; g->ty = ty;
     g->adt = malloc(sizeof *g->adt);

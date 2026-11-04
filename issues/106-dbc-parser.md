@@ -10,8 +10,37 @@ fields it uses in its own comments (Map, Light*, LiquidType,
 CharSections, ItemDisplayInfo, CreatureDisplayInfo ...). In the reader
 library.
 
+**Per row, through the resolver: built 2026-11-04** (issue 1109's step
+1b, `src/074-tables.c`, window-free, in the executable and the test
+program). A table is every copy of it at once: each place the resolver
+knows that holds it (packs, the server's folders, overlays such as a
+test map's build folder, then the archives), first place first, and a
+row is looked up by its number in the first copy that has it. So a map
+converted by world-edit-to-execute (its W02c writes `DBFilesClient/`
+tables holding only the map's own rows) brings its Map row and its
+creatures' looks, and every other row still comes from the archives.
+The resolver (060) has a `table` kind for it, with no placeholder, and
+`asset_resolve_all` gives every place's copy. Read so: Map (043) and
+CreatureDisplayInfo, CreatureDisplayInfoExtra, CreatureModelData
+(041). With no resolver, which is every run but a test map's for now
+(1109's decision 4), the archives are the only copy, as each reader
+found them before. Copies of different widths are refused, naming the
+table, both places and both widths: a check against each other, since
+there are no layout files yet to check against (acceptance line 2, in
+that form). A row no copy has is still an error naming the table and
+the row, not the placeholder and warning asked for above: a placeholder
+row needs the layouts, to know what to fill in (1109, decision 13).
+Checked in `tests/044-test-client.c` ("a converted map's folder") on a
+made-up archive and folder, and on the converter's real output (all
+seven of its tables as wide as 3.3.5a's).
+
 Not built: layouts as data files and the generator of C and Lua
-layouts from them; WC3 map mode's tables built from map files.
+layouts from them; a missing row as a placeholder; the other readers'
+tables (Light*, LiquidType, CharSections, ItemDisplayInfo ...) through
+074 (they still open the archives' copy whole); WC3 map mode's tables
+built from map files (world-edit-to-execute's W02c builds the first:
+Map, AreaTable, LoadingScreens, CreatureDisplayInfo, CreatureModelData,
+Faction, FactionTemplate).
 
 ## Intended behavior
 
@@ -100,4 +129,6 @@ First tables:
 - [docs/003-asset-formats.md](../docs/003-asset-formats.md#dbc--client-side-data-tables)
 - Blocked by: [105](./105-mpq-reader.md).
 - Blocks: [108](./108-phase-demo.md).
+- [1109](./1109-test-map-from-the-editor.md) step 1b: tables per row
+  (`src/074-tables.info.md`).
 - **Blocks:** [810](./810-spell-description-text.md), [1003](./1003-sounds-in-the-world.md).

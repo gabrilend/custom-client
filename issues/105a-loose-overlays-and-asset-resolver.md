@@ -26,7 +26,7 @@ drawing parts asking the resolver are still to come:
     refused with its line. Each entry's fields are held to their type
     and range; a field the format doesn't have is refused by name.
   - the asset kinds (model, texture, animation, particle, sound, font,
-    interface) and their names.
+    interface; table and ground since 1109's step 1b) and their names.
 - **`src/060-resolver.c`** (in the executable and the test program, not
   the library): `resolver_open` indexes every folder and reads every
   pack's manifest at the start, checking each entry's file is in its
@@ -93,14 +93,24 @@ Not built yet:
 - **The Phase 1 demo printing the table** (acceptance line 2):
   `resolver_report` prints it; the demo itself is
   [108](./108-phase-demo.md), not written yet, and calls it there.
-- **Drawing parts asking the resolver.** Pictures (036, 038, 041, 042),
-  models (041, 042), buildings and ground still read the archives
-  directly (`mpq_chain_read`). Each moves when its issue does:
-  [204](./204-blp-to-gpu-upload.md) for pictures first. The main
-  program (043) doesn't open a resolver yet, so its exit status doesn't
-  reflect strict mode yet; when it does, it exits with
-  `resolver_exit_status` (acceptance line 3, which the test checks on
-  the resolver).
+- **Drawing parts asking the resolver**, in part. Since 1109's step 1b
+  (2026-11-04) the ground's files (the WDT and ADTs in 033 and 034, the
+  WDL in 039), the client's tables (074, per row: 106) and a creature
+  look's own WC3 model and its pictures (041) ask it, with the
+  archives alone when there is no resolver. Two kinds were added for
+  them, `table` and `ground`, with no placeholder (no place having one
+  is the answer, quietly: a made-up table or ground tile would be
+  wrong), and two calls: `asset_resolve_all` (every place's copy, for a
+  table read per row) and `asset_read` (the first copy, never a
+  placeholder, through the resolver when one is open, else the
+  archives). Still reading the archives directly (`mpq_chain_read`):
+  pictures (036, 038, 042, and 041's for the game's own models),
+  models (042, and 041's `.m2`), buildings. Each moves when its issue
+  does: [204](./204-blp-to-gpu-upload.md) for pictures first. The main
+  program (043) opens a resolver only in a test-map run (1109's
+  decision 4), so an ordinary run's exit status doesn't reflect strict
+  mode yet; when it does, it exits with `resolver_exit_status`
+  (acceptance line 3, which the test checks on the resolver).
 - **The server's delivered assets**: their folder list is in the place
   (`server`) and searched second, but nothing fills it until
   world-edit-to-execute's 604/605/609 deliver into a folder (docs/012,

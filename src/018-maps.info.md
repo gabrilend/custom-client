@@ -20,6 +20,12 @@ count from the world's north-west corner:
 
 - `type MapTile`
   One tile. v9 and v8 are NULL for a tile of one flat height.
+- `typedef MapTile *(*MapTileSource)(void *ctx, int map_id, int tx, int ty, WWhy *why);`
+  Where a world's tiles come from when not from the server's files: a
+  call that makes tile (tx, ty) of `map_id`, or NULL with `why` (its code
+  W_ERR_NOT_FOUND when there is no ground there). Asked from either
+  thread, one tile at a time (the world's lock is held). A converted
+  map's own ground files are one (075-adt-heights.h).
 - `type MapWorld`
   A world on one map: tiles loaded as needed and kept.
 - `void maps_tile_of(float x, float y, int *tx, int *ty);`
@@ -30,5 +36,9 @@ count from the world's north-west corner:
   Height at (x, y) inside tile t, and its rise per yard along world x and y.
 - `void maps_corner_position(int tx, int ty, float ix, float iy, float *x, float *y);`
 - `void maps_world_init(MapWorld *w, const char *dir, int map_id);`
+- `void maps_world_init_source(MapWorld *w, int map_id, MapTileSource source, void *ctx, const char *what);`
+  The same world with its tiles made by `source` (with `ctx`, which must
+  outlive it) instead of read from the server's files; `what` names
+  where they come from in messages.
 - `float maps_world_height(MapWorld *w, float x, float y, float *gx, float *gy);`
 - `void maps_world_free(MapWorld *w);`

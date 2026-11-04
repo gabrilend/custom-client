@@ -10,6 +10,7 @@
 #include "017-blp.h"
 #include "016-dbc.h"
 #include "036-texture.h"
+#include "061-mdx.h"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -101,30 +102,48 @@ static Texture2D texture_of(const Textures *tx, const BlpImage *img)
  * archives match them. */
 struct Figures {
     MpqChain *chain;
+    Resolver *assets;                 /* NULL: the archives alone (a test map's folder comes first through it, 1109) */
+    Tables   *tables;                 /* the creature tables, per row (074-tables.h) */
+    double    wc3_scale;              /* yards per WC3 unit, for a WC3 model's points */
     Textures *textures;               /* how pictures go to the card (036-texture.h) */
     struct { char name[260]; Texture2D tex; } *cache;
     int ncache, cache_cap;
 };
-Figures *figures_new(MpqChain *chain, Textures *textures)
+Figures *figures_new(MpqChain *chain, Resolver *assets, Tables *tables, Textures *textures)
 {
     Figures *fs = calloc(1, sizeof *fs);
     fs->chain = chain;
+    fs->assets = assets;
+    fs->tables = tables;
+    fs->wc3_scale = FIGURE_WC3_YARDS;
     fs->textures = textures;
     return fs;
 }
+void figures_wc3_scale(Figures *fs, double yards_per_unit) { if (yards_per_unit > 0) fs->wc3_scale = yards_per_unit; }
 void figures_free(Figures *fs)
 {
     for (int i = 0; i < fs->ncache; ++i) UnloadTexture(fs->cache[i].tex);
     free(fs->cache);
     free(fs);
 }
-static WErr load_picture(Figures *fs, const char *name, Texture2D *out, WWhy *why)
+/* `wc3`: a WC3 model's picture, asked of the resolver when there is one,
+ * so a missing one gets its checker and a warning (no WC3 picture is in
+ * the game's archives); every other picture from the archives, as before */
+static WErr load_picture_from(Figures *fs, const char *name, int wc3, Texture2D *out, WWhy *why)
 {
     for (int i = 0; i < fs->ncache; ++i) if (!strcasecmp(fs->cache[i].name, name)) { *out = fs->cache[i].tex; return 0; }
     size_t len;
-    const char *from;
-    unsigned char *s = mpq_chain_read(fs->chain, name, &len, &from);
-    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the picture %.200s is in none of the client's archives", name); return why->code; }
+    unsigned char *s;
+    if (wc3 && fs->assets) {
+        AssetAnswer a;
+        WErr rc = asset_resolve(fs->assets, name, ASSET_TEXTURE, &a, why);
+        if (rc) return rc;
+        s = a.data; len = a.len;                         /* the answer's bytes, freed below */
+    } else {
+        const char *from;
+        s = mpq_chain_read(fs->chain, name, &len, &from);
+        if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the picture %.200s is in none of the client's archives", name); return why->code; }
+    }
     WWhy inner;
     int bad = texture_from_blp(fs->textures, s, len, out, &inner);   /* sent compressed when stored so (173u) */
     free(s);
@@ -134,6 +153,7 @@ static WErr load_picture(Figures *fs, const char *name, Texture2D *out, WWhy *wh
     fs->cache[fs->ncache++].tex = *out;
     return 0;
 }
+static WErr load_picture(Figures *fs, const char *name, Texture2D *out, WWhy *why) { return load_picture_from(fs, name, 0, out, why); }
 /* own: a picture made for this figure alone (a painted skin sheet), freed with it */
 static Texture2D own(Figures *fs, Figure *f, const BlpImage *img)
 {
@@ -146,7 +166,11 @@ static Texture2D own(Figures *fs, Figure *f, const BlpImage *img)
 /* {{{ static build: pieces, points and skeleton from a read model
  * `shown` says which pieces show (NULL: all); `pics` holds one picture
  * per model texture slot (id 0 where the slot has none: its pieces are
- * left out). `base` is the model's archive path without its extension. */
+ * left out). `base` is the model's archive path without its extension;
+ * NULL for a WC3 model, whose skeleton isn't read yet (402: 061's nodes
+ * are posed by issue 402 step 4): it stands as made, every point on one
+ * still bone, and a unit hidden at rest (its alpha 0: a death or
+ * alternate part, 061-mdx.h) is left out. */
 static WErr build(Figure *f, Figures *fs, const M2Model *mod, const uint8_t *shown, const Texture2D *pics,
                  const char *base, WWhy *why)
 {
@@ -155,6 +179,7 @@ static WErr build(Figure *f, Figures *fs, const M2Model *mod, const uint8_t *sho
         if (un.piece >= mod->npieces || un.texture >= mod->ntextures) continue;
         if (shown && !shown[un.piece]) continue;
         if (pics[un.texture].id == 0) continue;
+        if (!base && un.alpha <= 0) continue;
         M2Piece p = mod->pieces[un.piece];
         if (p.count == 0 || p.first + p.count > mod->nindices) continue;
         FigurePiece *fp = &f->pieces[f->npieces];
@@ -189,25 +214,34 @@ static WErr build(Figure *f, Figures *fs, const M2Model *mod, const uint8_t *sho
     f->rest = malloc(sizeof *f->rest * f->nrest);
     memcpy(f->rest, mod->vertices, sizeof *f->rest * f->nrest);
 
+    if (!base) {                                         /* a WC3 model: one still bone, no animations yet */
+        memset(&f->anim, 0, sizeof f->anim);
+        f->anim.npoints = f->nrest;
+        f->anim.weights = calloc(f->nrest ? f->nrest : 1, sizeof *f->anim.weights);
+        f->anim.bone_of = calloc(f->nrest ? f->nrest : 1, sizeof *f->anim.bone_of);
+        for (uint32_t i = 0; i < f->nrest; ++i) f->anim.weights[i][0] = 255;
+    }
     /* the skeleton, and any animation kept in a .anim file */
     char path[300];
     size_t len;
     const char *from;
-    snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(fs->chain, path, &len, &from);
-    WWhy inner;
-    if (!m2 || anim_read(m2, len, &f->anim, &inner)) {
-        w_fail(why, m2 ? inner.code : W_ERR_NOT_FOUND, "%s's skeleton (%s): %s", f->name, path, m2 ? inner.text : "not in the archives");
+    if (base) {
+        snprintf(path, sizeof path, "%s.m2", base);
+        unsigned char *m2 = mpq_chain_read(fs->chain, path, &len, &from);
+        WWhy inner;
+        if (!m2 || anim_read(m2, len, &f->anim, &inner)) {
+            w_fail(why, m2 ? inner.code : W_ERR_NOT_FOUND, "%s's skeleton (%s): %s", f->name, path, m2 ? inner.text : "not in the archives");
+            free(m2);
+            return why->code;
+        }
         free(m2);
-        return why->code;
-    }
-    free(m2);
-    for (int i = 0; i < f->anim.nseqs; ++i) {
-        if (!anim_needs_file(&f->anim, i)) continue;
-        snprintf(path, sizeof path, "%s%04d-%02d.anim", base, f->anim.seqs[i].id, f->anim.seqs[i].variation);
-        unsigned char *a = mpq_chain_read(fs->chain, path, &len, &from);
-        if (!a) { fprintf(stderr, "%s: %s is in none of the archives; that animation leaves it at rest\n", f->name, path); continue; }
-        anim_attach_file(&f->anim, i, a, len);
+        for (int i = 0; i < f->anim.nseqs; ++i) {
+            if (!anim_needs_file(&f->anim, i)) continue;
+            snprintf(path, sizeof path, "%s%04d-%02d.anim", base, f->anim.seqs[i].id, f->anim.seqs[i].variation);
+            unsigned char *a = mpq_chain_read(fs->chain, path, &len, &from);
+            if (!a) { fprintf(stderr, "%s: %s is in none of the archives; that animation leaves it at rest\n", f->name, path); continue; }
+            anim_attach_file(&f->anim, i, a, len);
+        }
     }
     if (f->anim.npoints != f->nrest) {
         w_fail(why, W_ERR_CORRUPT, "%s: the skeleton's model has %u points, the mesh %u", f->name, f->anim.npoints, f->nrest);
@@ -357,26 +391,52 @@ WErr figure_from_item(Figures *fs, Figure *f, const char *model, const char *pic
  * CreatureModelData: 1 id, 3 the model's path (.mdx; the archive holds .m2).
  * Pieces: the body group (ids under 100) and the first variant of every
  * other group (id % 100 == 1), the original's choice when the display
- * names no other (its geoset data, not read yet). */
-static WErr open_table(Figures *fs, const char *name, Dbc *d, unsigned char **keep, WWhy *why)
+ * names no other (its geoset data, not read yet).
+ * Each row comes through the tables (074-tables.h): a converted map's own
+ * rows first, then the archives'. */
+
+/* {{{ static from_wc3: a WC3 model the map brought (its bytes read): its
+ * drawable part from 061-mdx, its pictures named inside it (a replaceable
+ * one, team colour and the like, is left out until 404 paints it), its
+ * points turned from WC3 units into yards */
+static WErr from_wc3(Figures *fs, Figure *f, const unsigned char *s, size_t len, float scale, WWhy *why)
 {
-    size_t len;
-    const char *from;
-    *keep = mpq_chain_read(fs->chain, name, &len, &from);
-    if (!*keep) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", name); return why->code; }
-    return dbc_open(d, *keep, len, why);
+    MdxModel x;
+    WWhy inner;
+    if (mdx_read(s, len, &x, &inner)) { w_fail(why, inner.code, "%s: %s", f->name, inner.text); return why->code; }
+    const M2Model *mod = &x.model;
+    Texture2D pics[64] = { 0 };
+    for (uint32_t t = 0; t < mod->ntextures && t < 64; ++t) {
+        if (mod->textures[t].kind != 0 || !mod->textures[t].file[0]) continue;   /* replaceable (M2_TEXTURE_WC3 + n): not painted yet */
+        if (load_picture_from(fs, mod->textures[t].file, 1, &pics[t], &inner)) {
+            w_fail(why, inner.code, "%s: %s", f->name, inner.text);
+            mdx_free(&x);
+            return why->code;
+        }
+    }
+    WErr bad = build(f, fs, mod, NULL, pics, NULL, why);
+    mdx_free(&x);
+    if (!bad) f->scale = scale * (float)fs->wc3_scale;
+    return bad;
 }
+/* }}} */
+
+/* {{{ static row: a table's row by number, its failure said naming the display that asked */
+static WErr row(Figures *fs, int display_id, const char *table, uint32_t id, TableRow *r, WWhy *why)
+{
+    WWhy inner;
+    WErr rc = tables_row(fs->tables, table, id, r, &inner);
+    if (rc) return w_fail(why, rc, "creature display %d: %s", display_id, inner.text);
+    return W_OK;
+}
+/* }}} */
+
 WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
 {
     memset(f, 0, sizeof *f);
-    Dbc di, md;
-    unsigned char *di_s = NULL, *md_s = NULL;
-    if (open_table(fs, "DBFilesClient\\CreatureDisplayInfo.dbc", &di, &di_s, why) ||
-        open_table(fs, "DBFilesClient\\CreatureModelData.dbc", &md, &md_s, why)) { free(di_s); free(md_s); return why->code; }
-    int row = -1;
-    for (uint32_t r = 0; r < di.rows; ++r) if (dbc_u32(&di, r, 1) == (uint32_t)display_id) { row = (int)r; break; }
-    if (row < 0) { w_fail(why, W_ERR_NOT_FOUND, "no creature display %d in CreatureDisplayInfo", display_id); free(di_s); free(md_s); return why->code; }
-    uint32_t model_id = dbc_u32(&di, (uint32_t)row, 2), scale_bits = dbc_u32(&di, (uint32_t)row, 5), extra = dbc_u32(&di, (uint32_t)row, 4);
+    TableRow di, md;
+    if (row(fs, display_id, "CreatureDisplayInfo", (uint32_t)display_id, &di, why)) return why->code;
+    uint32_t model_id = dbc_u32(di.dbc, di.row, 2), scale_bits = dbc_u32(di.dbc, di.row, 5), extra = dbc_u32(di.dbc, di.row, 4);
     float scale;
     memcpy(&scale, &scale_bits, 4);
     if (!(scale > 0.01f && scale < 100)) scale = 1;
@@ -387,26 +447,21 @@ WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
          * worn: head, shoulders, shirt, chest, waist, legs, feet, wrists,
          * hands, tabard, back; 20 flags, 21 its baked skin sheet's name, in
          * Textures\BakedNpcTextures\) */
-        free(di_s); free(md_s);
-        Dbc ex;
-        unsigned char *ex_s = NULL;
-        if (open_table(fs, "DBFilesClient\\CreatureDisplayInfoExtra.dbc", &ex, &ex_s, why)) { free(ex_s); return why->code; }
-        int er = -1;
-        for (uint32_t r = 0; r < ex.rows; ++r) if (dbc_u32(&ex, r, 1) == extra) { er = (int)r; break; }
-        if (er < 0) { w_fail(why, W_ERR_NOT_FOUND, "display %d names extra row %u, which CreatureDisplayInfoExtra lacks", display_id, extra); free(ex_s); return why->code; }
+        TableRow ex;
+        if (row(fs, display_id, "CreatureDisplayInfoExtra", extra, &ex, why)) return why->code;
         static const int SLOT[11] = { SLOT_HEAD, SLOT_SHOULDERS, SLOT_SHIRT, SLOT_CHEST, SLOT_WAIST, SLOT_LEGS, SLOT_FEET, SLOT_WRISTS, SLOT_HANDS, SLOT_TABARD, SLOT_BACK };
         CharacterLook look = { 0 };
-        uint32_t e = (uint32_t)er;
-        look.race = (int)dbc_u32(&ex, e, 2); look.sex = (int)dbc_u32(&ex, e, 3);
-        look.skin = (int)dbc_u32(&ex, e, 4); look.face = (int)dbc_u32(&ex, e, 5);
-        look.hair_style = (int)dbc_u32(&ex, e, 6); look.hair_color = (int)dbc_u32(&ex, e, 7);
-        look.facial_hair = (int)dbc_u32(&ex, e, 8);
+        const Dbc *x = ex.dbc;
+        uint32_t e = ex.row;
+        look.race = (int)dbc_u32(x, e, 2); look.sex = (int)dbc_u32(x, e, 3);
+        look.skin = (int)dbc_u32(x, e, 4); look.face = (int)dbc_u32(x, e, 5);
+        look.hair_style = (int)dbc_u32(x, e, 6); look.hair_color = (int)dbc_u32(x, e, 7);
+        look.facial_hair = (int)dbc_u32(x, e, 8);
         look.npc = 1;
-        for (int k = 0; k < 11; ++k) look.items[SLOT[k]] = (int)dbc_u32(&ex, e, 9 + (uint32_t)k);
+        for (int k = 0; k < 11; ++k) look.items[SLOT[k]] = (int)dbc_u32(x, e, 9 + (uint32_t)k);
         char baked[300] = "";
-        const char *bake = dbc_text(&ex, e, 21);
+        const char *bake = dbc_text(x, e, 21);
         if (bake && bake[0]) snprintf(baked, sizeof baked, "Textures\\BakedNpcTextures\\%.200s", bake);
-        free(ex_s);
         int bad = from_character(f, fs, &look, baked[0] ? baked : NULL, why);
         if (!bad) {
             char model_name[64];
@@ -418,20 +473,36 @@ WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
     }
     f->scale = scale;
     char skins[3][128];
-    for (int k = 0; k < 3; ++k) snprintf(skins[k], sizeof skins[k], "%s", dbc_text(&di, (uint32_t)row, 7 + k));
-    char base[260] = "";
-    for (uint32_t r = 0; r < md.rows; ++r)
-        if (dbc_u32(&md, r, 1) == model_id) { snprintf(base, sizeof base, "%s", dbc_text(&md, r, 3)); break; }
-    free(di_s); free(md_s);
-    if (!base[0]) { w_fail(why, W_ERR_NOT_FOUND, "display %d names model %u, which CreatureModelData lacks", display_id, model_id); return why->code; }
+    for (int k = 0; k < 3; ++k) snprintf(skins[k], sizeof skins[k], "%s", dbc_text(di.dbc, di.row, 7 + (uint32_t)k));
+    if (row(fs, display_id, "CreatureModelData", model_id, &md, why)) return why->code;
+    char named[260], base[260];
+    snprintf(named, sizeof named, "%s", dbc_text(md.dbc, md.row, 3));
+    if (!named[0]) { w_fail(why, W_ERR_NOT_FOUND, "display %d names model %u, whose CreatureModelData row has no path", display_id, model_id); return why->code; }
+    snprintf(base, sizeof base, "%s", named);
     char *dot = strrchr(base, '.');
     if (dot) *dot = '\0';
     char folder[260];
     snprintf(folder, sizeof folder, "%s", base);
     char *cut = strrchr(folder, '\\');
     if (cut) cut[1] = '\0'; else folder[0] = '\0';
-    snprintf(f->name, sizeof f->name, "display %d (%s)", display_id, cut ? base + (cut - folder) + 1 : base);
+    snprintf(f->name, sizeof f->name, "display %d (%.40s)", display_id, cut ? base + (cut - folder) + 1 : base);
 
+    /* a .mdx named as it is: a WC3 model a converted map brought (W02c
+     * names a map's own model so; the game's own rows say .mdx too, but
+     * the archives hold only the .m2). Asked for as named, with no
+     * placeholder: a WC3 model (MDLX) found goes to 061's reader; anything
+     * else, the game's .m2 beside the name, as before. */
+    size_t nlen = strlen(named);
+    if (nlen > 4 && !strcasecmp(named + nlen - 4, ".mdx")) {
+        AssetAnswer a;
+        WWhy inner;
+        if (asset_read(fs->assets, fs->chain, named, ASSET_MODEL, &a, &inner) == W_OK) {
+            int wc3 = a.len >= 4 && !memcmp(a.data, "MDLX", 4);
+            WErr bad = wc3 ? from_wc3(fs, f, a.data, a.len, scale, why) : W_OK;
+            asset_answer_free(&a);
+            if (wc3) return bad;
+        }
+    }
     char path[300];
     size_t mlen, slen;
     const char *from;

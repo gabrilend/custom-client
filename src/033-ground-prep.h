@@ -23,12 +23,17 @@
 #include "020-adt.h"
 #include "018-maps.h"
 #include "015-mpq.h"
+#include "060-resolver.h"
 
-/* Where tiles are prepared: the archives, the map's folder in them and its
- * blend-map form (from its WDT), the server's heights (for the light),
- * and the drawing origin points are placed relative to. */
+/* Where tiles are prepared: the archives, the resolver (NULL: the
+ * archives alone; a test map's folder comes first through it, 1109), the
+ * map's folder in them and its blend-map form (from its WDT), the
+ * server's heights (for the light), and the drawing origin points are
+ * placed relative to. The map's ground files (WDT, ADTs) are read
+ * through the resolver; the ground's pictures from the archives. */
 typedef struct {
     MpqChain *chain;
+    Resolver *assets;
     char      map_name[64];
     int       big_alpha;              /* 1: the map's blend maps are the 8-bit form (020-adt.h) */
     MapWorld *world;
@@ -73,7 +78,7 @@ typedef struct {
 
 /* Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
  * with `why`. */
-WErr  ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);
+WErr  ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);
 
 /* Prepares tile (tx, ty). `on_card`, when given, answers whether a
  * picture (by archive name) is already on the card (asked with `ctx`:

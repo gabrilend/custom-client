@@ -31,6 +31,7 @@
  * (`files_read` alone counts with atomic adds). */
 struct Prefetch {
     MpqChain       *chain;
+    Resolver       *assets;           /* the tiles' files through it (NULL: the chain's) */
     char            map[64];
     int             started;          /* 0: reading ahead is off (asked so, or the thread couldn't start) */
     pthread_t       thread;
@@ -83,11 +84,12 @@ static void read_tile(Prefetch *pf, int i, GroundPrep **ground, int *state)
     }
     if (!t) {
         snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", pf->map, pf->map, ty, tx);
-        unsigned char *s = touch(pf, path, &len);
-        if (!s) return;                                  /* open sea: no ground file */
+        AssetAnswer file;
+        if (asset_read(pf->assets, pf->chain, path, ASSET_GROUND, &file, &why)) return;   /* open sea: no ground file (or the load will say what is wrong) */
+        __atomic_add_fetch(&pf->files_read, 1, __ATOMIC_RELAXED);
         t = malloc(sizeof *t);
-        int bad = adt_read(s, len, 0, t, &why);   /* the blend-map form doesn't matter for names */
-        free(s);
+        int bad = adt_read(file.data, file.len, 0, t, &why);   /* the blend-map form doesn't matter for names */
+        asset_answer_free(&file);
         if (bad) { free(t); return; }                    /* the load itself will say what is wrong */
     }
     /* each ground picture */
@@ -166,10 +168,11 @@ static void *work(void *arg)
 /* }}} */
 
 /* {{{ prefetch_start, prefetch_prepare_ground, prefetch_tile, prefetch_wait, prefetch_counts, prefetch_stop */
-Prefetch *prefetch_start(MpqChain *chain, const char *map_name, int read_ahead)
+Prefetch *prefetch_start(MpqChain *chain, Resolver *assets, const char *map_name, int read_ahead)
 {
     Prefetch *pf = calloc(1, sizeof *pf);
     pf->chain = chain;
+    pf->assets = assets;
     snprintf(pf->map, sizeof pf->map, "%s", map_name);
     pf->working_on = -1;
     pthread_mutex_init(&pf->lock, NULL);

@@ -17,7 +17,17 @@ Where a figure's pictures come from:
   a creature (figure_from_display): the creature's display row in the
     client's CreatureDisplayInfo table names its model (through
     CreatureModelData) and up to three skins; a model's pictures of kind
-    11, 12 and 13 are those skins, found in the model's own folder. A
+    11, 12 and 13 are those skins, found in the model's own folder. The
+    rows come through the tables (074-tables.h): a converted map's own
+    rows first, then the archives'. A model named .mdx is read as
+    named first: a Warcraft III model a converted map brought (its
+    folder, through the resolver) is read by 061-mdx and stands as
+    made (its skeleton is 402's), its points turned from WC3 units
+    into yards, its pictures named inside it through the resolver (a
+    missing one is the resolver's checker), a replaceable picture
+    (team colour) left off until 404 paints it; any other name, or a
+    .mdx no place has, is the game's .m2 beside the name, as the
+    game's own rows mean it. A
     humanoid display (a townsperson: its row names a
     CreatureDisplayInfoExtra row) is built as a character instead, with
     that row's race, choices and clothes, wearing its baked skin sheet
@@ -27,14 +37,20 @@ Where a figure's pictures come from:
 ## What it offers
 
 - `type FigurePiece`
+  Yards per Warcraft III unit: W02's rule (world-edit-to-execute's
+  wc3_to_wow, map.lua's scale; 1 / 30.72), until a test map says its own.
 - `typedef struct Figures Figures;`
   A figure maker (the handle: docs/001, "Handles"): the archives figures
-  are read from, and the pictures already sent to the card, shared by
-  every figure it makes (a picture is read and sent once; eleven
-  sentinels share one set of hair). Its pictures last until figures_free,
-  so the figures it made must be freed first.
-- `Figures *figures_new(MpqChain *chain, Textures *textures);`
+  are read from, the resolver (NULL: the archives alone) and the tables
+  (074-tables.h) a creature's rows come from, and the pictures already
+  sent to the card, shared by every figure it makes (a picture is read
+  and sent once; eleven sentinels share one set of hair). Its pictures
+  last until figures_free, so the figures it made must be freed first;
+  the chain, resolver and tables must outlive it.
+- `Figures *figures_new(MpqChain *chain, Resolver *assets, Tables *tables, Textures *textures);`
 - `void figures_free(Figures *fs);`
+- `void figures_wc3_scale(Figures *fs, double yards_per_unit);`
+  A WC3 model's yards per unit from now on (above 0; else unchanged).
 - `type FigureItem`
   an item hung on the figure (173p): its own figure, the bone it hangs
   from and where on it (the model's attachment point), and its place in

@@ -22,14 +22,17 @@
 
 #include "033-ground-prep.h"
 #include "015-mpq.h"
+#include "060-resolver.h"
 
 /* A reader-ahead for map `map_name` (its tiles are
- * World\Maps\<map>\<map>_<ty>_<tx>.adt), its helper thread started
+ * World\Maps\<map>\<map>_<ty>_<tx>.adt, read through `assets`, or the
+ * chain alone when it is NULL; the pictures and models they name from
+ * the chain), its helper thread started
  * when `read_ahead` is 1; with 0 (or a thread that couldn't start, said on
  * the terminal) it reads nothing ahead and every take finds nothing
- * prepared. The chain must outlive it; freed with prefetch_free. */
+ * prepared. The chain and resolver must outlive it; freed with prefetch_free. */
 typedef struct Prefetch Prefetch;
-Prefetch *prefetch_start(MpqChain *chain, const char *map_name, int read_ahead);
+Prefetch *prefetch_start(MpqChain *chain, Resolver *assets, const char *map_name, int read_ahead);
 void      prefetch_free(Prefetch *pf);
 
 /* From now on, each tile read ahead has its ground prepared too, at

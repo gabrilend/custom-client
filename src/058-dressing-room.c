@@ -43,6 +43,7 @@
 #include "030-moves.h"
 #include "036-texture.h"
 #include "041-figure.h"
+#include "074-tables.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -87,6 +88,7 @@ static const float FOG_RANGE[2] = { 100000.0f, 100001.0f };
 typedef struct {
     MpqChain      chain;
     Textures      textures;
+    Tables       *tables;                           /* the archives' tables (074-tables.h; no resolver here) */
     Figures      *figures;
     Shader        shader;
     RenderTexture2D canvas;
@@ -279,7 +281,8 @@ int main(int argc, char **argv)
     WWhy why;
     if (mpq_chain_open(&room.chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
     textures_init(&room.textures, 5);                /* the sharpest filtering the card offers: nothing here is in a hurry */
-    room.figures = figures_new(&room.chain, &room.textures);
+    room.tables = tables_new(NULL, &room.chain);
+    room.figures = figures_new(&room.chain, NULL, room.tables, &room.textures);
     room.shader = figure_shader();
     SetShaderValue(room.shader, GetShaderLocation(room.shader, "sun_dir"), SUN_DIR, SHADER_UNIFORM_VEC3);
     SetShaderValue(room.shader, GetShaderLocation(room.shader, "sun_col"), SUN_COL, SHADER_UNIFORM_VEC3);
@@ -295,6 +298,7 @@ int main(int argc, char **argv)
     UnloadRenderTexture(room.canvas);
     UnloadShader(room.shader);
     figures_free(room.figures);
+    tables_free(room.tables);
     mpq_chain_close(&room.chain);
     CloseWindow();
     struct timespec end;

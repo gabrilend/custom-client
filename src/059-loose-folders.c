@@ -3,8 +3,9 @@
  *
  * For a general audience: three small pieces. A folder walk that lists
  * every file under a name folded to small letters; a reader for Lua
- * tables of plain data (the manifest's language, read without running
- * any Lua); and the manifest's fields, each held to its type and range.
+ * tables of plain data (the manifest's language, and a converted map's
+ * map.lua, read without running any Lua); and the manifest's fields,
+ * each held to its type and range.
  */
 #include "059-loose-folders.h"
 #include "013-errors.h"
@@ -21,6 +22,8 @@
 #define FS_DEPTH_MAX   32                 /* folders inside folders, at most (a link looping back stops here) */
 #define LUA_DEPTH_MAX  32                 /* tables inside tables, at most */
 #define MANIFEST_MAX   ((size_t)16 << 20) /* bytes a manifest may hold: far past any real pack's */
+#define MANIFEST_NOTE  "a manifest is a Lua table of plain data: docs/012, \"The pack manifest\""
+#define DATA_NOTE      "read as Lua data: strings, numbers, true, false, nil and tables, nothing else"
 
 /* {{{ fs_normalise */
 int fs_normalise(const char *in, char *out, size_t n)
@@ -141,7 +144,8 @@ const char *fs_index_at(const FsIndex *ix, int i, const char **real)
 /* {{{ the kinds' names */
 static const char *const KIND_NAMES[ASSET_KIND_COUNT] = {
     [ASSET_MODEL] = "model", [ASSET_TEXTURE] = "texture", [ASSET_ANIMATION] = "animation", [ASSET_PARTICLE] = "particle",
-    [ASSET_SOUND] = "sound", [ASSET_FONT] = "font", [ASSET_INTERFACE] = "interface",
+    [ASSET_SOUND] = "sound", [ASSET_FONT] = "font", [ASSET_INTERFACE] = "interface", [ASSET_TABLE] = "table",
+    [ASSET_GROUND] = "ground",
 };
 const char *asset_kind_name(AssetKind kind) { return (kind >= 0 && kind < ASSET_KIND_COUNT) ? KIND_NAMES[kind] : "(not a kind)"; }
 int asset_kind_from_name(const char *name)
@@ -185,9 +189,10 @@ static void arena_free(Chunk *a) { while (a) { Chunk *n = a->next; free(a); a = 
  * -- to the line's end, or --[[ ]]. Anything else (a name standing for a
  * value, a call, arithmetic) is refused with its line: a manifest is
  * data, never a program. */
-typedef enum { LV_NIL, LV_BOOL, LV_NUM, LV_STR, LV_TABLE } LvType;
+typedef enum { LV_NIL = LUA_DATA_NIL, LV_BOOL = LUA_DATA_BOOL, LV_NUM = LUA_DATA_NUMBER, LV_STR = LUA_DATA_TEXT, LV_TABLE = LUA_DATA_TABLE } LvType;
 typedef struct LvItem LvItem;
-typedef struct {
+typedef struct LuaValue Lv;
+struct LuaValue {
     LvType      t;
     int         line;
     int         b;
@@ -195,7 +200,7 @@ typedef struct {
     const char *s;
     LvItem     *first;                /* a table's items, in order */
     int         count, listed;        /* items; of them, those with no key */
-} Lv;
+};
 struct LvItem { const char *key; int key_line; Lv *val; LvItem *next; };
 
 typedef struct {
@@ -205,6 +210,7 @@ typedef struct {
     WWhy       *why;
     Chunk     **arena;
     int         depth;
+    const char *note;                 /* said after every refusal: what the text is read as */
 } Lex;
 
 static const char *const RESERVED[] = { "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if",
@@ -217,7 +223,7 @@ static int reserved(const char *w, size_t n)
 
 static WErr bad(Lex *x, const char *what)
 {
-    return w_fail(x->why, W_ERR_CORRUPT, "%s line %d: %s (a manifest is a Lua table of plain data: docs/012, \"The pack manifest\")", x->where, x->line, what);
+    return w_fail(x->why, W_ERR_CORRUPT, "%s line %d: %s (%s)", x->where, x->line, what, x->note);
 }
 
 /* {{{ static long_open: at "[", "[=", "[==" ... "[": the level (number of =), or -1 */
@@ -527,7 +533,7 @@ static WErr word_field(const Lv *t, const char *key, const char *const *words, i
 
 static const char *const ROUTES[]   = { "search", "generate", "hand", "restyle", NULL };
 static const char *const LINEAGES[] = { "derived", "independent", NULL };
-static const char *const KINDS[]    = { "model", "texture", "animation", "particle", "sound", "font", "interface", NULL };
+static const char *const KINDS[]    = { "model", "texture", "animation", "particle", "sound", "font", "interface", "table", "ground", NULL };
 static const char *const TOP_KEYS[]   = { "format", "name", "entries", NULL };
 static const char *const ENTRY_KEYS[] = { "replaces", "file", "kind", "id", "route", "lineage", "licence", "generation",
                                           "scores", "seal", "transcript", "wc3", NULL };
@@ -662,7 +668,7 @@ WErr pack_manifest_parse(const char *text, size_t len, const char *where, PackMa
 {
     *out = NULL;
     ManifestHeld *h = calloc(1, sizeof *h);
-    Lex x = { text, text + len, 1, where, why, &h->arena, 0 };
+    Lex x = { text, text + len, 1, where, why, &h->arena, 0, MANIFEST_NOTE };
     Lv *top;
     WErr rc = lua_data(&x, &top);
     if (!rc && top->t != LV_TABLE) rc = w_fail(why, W_ERR_REFUSED, "%s: it returns %s; a manifest returns a table", where, TYPE_NAMES[top->t]);
@@ -719,4 +725,65 @@ WErr pack_manifest_read(const char *path, PackManifest **out, WWhy *why)
 }
 
 double pack_entry_latest(const PackEntry *e) { return e->nscores ? e->scores[e->nscores - 1].score : -1; }
+/* }}} */
+
+/* {{{ Lua data, for any file of it (a converted map's map.lua) */
+struct LuaData { Chunk *arena; const Lv *top; };
+
+WErr lua_data_parse(const char *text, size_t len, const char *where, LuaData **out, WWhy *why)
+{
+    *out = NULL;
+    LuaData *d = calloc(1, sizeof *d);
+    Lex x = { text, text + len, 1, where, why, &d->arena, 0, DATA_NOTE };
+    Lv *top;
+    WErr rc = lua_data(&x, &top);
+    if (rc) { lua_data_free(d); return rc; }
+    d->top = top;
+    *out = d;
+    return W_OK;
+}
+
+WErr lua_data_read(const char *path, size_t most, LuaData **out, WWhy *why)
+{
+    *out = NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) return w_fail(why, errno == ENOENT ? W_ERR_NOT_FOUND : W_ERR_IO, "no %s (%s)", path, strerror(errno));
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0) { fclose(f); return w_fail(why, W_ERR_IO, "can't look at %s (%s)", path, strerror(errno)); }
+    if (!S_ISREG(st.st_mode)) { fclose(f); return w_fail(why, W_ERR_REFUSED, "%s is not a file", path); }
+    if ((size_t)st.st_size > most) { fclose(f); return w_fail(why, W_ERR_REFUSED, "%s is %lld bytes; this file is never over %zu", path, (long long)st.st_size, most); }
+    size_t want_len = (size_t)st.st_size;
+    char *text = malloc(want_len + 1);
+    size_t len = fread(text, 1, want_len, f);
+    int err = ferror(f) || len != want_len;
+    fclose(f);
+    WErr rc = err ? w_fail(why, W_ERR_IO, "can't read %s (%zu of %zu bytes)", path, len, want_len) : lua_data_parse(text, len, path, out, why);
+    free(text);
+    return rc;
+}
+
+void lua_data_free(LuaData *d)
+{
+    if (!d) return;
+    arena_free(d->arena);
+    free(d);
+}
+
+const LuaValue *lua_data_top(const LuaData *d) { return d->top; }
+LuaDataType lua_value_type(const LuaValue *v) { return v ? (LuaDataType)v->t : LUA_DATA_NIL; }
+const char *lua_type_name(LuaDataType t) { return (t >= LUA_DATA_NIL && t <= LUA_DATA_TABLE) ? TYPE_NAMES[t] : "(not a type)"; }
+int lua_value_line(const LuaValue *v) { return v ? v->line : 0; }
+double lua_value_number(const LuaValue *v) { return v && v->t == LV_NUM ? v->n : 0; }
+int lua_value_true(const LuaValue *v) { return v && v->t == LV_BOOL && v->b; }
+const char *lua_value_text(const LuaValue *v) { return v && v->t == LV_STR ? v->s : NULL; }
+const LuaValue *lua_value_field(const LuaValue *t, const char *key) { return t && t->t == LV_TABLE ? field(t, key) : NULL; }
+int lua_value_listed(const LuaValue *t) { return t && t->t == LV_TABLE ? t->listed : 0; }
+const LuaValue *lua_value_item(const LuaValue *t, int i)
+{
+    if (!t || t->t != LV_TABLE || i < 1) return NULL;
+    int n = 0;
+    for (const LvItem *it = t->first; it; it = it->next)
+        if (!it->key && ++n == i) return it->val;
+    return NULL;
+}
 /* }}} */

@@ -41,10 +41,20 @@
  * A map handed in by world-edit-to-execute's editor (its Test Map button;
  * issue 1109, 067-test-map.h):
  *   --test-map FOLDER the converted map's build folder, in front of the
- *                     asset overlays for this run only
+ *                     asset overlays for this run only. Its map.lua
+ *                     (073-converted-map.h, written by world-edit-to-
+ *                     execute's W02c) says which map to open (its number
+ *                     and its folder under World\Maps) and where she
+ *                     starts, so --map isn't taken with it. The map's own
+ *                     table rows come before the archives', row by row
+ *                     (074-tables.h); its ground, horizon and creature
+ *                     looks are read from the folder first; while the
+ *                     server has no map files for it (W02d makes them)
+ *                     her ground's heights come from its own ground files
+ *                     (075-adt-heights.h); --world is FOLDER/world unless given
  *   --receipt FILE    where the goodbye receipt goes when the client ends
  *                     (068-goodbye.h); a crash leaves none
- *   --camera X,Y      start there (world yards) instead of the map's start
+ *   --camera X,Y      start there (world yards) instead of map.lua's start
  *   --realm HOST:PORT the local AzerothCore's login server (127.0.0.1:3724)
  *   --account NAME    the account; its password only from W_CLIENT_PASSWORD
  * An option the client doesn't know, or one short of its values, stops the
@@ -76,6 +86,9 @@
 #include "060-resolver.h"
 #include "067-test-map.h"
 #include "068-goodbye.h"
+#include "073-converted-map.h"
+#include "074-tables.h"
+#include "075-adt-heights.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -86,6 +99,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* {{{ the map and the start (--map ID X Y chooses another; the folder
@@ -210,6 +224,10 @@ typedef struct {
     TestMap *test_map;                                /* a map handed in by the editor (067-test-map.h; 1109), or NULL */
     Goodbye *bye;                                     /* its goodbye receipt (068-goodbye.h), or NULL */
     Resolver *assets;                                 /* a test map's resolver, its folder first of the overlays (060-resolver.h) */
+    Tables   *tables;                                 /* the client's tables, per row, through the resolver in a test-map run (074-tables.h) */
+    ConvertedMap conv;                                /* a test map's map.lua: which map, where she starts (073-converted-map.h) */
+    AdtHeights *adt_heights;                          /* a test map's heights from its own ground files, while the server has none (075) */
+    char   world_in_map[700];                         /* a test map's default --world: <folder>/world */
 } App;
 /* }}} */
 /* build one spawn's figure; 0, or 1 when its look can't be built (said
@@ -446,6 +464,7 @@ int main(int argc, char **argv)
     float  dive_s = 0;                                   /* --dive: then hold X (swim down) this many world-seconds */
     float  wait_s = 0;                                   /* --wait: then this many world-seconds more before the picture */
     int    go_to = 0;                                    /* --goto: one world-second in, she is moved to (goto_x, goto_y) */
+    int    map_given = 0;                                /* --map: refused in a test-map run, whose map.lua says which map */
     double goto_x = 0, goto_y = 0;
     /* the time of day: the original follows the realm's clock, which is
      * real time; until the client talks to a server, this machine's own
@@ -495,7 +514,7 @@ int main(int argc, char **argv)
             if (character_wear_text(app->WEAR_OVER, argv[++i], bad, sizeof bad))
                 return start_failed(app, 2, "--wear: \"%s\" isn't slot:look (slots: shirt legs feet wrists chest hands tabard waist head shoulders back mainhand offhand)", bad);
         }
-        else if (!strcmp(argv[i], "--map") && i + 3 < argc) { app->map_id = atoi(argv[++i]); app->start_x = atof(argv[++i]); app->start_y = atof(argv[++i]); }
+        else if (!strcmp(argv[i], "--map") && i + 3 < argc) { app->map_id = atoi(argv[++i]); app->start_x = atof(argv[++i]); app->start_y = atof(argv[++i]); map_given = 1; }
         else if (!strcmp(argv[i], "--goto") && i + 2 < argc) { goto_x = atof(argv[++i]); goto_y = atof(argv[++i]); go_to = 1; }
     }
     if (!maps || !client) {
@@ -503,7 +522,24 @@ int main(int argc, char **argv)
                         "       [--test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME]]   (the password from W_CLIENT_PASSWORD)\n");
         return start_failed(app, 2, "the client needs --maps (the server's map files) and --client (the game's Data folder); scripts/run gives both");
     }
-    /* --camera (1109): she starts there, the camera behind her as at any start */
+    /* {{{ a test map's own map (1109, open question 4): map.lua in its
+     * folder (073-converted-map.h) says which map and where she starts;
+     * its creatures are in the folder's world/ unless --world says */
+    if (app->test_map) {
+        const char *folder = test_map_folder(app->test_map);
+        if (map_given) return start_failed(app, 2, "--map can't be given with --test-map: the test map's %s/%s says which map it is", folder, CONVERTED_MAP_FILE);
+        if (converted_map_read(folder, &app->conv, &why)) return start_failed(app, 1, "test map: %s", why.text);
+        app->map_id = app->conv.id;
+        app->start_x = app->conv.start_x; app->start_y = app->conv.start_y;
+        if (!app->world_dir) {
+            snprintf(app->world_in_map, sizeof app->world_in_map, "%s/world", folder);
+            app->world_dir = app->world_in_map;
+        }
+        printf("test map: map %d, World\\Maps\\%s (\"%s\"), its start at (%.1f, %.1f)\n", app->conv.id, app->conv.directory,
+               app->conv.name[0] ? app->conv.name : app->conv.directory, app->conv.start_x, app->conv.start_y);
+    }
+    /* }}} */
+    /* --camera (1109): she starts there instead, the camera behind her as at any start */
     double camera_x, camera_y;
     if (app->test_map && test_map_camera(app->test_map, &camera_x, &camera_y)) { app->start_x = camera_x; app->start_y = camera_y; }
 
@@ -516,10 +552,56 @@ int main(int argc, char **argv)
     int win_w, win_h;
     settings_resolution(settings_text(app->settings, "gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
 
-    maps_world_init(&app->world, maps, app->map_id);
+    /* {{{ the archives, and in a test-map run the resolver in front of them
+     * (1109): opened before the ground, since a test map's heights may
+     * come from its own ground files. A folder that isn't there stops the
+     * start by name. */
+    if (mpq_chain_open(&app->chain, client, "enUS", &why)) return start_failed(app, 1, "%s", why.text);
+    if (app->test_map) {
+        ResolverPlace place;
+        if (test_map_place(app->test_map, app->settings, assets_dir, &app->chain, &place, &why) || resolver_open(&place, &app->assets, &why))
+            return start_failed(app, 1, "%s", why.text);
+        printf("test map: %s, the first of %d overlay%s\n", test_map_folder(app->test_map), place.noverlays, place.noverlays == 1 ? "" : "s");
+    }
+    app->tables = tables_new(app->assets, &app->chain);          /* a test map's rows first, per row (074-tables.h) */
+    /* }}} */
+    /* {{{ the map's folder (Map.dbc: 1 id, 2 its folder under World\Maps), a converted map's own row first */
+    {
+        TableRow mr;
+        if (tables_row(app->tables, "Map", (uint32_t)app->map_id, &mr, &why)) return start_failed(app, 1, "Map.dbc: %s", why.text);
+        snprintf(app->map_name, sizeof app->map_name, "%s", dbc_text(mr.dbc, mr.row, 2));
+        if (app->test_map && strcasecmp(app->map_name, app->conv.directory))
+            return start_failed(app, 1, "the test map's %s names map %d's folder %s, but its Map.dbc row (from %s, %s) names %s",
+                                CONVERTED_MAP_FILE, app->map_id, app->conv.directory, asset_source_name(mr.source), mr.from, app->map_name);
+        if (app->test_map) printf("test map: map %d's row from %s (%s)\n", app->map_id, asset_source_name(mr.source), mr.from);
+    }
+    /* }}} */
+    /* {{{ the ground's heights: the server's map files; in a test-map run
+     * whose map the server has none for yet (world-edit-to-execute's W02d
+     * writes them), the map's own ground files, made into the server's
+     * tiles as its extractor would (075-adt-heights.h) */
+    int from_adts = 0;
+    if (app->test_map) {
+        int tx0, ty0;
+        WWhy no_tile;
+        maps_tile_of((float)app->start_x, (float)app->start_y, &tx0, &ty0);
+        MapTile *t = maps_load_tile(maps, app->map_id, tx0, ty0, &no_tile);
+        if (t) maps_free_tile(t);
+        else if (no_tile.code == W_ERR_NOT_FOUND) from_adts = 1;
+        else return start_failed(app, 1, "the server's map files for map %d: %s", app->map_id, no_tile.text);
+    }
+    if (from_adts) {
+        if (adt_heights_open(app->assets, &app->chain, app->map_name, &app->adt_heights, &why)) return start_failed(app, 1, "%s", why.text);
+        char what[300];
+        snprintf(what, sizeof what, "map %d's own ground files (World\\Maps\\%s)", app->map_id, app->map_name);
+        maps_world_init_source(&app->world, app->map_id, adt_heights_tile, app->adt_heights, what);
+        printf("ground: the server's map files (%s) have none for map %d yet; her ground's heights come from %s\n", maps, app->map_id, what);
+    } else maps_world_init(&app->world, maps, app->map_id);
     float gx, gy;
     float z = maps_world_height(&app->world, (float)app->start_x, (float)app->start_y, &gx, &gy);
-    if (z < -10000) return start_failed(app, 1, "no ground at the start (%.1f, %.1f) in map %d from %s: is the maps folder right?", app->start_x, app->start_y, app->map_id, maps);
+    if (z < -10000) return start_failed(app, 1, "no ground at the start (%.1f, %.1f) in map %d from %s%s", app->start_x, app->start_y, app->map_id, app->world.dir,
+                                        app->test_map ? "" : ": is the maps folder right?");
+    /* }}} */
     /* the steepest walkable ground, from the server's navigation tiles
      * (data-files/mmaps beside data-files/maps) */
     char mmaps[600];
@@ -528,6 +610,14 @@ int main(int argc, char **argv)
     if (!cut) return start_failed(app, 1, "the maps folder %s doesn't end in /maps; can't find mmaps beside it", maps);
     strcpy(cut, "/mmaps");
     float max_slope = navmesh_slope_read(mmaps, app->map_id, &why);
+    /* a test map has none until W02d makes them: the server's rule is one
+     * rule for every map it builds, so another map's tiles say it */
+    static const int STOCK_MAPS[] = { 1, 0, 530, 571 };
+    for (int k = 0; max_slope < 0 && app->test_map && k < (int)(sizeof STOCK_MAPS / sizeof STOCK_MAPS[0]); ++k) {
+        WWhy other;
+        max_slope = navmesh_slope_read(mmaps, STOCK_MAPS[k], &other);
+        if (max_slope >= 0) printf("steep ground: map %d has no navigation tiles yet; the server's rule from map %d's: %.1f degrees\n", app->map_id, STOCK_MAPS[k], max_slope);
+    }
     if (max_slope < 0) return start_failed(app, 1, "%s", why.text);
     mover_init(&app->elf, app->start_x, app->start_y, z, START_O + face_deg * PI / 180, SPEED, max_slope);
     app->view.yaw = (float)app->elf.o + (app->view.yaw - (float)START_O);   /* the camera keeps its place behind her */
@@ -544,21 +634,9 @@ int main(int argc, char **argv)
     textures_init(&app->textures, (int)settings_num(app->settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = figure_shader();                  /* the figures' bending and lighting (041-figure.h) */
-    if (mpq_chain_open(&app->chain, client, "enUS", &why)) return start_failed(app, 1, "%s", why.text);
-    /* {{{ a test map's folder in front of the asset overlays, for this run
-     * only (1109): the resolver opens on it now, so a folder that isn't
-     * there stops the start by name. The readers still ask the archives
-     * directly (each moves to the resolver with its own issue, docs/045),
-     * so nothing is drawn from the folder yet. */
-    if (app->test_map) {
-        ResolverPlace place;
-        if (test_map_place(app->test_map, app->settings, assets_dir, &app->chain, &place, &why) || resolver_open(&place, &app->assets, &why))
-            return start_failed(app, 1, "%s", why.text);
-        printf("test map: %s, the first of %d overlay%s\n", test_map_folder(app->test_map), place.noverlays, place.noverlays == 1 ? "" : "s");
-    }
-    /* }}} */
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
-    app->figures = figures_new(&app->chain, &app->textures);                      /* makes her, the bystanders and the creatures (041-figure.h) */
+    app->figures = figures_new(&app->chain, app->assets, app->tables, &app->textures);   /* makes her, the bystanders and the creatures (041-figure.h) */
+    if (app->test_map) figures_wc3_scale(app->figures, app->conv.wc3_scale);       /* a map's own WC3 models, in yards by its rule */
     if (character_start_outfit(&app->chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why)) return start_failed(app, 1, "%s", why.text);
     for (int k = 0; k < SLOT_COUNT; ++k) if (app->WEAR_OVER[k]) app->LOOK.items[k] = app->WEAR_OVER[k];
     if (figure_from_character(app->figures, &app->her, &app->LOOK, &why)) return start_failed(app, 1, "%s", why.text);
@@ -588,22 +666,11 @@ int main(int argc, char **argv)
         printf("bystander: %s\n", f->name);
         ++app->nothers;
     }
-    {
-        size_t len;
-        const char *from;
-        unsigned char *mt = mpq_chain_read(&app->chain, "DBFilesClient\\Map.dbc", &len, &from);
-        Dbc maps_table;
-        if (!mt || dbc_open(&maps_table, mt, len, &why)) return start_failed(app, 1, "Map.dbc: %s", mt ? why.text : "not in the archives");
-        int found = 0;
-        for (uint32_t r = 0; r < maps_table.rows && !found; ++r)
-            if ((int)dbc_u32(&maps_table, r, 1) == app->map_id) { snprintf(app->map_name, sizeof app->map_name, "%s", dbc_text(&maps_table, r, 2)); found = 1; }
-        free(mt);
-        if (!found) return start_failed(app, 1, "no map %d in Map.dbc", app->map_id);
-    }
-    if (ground_place_init(&app->ground_place, &app->chain, app->map_name, &app->world, app->ox, app->oy, &why) || !(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
+    /* the ground, its files through the resolver in a test-map run (its folder first) */
+    if (ground_place_init(&app->ground_place, &app->chain, app->assets, app->map_name, &app->world, app->ox, app->oy, &why) || !(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
         return start_failed(app, 1, "%s", why.text);
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
-    app->pf = prefetch_start(&app->chain, app->map_name, app->read_ahead);
+    app->pf = prefetch_start(&app->chain, app->assets, app->map_name, app->read_ahead);
     prefetch_prepare_ground(app->pf, &app->ground_place, ground_on_card, app->ground);
     app->solids = collide_new(app->ox, app->oy);
     app->waters = liquid_new();
@@ -611,7 +678,7 @@ int main(int argc, char **argv)
     if (!app->water) return start_failed(app, 1, "%s", why.text);
     app->doodads = doodads_new(&app->chain, &app->textures, app->solids, app->waters, app->water, &why);
     if (!app->doodads) return start_failed(app, 1, "%s", why.text);
-    app->horizon = horizon_new(&app->chain, app->map_name, app->ox, app->oy, &why);
+    app->horizon = horizon_new(&app->chain, app->assets, app->map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
     if (light_open(&lights, &app->chain, &why)) return start_failed(app, 1, "%s", why.text);
@@ -974,9 +1041,13 @@ int main(int argc, char **argv)
     free(app->built_of);
     creatures_free(&app->spawns);
     if (app->assets) resolver_report(app->assets, stdout);
+    if (app->test_map) tables_report(app->tables, stdout);
+    if (app->adt_heights) printf("ground: %d tiles' heights made from the map's own ground files\n", adt_heights_made(app->adt_heights));
+    maps_world_free(&app->world);                             /* before the heights' source it may ask */
+    adt_heights_free(app->adt_heights);
+    tables_free(app->tables);                                 /* before the resolver and archives it reads from */
     resolver_free(app->assets);                               /* before the archives it reads from */
     mpq_chain_close(&app->chain);
-    maps_world_free(&app->world);
     settings_free(app->settings);
     /* the goodbye receipt, last (1109): its being there says the run ended
      * by itself, not in a crash */

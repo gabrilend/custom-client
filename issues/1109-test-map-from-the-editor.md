@@ -88,12 +88,116 @@ editor. It took any argument it didn't know and passed over it, and an
 option short of its values (`--map 1 2`) was dropped silently. Nothing
 was written when it ended.
 
-Not built yet: drawing anything from the map's folder (the readers
-still ask the archives directly; 302, 401 and 204 move them to the
-resolver), choosing the map by the converted map's own registration
-(open question 4), logging in, and the `lost-connection` ending (Phase
-5's 609). The client reads no WC3 ground or WC3 models yet (pictures,
-yes: 107a).
+**Step 1b is built** (2026-11-04, the same background work): a test-map
+run opens the map world-edit-to-execute converted, not Kalimdor. The
+converter's output is its W02c's (world-edit-to-execute draft PR #243,
+`src/wowbuild/`): a build folder with `World/Maps/<dir>/` (the WDT, WDL
+and ADTs), `DBFilesClient/<Table>.dbc` holding only the map's own rows,
+`map.lua`, `world/creatures-<id>.tsv` (035's format) and `patch-W.MPQ`.
+
+- **`src/073-converted-map.c`** reads the folder's `map.lua` with 059's
+  data reader (made public for it: `lua_data_parse`, `lua_data_read` and
+  the value getters; no Lua runs): format 1, the map's number (1 to
+  65535) and its folder under `World\Maps` (1 to 48 letters, digits
+  and `_`, never a path), its name and area, the start (x, y, and z
+  when given), the rule from WC3 positions to world yards
+  (`wc3_to_wow`: scale, x0, y0), and the creature list (a path inside
+  the folder). Each field is held to its type and range and a refusal
+  names it and its line; fields it doesn't read are passed over, so
+  the converter's later parts can add their own.
+- **`src/074-tables.c`** reads the client's tables per row (106): every
+  place that holds a table (packs, server folders, overlays, then the
+  archives) is read once, and a row is answered by the first copy
+  holding its number. The map's own rows win over the archives' rows of
+  the same number, and every other row is still the archives'. Copies
+  of different widths are refused, naming both. Map.dbc (043) and
+  CreatureDisplayInfo, CreatureDisplayInfoExtra and CreatureModelData
+  (041's `figure_from_display`) are read through it in every run; with
+  no resolver (every run but a test map's) the archives are the one copy.
+- **The resolver** (060) has two new kinds with no placeholder, `table`
+  and `ground` (a made-up table row or ground tile would be wrong, so
+  no place having one is the answer, quietly), and two new calls:
+  `asset_resolve_all` (every place's copy, for 074) and `asset_read`
+  (the first copy, never a placeholder, through the resolver when there
+  is one, else the archives alone). The ground's readers ask through it:
+  the WDT and ADTs (033, 034) and the WDL (039).
+- **Heights.** She walks on the server's map files (018), which don't
+  exist for a converted map until W02d writes them. **`src/075-adt-
+  heights.c`** makes the server's tile from the map's own ADT the way
+  the extractor does (corners and centres side by side, each chunk's
+  holes as the tile's), and 018 takes it as a tile source
+  (`maps_world_init_source`), so the same arithmetic answers. In a
+  test-map run the server's files are used when they have the start's
+  tile; otherwise the map's ADTs. With neither, the start stops with
+  "no ground at the start (x, y) in map N from ..." and a receipt. The
+  steepest walkable slope comes from the server's navigation tiles,
+  which a converted map hasn't either: the stock maps' (1, 0, 530,
+  571; the server's rule is one number for every map), said on the
+  terminal.
+- **WC3 models** (401 step 2, 061): a creature look whose model row
+  names an `.mdx` the map brought (CreatureModelData's path as written,
+  `war3mapImported\orc.mdx`) is read through the resolver; when its
+  bytes start `MDLX` it goes through `mdx_read` instead of the `.m2`
+  swap 041 always made. Any other name (the game's own models, which
+  the converter writes with `.mdx` too) still swaps to `.m2` and reads
+  the archives, as before.
+- **`src/043-main.c`**: in a test-map run, `map.lua` gives the map and
+  the start; `--camera` overrides the start; `--map` is refused with
+  `--test-map`; Map.dbc's row (through 074) must name the folder
+  `map.lua` names. `--world` defaults to `<folder>/world`, and
+  `scripts/run` no longer adds its own `--world` to a test-map run. The
+  archives and the resolver now open before the ground (they were
+  opened after the window), since the ground reads through them. At the
+  end a test-map run prints the tables' report (each table's copies and
+  how many rows each answered) and how many ground tiles came from ADTs.
+
+Checked (`tests/044-test-client.c`, "a converted map's folder", before
+the archives, so no game data needed): 059's data reader on its own;
+`map.lua` as W02c writes it, its optional fields left out, and
+eighteen broken ones refused with the field and its line (a format 2,
+an id past 16 bits or not whole, a folder that is a path or too long,
+no start, a start off the world, a scale of 0, a creature list leaving
+the folder ...); a made-up archive and a map folder each holding Map
+and AreaTable: the map's row 900 from its folder, a row both have
+answered by the map's, rows only the archives have still theirs,
+copies of different widths refused (106's acceptance), a table nowhere
+named, no placeholder for a table or a ground file, the same tables
+without a resolver; a tilted plane written as an ADT coming back as
+itself through 018's arithmetic at 400 places, a chunk's holes, a
+chunk out of place refused. With a converted build folder (the third
+argument, else `assets/test-map-build`; skipped when there is none),
+the converter's real output, made here by running W02c's
+`wow-convert.lua` on Master Crafters Final Conquest: its Map row 900
+from its folder naming its folder, all seven of its tables as wide as
+3.3.5a's, its start equal to WC3's start by its own rule, the ground
+at the start from its own ADTs 4.167 yards (`map.lua`'s `start.z`
+4.167), all 316 creatures read and standing within 0.48 yards of that
+ground, and its one creature look naming its own `orc.mdx` read by
+061 with something to draw. Clean under the address and
+undefined-behaviour checkers.
+
+Away from raylib, as before: every drawing part, 043 and 058 compile
+with `-Wall -Wextra -Werror` against stand-in headers (never
+committed), and both programs link with every one of their own symbols
+found. 043's start was run on the converted folder, linked with stubs
+that stop at the first raylib call: it read `map.lua`, found Map row
+900 in the folder, took the ground from the ADTs and the slope from a
+stock map's tile, and reached the window; a `--camera` off the map
+stopped with "no ground at the start" in the receipt; `--map` with
+`--test-map` was refused. Under the address and undefined-behaviour
+checkers, no memory errors on any of these (a failed start leaves its
+memory to the exit, as it did before). A
+window has not been opened on the converted map: `scripts/build
+--test` and a Test Map run on the owner's machine are the full check.
+
+Not built yet: the map's ground drawn with WC3's tilesets (302: the
+ADTs are drawn as any ADT, their pictures from the archives); a WC3
+model posed and animated (it stands in its rest pose; 402 step 4, PR
+#7) or team-coloured (404: its replaceable pictures are left off); a
+missing table row as a placeholder (106 wants one: still an error
+naming the table and row); the resolver for pictures, doodads and
+buildings (204, 302); logging in, and the `lost-connection` ending
+(Phase 5's 609).
 
 ## Intended behavior
 
@@ -210,10 +314,13 @@ return {
 1. ~~The launch option: open a converted map folder as an overlay, skip
    the login and character screens, place the camera.~~ Done
    (2026-11-04): 067 and 068, wired into 043, with the receipt
-   ("A clean ending"). No screens exist to skip yet; the map's folder
-   is in the resolver, which no reader asks yet; the map is the one
-   `--map` names (Kalimdor by default) until the converted map says
-   its own (open question 4).
+   ("A clean ending"). No screens exist to skip yet. (Then, the map's
+   folder was in a resolver no reader asked, and the map was `--map`'s;
+   step 1b changed both.)
+1b. ~~Open the converted map: its map, start, tables, ground and own
+   models from the build folder.~~ Done (2026-11-04): 073, 074, 075,
+   the resolver's table and ground kinds, 041 reading a map's `.mdx`
+   (open question 4 answered; decisions 12 to 19).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -293,6 +400,56 @@ return {
 11. **Exit statuses** as listed above: 2 for the options, as the usage
     message always gave; 1 for other failures.
 
+## Decisions (2026-11-04, step 1b, answered here; the owner may overturn any)
+
+12. **`map.lua` names the map, and only it.** The converter knows which
+    map it made; a `--map` the editor passed could disagree with the
+    folder. So `--map` with `--test-map` stops the start (a usage error,
+    2), and Map.dbc's row must name the folder `map.lua` names (any
+    capitals), or the start stops naming both.
+13. **A table is every place's copy, read per row**, as 106 asks: the
+    first copy holding a row's number answers it. A copy of another
+    width is refused, not read, since its columns would be misread
+    (106's acceptance, by comparing the copies' widths: there are no
+    layout files yet). A row nobody has is still an error naming the
+    table and the row, not a placeholder: 106's "unknown spell 133"
+    needs its layouts first, and a made-up Map row would open nothing.
+14. **Tables and ground files have no placeholder** in the resolver. A
+    checker or a box stands in for a picture or a model and is still
+    something to see; a made-up table or ground tile would be wrong
+    data, so no place having one is the answer (`W_ERR_NOT_FOUND`),
+    with no warning or count of a placeholder.
+15. **Heights from the ADTs only when the server has none.** The
+    server's map files are what the server will check her against; when
+    they have the start's tile (W02d has run), they are used, even in a
+    test-map run. Otherwise the ADT's heights are turned into the
+    server's tile the way the extractor does it, so the heights agree
+    with what W02d will write. A server tile that is there but broken
+    stops the start rather than falling back.
+16. **The slope from a stock map.** The server's walkable-slope rule is
+    one number for all maps (its navigation tiles all carry the same),
+    so a map with no tiles yet takes the first stock map's that has
+    them (1, 0, 530, 571), and says which.
+17. **The archives and the resolver open before the ground**, before
+    the window: the ground's readers now read through them. Nothing that
+    needs a window happens before.
+18. **A map's own WC3 model is told by its name and its bytes.** A
+    CreatureModelData path ending in `.mdx` is asked for as written,
+    folder first; read as MDX only when its bytes start `MDLX` (so a
+    pack's `.m2` under that name still works). The game's own models,
+    which W02c also names `.mdx`, aren't in the folder and go on to the
+    `.m2` in the archives, as before. The model's size: the look's
+    scale times `map.lua`'s `wc3_to_wow.scale` (yards per WC3 unit).
+    Its pictures come through the resolver (the checker stands in for
+    a missing one); its replaceable pictures (team colour, 404) are
+    left off; its layers that start hidden (alpha 0 at rest: a death
+    or alternate part) aren't drawn. It stands in its rest pose until
+    WC3 posing (402 step 4) lands.
+19. **PR #2's MDX reader is merged into this branch**, since 041 needs
+    `mdx_read`, and this branch is stacked on #4 (and #1). Until #2
+    lands, this branch's diff shows #2's files too; once it does, a
+    merge of the base makes them drop out.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -340,13 +497,15 @@ return {
    this client (it knows when it needs a server), or a small shared
    launcher both call?
 
-4. **Which map a test map is.** The converted map registers itself
-   (W02: its Map.dbc row, its folder of ground tiles), but the client
-   still opens the map `--map` names, and reads ground from the archives
-   only. When 302 reads WC3 ground and the readers ask the resolver,
-   should the client take the map's id from a file in the build folder
-   (which W02 would write, say `map.lua`), or from a `--map` the editor
-   passes? Until answered: `--map`, defaulting to Kalimdor.
+4. ~~**Which map a test map is.**~~ Answered 2026-11-04 (decision 12):
+   from the build folder's `map.lua`, which world-edit-to-execute's W02c
+   writes; `--map` isn't taken with `--test-map`. The question as asked:
+   The converted map registers itself (W02: its Map.dbc row, its folder
+   of ground tiles), but the client still opens the map `--map` names,
+   and reads ground from the archives only. When 302 reads WC3 ground
+   and the readers ask the resolver, should the client take the map's
+   id from a file in the build folder (which W02 would write, say
+   `map.lua`), or from a `--map` the editor passes?
 5. **Being stopped.** When the editor closes while the client runs (913:
    it stops its server then), or the player presses Ctrl-C in a
    terminal, the client is killed and leaves no receipt, which reads as
@@ -362,6 +521,11 @@ return {
   as an overlay; wire-frames), world-edit-to-execute's W02 (conversion).
 - Built here for step 1: `src/067-test-map.info.md` (the launch),
   `src/068-goodbye.info.md` (the receipt); stacked on 105a's resolver.
+  For step 1b: `src/073-converted-map.info.md` (`map.lua`),
+  `src/074-tables.info.md` (tables per row),
+  `src/075-adt-heights.info.md` (heights from the ADTs).
+- world-edit-to-execute's W02c (map registration and output forms,
+  draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103
   selection, 1104 orders are what Test Map plays with).
 - world-edit-to-execute issues 901-912 (the editor), its

@@ -42,7 +42,9 @@
 #            password in W_CLIENT_PASSWORD. A failure here, before the client
 #            starts (no maps folder, no client, a build that fails), leaves no
 #            receipt, which the editor reports as a crash; this script's own
-#            message says why.
+#            message says why. The client opens the map the folder's map.lua
+#            names, its creatures from the folder's world/ (no --world is
+#            given then).
 
 # {{{ set_dir
 DIR="/mnt/kaun/custom-client"
@@ -62,7 +64,10 @@ CLIENT="${CLIENT:-/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data}"
 SETTINGS="${DIR}/assets/settings/Config.wtf"
 mkdir -p "$(dirname "${SETTINGS}")"
 
-ARGS=(--maps "${MAPS}" --client "${CLIENT}" --settings "${SETTINGS}" --world "${DIR}/assets/world" --assets "${DIR}/assets")
+ARGS=(--maps "${MAPS}" --client "${CLIENT}" --settings "${SETTINGS}" --assets "${DIR}/assets")
+# the creature lists: a test map's own (its folder's world/, which the
+# client takes when no --world is given; 1109), else assets/world
+[[ " $* " == *" --test-map "* ]] || ARGS+=(--world "${DIR}/assets/world")
 if [[ "${1:-}" == "--shot" ]]; then
     shift
     ARGS+=(--shot "${DIR}/tmp/shared-memory/shot.png")
