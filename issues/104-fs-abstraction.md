@@ -2,10 +2,23 @@
 
 ## Current behavior
 
-There is no abstraction over file I/O. Every caller would reach for
-`fopen` directly, scatter `errno` checks across the codebase, and have no
-shared notion of where the asset root, the replacement packs or the loose
-overlay folders live.
+Partly built (2026-11-04, for the asset resolver,
+[105a](./105a-loose-overlays-and-asset-resolver.md)): the case-folded
+folder index, `src/059-loose-folders.c`, in the reader library.
+`fs_index_folder` walks a folder once (through links, 32 deep at most)
+and lists every file under its name in small letters with `/`;
+`fs_index_find` finds a file in any spelling (a pack's
+`Creature/Wolf/Wolf.M2` by `creature\wolf\wolf.m2`, checked in the
+test program); two names differing only by capitals fail to index,
+naming both (checked); a folder that isn't there is `W_ERR_NOT_FOUND`.
+`fs_normalise` folds a name. Errors are `WErr` with a sentence
+(013-errors.h), never `errno`.
+
+Not built: everything else below. Callers still `fopen` files
+themselves; there is no `fs_read_all`, no stream, no `fs_join` and the
+rest, no allocator hook, and the asset roots come from 105a's settings
+(`assetPacks`, `assetOverlays`) and `scripts/run`'s arguments, not
+from this layer.
 
 ## Intended behavior
 
