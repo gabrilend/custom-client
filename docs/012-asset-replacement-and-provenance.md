@@ -291,7 +291,7 @@ while any source can give a real one.
    (the list first, then only the missing files, over rmail), `604`
    (every file stored once, by the hash of its bytes, so nothing held is
    fetched again) and `605` (the local store those land in). The client
-   uses them rather than a second copy, as with the engine (1109). An
+   uses them rather than a second copy. An
    asset a server adds while a player is on reaches them at their next
    login. The two shapes as they were weighed (the second "might be
    cheaper / easier", the owner):
