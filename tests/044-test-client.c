@@ -41,12 +41,15 @@
 #include "../src/049-jpeg.h"
 #include "../src/059-loose-folders.h"
 #include "../src/060-resolver.h"
+#include "../src/067-test-map.h"
+#include "../src/068-goodbye.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
 
 #include <dirent.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -674,6 +677,335 @@ static void resolver_tests(const char *dir)
 }
 /* }}} */
 
+/* {{{ 1109: the test map's launch and its goodbye receipt, on folders made
+ * here (no game data needed): the options read and refused, the password
+ * rule, the map's folder first among the resolver's overlays, and the
+ * receipt written whole, read back with LuaJIT as the editor reads it, and
+ * refused where it can't be written. Everything is made under
+ * DIR/tmp/shared-memory/test-test-map and removed after. */
+
+/* {{{ static the test map's helpers */
+/* the parse of a NULL-ended argument list (argv[0] the program's name) */
+static const ClientOption T_OPTIONS[] = {
+    { "--maps", 1 }, { "--client", 1 }, { "--settings", 1 }, { "--front", 0 }, { "--goto", 2 }, { "--map", 3 }, { NULL, 0 },
+};
+static WErr t_parse(const char *password, TestMap **tm, WWhy *why, ...)
+{
+    char *argv[40] = { "w-client" };
+    int argc = 1;
+    va_list ap;
+    va_start(ap, why);
+    for (char *a; argc < 39 && (a = va_arg(ap, char *)); ) argv[argc++] = a;
+    va_end(ap);
+    why->code = W_OK; why->text[0] = '\0';
+    return test_map_parse(argc, argv, T_OPTIONS, password, tm, why);
+}
+/* the bytes of `s` as small hex digits (how LuaJIT's reading is compared) */
+static void t_hex(const char *s, char *out, size_t n)
+{
+    size_t k = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p && k + 3 < n; ++p) k += (size_t)snprintf(out + k, n - k, "%02x", *p);
+    out[k] = '\0';
+}
+/* the receipt at `path` read by LuaJIT as the editor reads it (loadfile, an
+ * empty environment), printed as format|map in hex|started|ended|seconds|
+ * frames|reason|why; "" when LuaJIT refused it or isn't there */
+static void t_luajit_read(const char *path, char *out, size_t n)
+{
+    char cmd[2000];
+    snprintf(cmd, sizeof cmd,
+             "/usr/bin/luajit -e 'local c, e = loadfile([==[%s]==], \"t\", {}); if not c then io.write(\"refused: \", e) return end; "
+             "local r = c(); local h = (r.map or \"\"):gsub(\".\", function(b) return string.format(\"%%02x\", b:byte()) end); "
+             "io.write(tostring(r.format), \"|\", h, \"|\", tostring(r.started), \"|\", tostring(r.ended), \"|\", "
+             "type(r.seconds) == \"number\" and string.format(\"%%.3f\", r.seconds) or \"none\", \"|\", tostring(r.frames), \"|\", "
+             "tostring(r.reason), \"|\", tostring(r.why))' 2>&1", path);
+    out[0] = '\0';
+    fflush(stdout);                                       /* so the child doesn't inherit lines not yet written */
+    FILE *p = popen(cmd, "r");
+    if (!p) return;
+    size_t got = fread(out, 1, n - 1, p);
+    out[got] = '\0';
+    pclose(p);
+}
+static int t_is_utc(const char *s)
+{
+    static const char shape[] = "dddd-dd-ddTdd:dd:ddZ";
+    if (strlen(s) != 20) return 0;
+    for (int i = 0; i < 20; ++i) if (shape[i] == 'd' ? !(s[i] >= '0' && s[i] <= '9') : s[i] != shape[i]) return 0;
+    return 1;
+}
+/* files in `dir` whose names start with `start` */
+static int t_count_starting(const char *dir, const char *start)
+{
+    DIR *d = opendir(dir);
+    if (!d) return -1;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) if (!strncmp(e->d_name, start, strlen(start))) ++n;
+    closedir(d);
+    return n;
+}
+static char *t_read_text(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    static char buf[8192];
+    size_t got = fread(buf, 1, sizeof buf - 1, f);
+    buf[got] = '\0';
+    fclose(f);
+    return buf;
+}
+/* }}} */
+
+static void test_map_tests(const char *dir)
+{
+    char root[400], path[900], line[1200], got[2000], hex[400];
+    WWhy why;
+    WErr e;
+    TestMap *tm = NULL;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-test-map", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the test map's fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the options: good */
+    e = t_parse("pw", &tm, &why, "--maps", "M", "--test-map", "/maps/daow-build", "--client", "C", "--receipt", "/tmp/r.lua",
+                "--camera", "12.5,-300", "--realm", "10.0.0.2:3725", "--account", "TESTER", "--front", "--goto", "-1", "2", NULL);
+    double cx = 0, cy = 0;
+    check(!e && tm && !strcmp(test_map_folder(tm), "/maps/daow-build") && !strcmp(test_map_receipt(tm), "/tmp/r.lua")
+          && test_map_camera(tm, &cx, &cy) && cx == 12.5 && cy == -300 && !strcmp(test_map_realm_host(tm), "10.0.0.2")
+          && test_map_realm_port(tm) == 3725 && !strcmp(test_map_account(tm), "TESTER") && !strcmp(test_map_password(tm), "pw"),
+          e ? why.text : "a test-map run among the client's own options: every value read (a negative --goto value is a value, not an option)");
+    test_map_free(tm);
+    e = t_parse("pw", &tm, &why, "--test-map", "m", "--receipt", "r", NULL);
+    check(!e && tm && !test_map_camera(tm, &cx, &cy) && !strcmp(test_map_realm_host(tm), "127.0.0.1") && test_map_realm_port(tm) == 3724
+          && !strcmp(test_map_account(tm), ""), "only --test-map and --receipt: the map's own start, the local server at 127.0.0.1:3724, no account");
+    test_map_free(tm);
+    e = t_parse(NULL, &tm, &why, "--maps", "M", "--client", "C", "--map", "0", "-8913", "554", NULL);
+    check(!e && !tm, "no --test-map: not a test-map run, no handle, and no password needed");
+    /* }}} */
+
+    /* {{{ the options: refused */
+    static const struct { const char *args[8]; WErr code; int handle; const char *finds; const char *what; } wrong[] = {
+        { { "--receipt", "r", "--test-map", NULL }, W_ERR_REFUSED, 1, "--test-map needs a value", "--test-map last, with nothing after it" },
+        { { "--test-map", "--receipt", "r", NULL }, W_ERR_REFUSED, 1, "--test-map needs a value", "--test-map followed by another option" },
+        { { "--test-map", "m", "--receipt", NULL }, W_ERR_REFUSED, 0, "--receipt needs a value", "--receipt with no file: refused, and no receipt to write" },
+        { { "--test-map", "m", "--receipt", "r", "--goto", "1", NULL }, W_ERR_REFUSED, 1, "--goto needs 2 values after it, and has 1", "one of the client's own options short of its values" },
+        { { "--test-map", "m", "--receipt", "r", "--account", "--realm", "h:1", NULL }, W_ERR_REFUSED, 1, "--account needs a value", "--account followed by another option" },
+        { { "--test-map", "m", "--receipt", "r", "--frobnicate", NULL }, W_ERR_REFUSED, 1, "the option --frobnicate isn't one this client takes", "an option the client doesn't know, in a test-map run: refused, the receipt still written" },
+        { { "--maps", "M", "--frobnicate", NULL }, W_ERR_REFUSED, 0, "the option --frobnicate isn't one this client takes", "an option the client doesn't know, in an ordinary run" },
+        { { "--maps", "M", "stray", NULL }, W_ERR_REFUSED, 0, "the argument \"stray\" follows no option", "an argument no option takes" },
+        { { "--test-map", "a", "--receipt", "r", "--test-map", "b", NULL }, W_ERR_REFUSED, 1, "--test-map was given twice", "--test-map twice" },
+        { { "--receipt", "r", NULL }, W_ERR_REFUSED, 0, "--receipt is for a --test-map run", "--receipt with no --test-map" },
+        { { "--maps", "M", "--camera", "1,2", NULL }, W_ERR_REFUSED, 0, "--camera is for a --test-map run", "--camera with no --test-map" },
+        { { "--test-map", "m", NULL }, W_ERR_NOT_FOUND, 0, "needs --receipt FILE", "--test-map with no --receipt" },
+    };
+    for (unsigned i = 0; i < sizeof wrong / sizeof wrong[0]; ++i) {
+        const char *const *a = wrong[i].args;
+        e = t_parse("pw", &tm, &why, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+        snprintf(line, sizeof line, "%s: %s (%s)", wrong[i].what, w_err_name(e), why.text);
+        check(e == wrong[i].code && (tm != NULL) == wrong[i].handle && strstr(why.text, wrong[i].finds), line);
+        if (i == 1) check(tm && !strcmp(test_map_folder(tm), "") && !strcmp(test_map_receipt(tm), "r"), "and the receipt is still known, with no map folder");
+        if (i == 8) check(tm && !strcmp(test_map_folder(tm), "a"), "and the first one stands");
+        test_map_free(tm);
+    }
+    static const char *const cameras[] = { "12", "12,", ",5", "a,b", "1,2,3", "1;2", "nan,1", "1e999,0", "1, 2", "" };
+    int all = 1;
+    for (unsigned i = 0; i < sizeof cameras / sizeof cameras[0]; ++i) {
+        e = t_parse("pw", &tm, &why, "--test-map", "m", "--receipt", "r", "--camera", cameras[i], NULL);
+        if (!(e == W_ERR_REFUSED && tm && strstr(why.text, "--camera takes") && !test_map_camera(tm, &cx, &cy))) { all = 0; printf("        camera \"%s\": %s\n", cameras[i], why.text); }
+        test_map_free(tm);
+    }
+    check(all, "a camera that isn't two finite numbers with a comma between is refused, each of 10 ways (12; 12,; ,5; a,b; 1,2,3; 1;2; nan,1; 1e999,0; a space; nothing)");
+    e = t_parse("pw", &tm, &why, "--test-map", "m", "--receipt", "r", "--camera", "-0.25,1e3", NULL);
+    check(!e && test_map_camera(tm, &cx, &cy) && cx == -0.25 && cy == 1000, "a camera of -0.25,1e3: read as written");
+    test_map_free(tm);
+    static const char *const realms[] = { "localhost", "localhost:", ":3724", "h:0", "h:65536", "h:12x", "my host:3724" };
+    all = 1;
+    for (unsigned i = 0; i < sizeof realms / sizeof realms[0]; ++i) {
+        e = t_parse("pw", &tm, &why, "--test-map", "m", "--receipt", "r", "--realm", realms[i], NULL);
+        if (!(e == W_ERR_REFUSED && tm && strstr(why.text, "--realm takes"))) { all = 0; printf("        realm \"%s\": %s\n", realms[i], why.text); }
+        test_map_free(tm);
+    }
+    check(all, "a realm that isn't host:port with a port from 1 to 65535 is refused, each of 7 ways");
+    e = t_parse("pw", &tm, &why, "--test-map", "m", "--receipt", "r", "--account", "two words", NULL);
+    check(e == W_ERR_REFUSED && strstr(why.text, "--account takes"), "an account name with a space is refused");
+    test_map_free(tm);
+    /* }}} */
+
+    /* {{{ the password: from W_CLIENT_PASSWORD only */
+    e = t_parse(NULL, &tm, &why, "--test-map", "m", "--receipt", "r", NULL);
+    check(e == W_ERR_NOT_FOUND && tm && strstr(why.text, "W_CLIENT_PASSWORD") && strstr(why.text, "not set") && strstr(why.text, "never taken on the command line"),
+          "a test-map run with no W_CLIENT_PASSWORD stops, saying where the password is read from, and the receipt can say why");
+    test_map_free(tm);
+    e = t_parse("", &tm, &why, "--test-map", "m", "--receipt", "r", NULL);
+    check(e == W_ERR_NOT_FOUND && tm && strstr(why.text, "empty"), "an empty one is missing too");
+    test_map_free(tm);
+    e = t_parse("sekrit", &tm, &why, "--test-map", "m", "--receipt", "r", "--password", "sekrit", NULL);
+    check(e == W_ERR_REFUSED && strstr(why.text, "--password isn't one this client takes") && !strstr(why.text, "sekrit"),
+          "there is no --password option: refused by name, its value not repeated in the sentence");
+    test_map_free(tm);
+    e = t_parse("sekrit", &tm, &why, "--test-map", "m", "--receipt", "r", "--camera", "x", NULL);
+    check(e && !strstr(why.text, "sekrit"), "a refusal never names the password");
+    test_map_free(tm);
+    /* }}} */
+
+    /* {{{ the map first among the resolver's overlays */
+    char assets[600], base[700], build[600], pack[700];
+    snprintf(assets, sizeof assets, "%s/assets", root);
+    snprintf(base, sizeof base, "%s/overlays/base", assets);
+    snprintf(pack, sizeof pack, "%s/packs/p", assets);
+    snprintf(build, sizeof build, "%s/daow-build", root);
+    t_write_text(base, "Textures/Ground.blp", "the settings' overlay's ground");
+    t_write_text(base, "Textures/Only.blp", "only in the settings' overlay");
+    t_write_text(build, "TEXTURES/ground.BLP", "the test map's ground");
+    t_write_text(build, "Textures/Pack.blp", "the test map's file the pack replaces");
+    char entry[700], manifest[1200];
+    t_entry(entry, sizeof entry, "Textures\\Pack.blp", "pack.blp", "texture", 0.8);
+    snprintf(manifest, sizeof manifest, "return { format = 1, name = 'p', entries = {\n%s} }\n", entry);
+    t_write_text(pack, "manifest.lua", manifest);
+    t_write_text(pack, "pack.blp", "the pack's file");
+    Settings *ts = settings_new();
+    settings_set(ts, "assetOverlays", "base", &why);
+    settings_set(ts, "assetPacks", "p", &why);
+    e = t_parse("pw", &tm, &why, "--test-map", build, "--receipt", "r", NULL);
+    ResolverPlace place;
+    e = e ? e : test_map_place(tm, ts, assets, NULL, &place, &why);
+    check(!e && place.noverlays == 2 && !strcmp(place.overlays[0], build) && !strcmp(place.overlays[1], base) && place.npacks == 1,
+          e ? why.text : "the place: the map's folder first among the overlays, the settings' overlay after it, the pack kept");
+    Resolver *r = NULL;
+    char *log = NULL;
+    size_t log_len = 0;
+    place.log = open_memstream(&log, &log_len);
+    e = e ? e : resolver_open(&place, &r, &why);
+    check(!e, e ? why.text : "the resolver opens on it");
+    if (!e) {
+        AssetAnswer a;
+        e = asset_resolve(r, "textures\\ground.blp", ASSET_TEXTURE, &a, &why);
+        check(!e && a.source == ASSET_FROM_OVERLAY && !strcmp(a.from, build) && a.len == 21 && !memcmp(a.data, "the test map's ground", 21),
+              "a file in both overlays: the test map's answers, from its folder");
+        asset_answer_free(&a);
+        e = asset_resolve(r, "Textures/Only.blp", ASSET_TEXTURE, &a, &why);
+        check(!e && a.source == ASSET_FROM_OVERLAY && !strcmp(a.from, base), "a file only in the settings' overlay: still found, behind the map");
+        asset_answer_free(&a);
+        e = asset_resolve(r, "Textures\\Pack.blp", ASSET_TEXTURE, &a, &why);
+        check(!e && a.source == ASSET_FROM_PACK && a.len == 15, "a pack's file still comes before the map's (105a's order: packs, the server's, overlays, the archives)");
+        asset_answer_free(&a);
+    }
+    resolver_free(r);
+    fclose(place.log);
+    free(log);
+    snprintf(path, sizeof path, "%s/Config.wtf", root);
+    char *saved = settings_save(ts, path, &why) ? NULL : t_read_text(path);
+    check(!strcmp(settings_text(ts, "assetOverlays"), "base") && saved && !strstr(saved, "daow-build"),
+          "the settings are unchanged: assetOverlays is still base, and a saved settings file doesn't name the map");
+    e = test_map_place(tm, ts, NULL, NULL, &place, &why);
+    check(e == W_ERR_REFUSED && strstr(why.text, "no --assets folder"), "settings naming folders, and no assets folder to find them under: refused");
+    Settings *plain = settings_new();
+    e = test_map_place(tm, plain, NULL, NULL, &place, &why);
+    check(!e && place.noverlays == 1 && place.npacks == 0 && !strcmp(place.overlays[0], build), "no folders in the settings and no assets folder: the map alone");
+    settings_set(plain, "assetOverlays", "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p", &why);
+    e = test_map_place(tm, plain, assets, NULL, &place, &why);
+    check(e == W_ERR_FULL && strstr(why.text, "no room"), "16 overlays in the settings already: no room in front of them, said so");
+    settings_free(plain);
+    settings_free(ts);
+    test_map_free(tm);
+    e = t_parse("pw", &tm, &why, "--test-map", "--receipt", "r", NULL);
+    Settings *none = settings_new();
+    check(tm && test_map_place(tm, none, NULL, NULL, &place, &why) == W_ERR_REFUSED && strstr(why.text, "no folder"), "a test map with no folder has no place");
+    settings_free(none);
+    test_map_free(tm);
+    /* }}} */
+
+    /* {{{ the receipt */
+    char goodbye_utc_text[21];
+    goodbye_utc(1793824267, goodbye_utc_text);
+    check(!strcmp(goodbye_utc_text, "2026-11-04T20:31:07Z"), "times are written as 2026-11-04T20:31:07Z, in UTC");
+    check(!strcmp(goodbye_reason_name(GOODBYE_CLOSED), "closed") && !strcmp(goodbye_reason_name(GOODBYE_LOST_CONNECTION), "lost-connection")
+          && !strcmp(goodbye_reason_name(GOODBYE_ERROR), "error"), "the reasons' names: closed, lost-connection, error");
+    char outdir[600], receipt[700];
+    snprintf(outdir, sizeof outdir, "%s/out", root);
+    t_mkdirs(outdir);
+    snprintf(receipt, sizeof receipt, "%s/receipt.lua", outdir);
+    const char *map = "/maps/the \"best\" map\\v2\nsecond line\001\tend 9 \xc3\xa9";
+    Goodbye *g = NULL;
+    e = goodbye_begin(receipt, map, &g, &why);
+    check(!e && g, e ? why.text : "a run with a receipt begins");
+    for (int i = 0; i < 3; ++i) goodbye_frame(g);
+    e = goodbye_end(g, GOODBYE_CLOSED, NULL, &why);
+    check(!e, e ? why.text : "it ends, closed, and the receipt is written");
+    check(t_count_starting(outdir, ".receipt.lua.") == 0, "no temporary file is left beside it");
+    t_luajit_read(receipt, got, sizeof got);
+    t_hex(map, hex, sizeof hex);
+    char started[24] = "", ended[24] = "", seconds[24] = "";
+    char *f[8] = { 0 };
+    int nf = 0;
+    for (char *p = got, *s = got; nf < 8; ++p) if (*p == '|' || !*p) { int end = !*p; *p = '\0'; f[nf++] = s; s = p + 1; if (end) break; }
+    if (nf == 8) { snprintf(started, sizeof started, "%s", f[2]); snprintf(ended, sizeof ended, "%s", f[3]); snprintf(seconds, sizeof seconds, "%s", f[4]); }
+    snprintf(line, sizeof line, "LuaJIT reads it with loadfile in an empty environment: format 1, the map as given byte for byte (quotes, a backslash, a new line, a control byte, a tab, a digit after it, UTF-8), 3 frames, closed, no why (%.300s)",
+             nf == 8 ? "read" : got);
+    check(nf == 8 && !strcmp(f[0], "1") && !strcmp(f[1], hex) && !strcmp(f[5], "3") && !strcmp(f[6], "closed") && !strcmp(f[7], "nil"), line);
+    snprintf(line, sizeof line, "started %s and ended %s are UTC times, in order; %s seconds between", started, ended, seconds);
+    check(t_is_utc(started) && t_is_utc(ended) && strcmp(started, ended) <= 0 && atof(seconds) >= 0 && atof(seconds) < 60, line);
+    e = goodbye_end(g, GOODBYE_CLOSED, NULL, &why);
+    check(e == W_ERR_REFUSED && strstr(why.text, "written already"), "a second goodbye is refused");
+    goodbye_free(g);
+    char *text = t_read_text(receipt);
+    int calls = 0;                                        /* a bracket outside the comment line would be a call */
+    for (const char *l = text; l && *l; ) {
+        const char *nl = strchr(l, '\n');
+        size_t n = nl ? (size_t)(nl - l) : strlen(l);
+        if (strncmp(l, "--", 2) && memchr(l, '(', n)) ++calls;
+        l += n + (nl ? 1 : 0);
+    }
+    check(text && !calls && !strstr(text, "password") && !strncmp(text, "-- ", 3) && strstr(text, "\nreturn {\n    format  = 1,\n"),
+          "the receipt holds plain data only (a comment, then return and one table: no names, no calls) and nothing of the password");
+
+    e = goodbye_begin(receipt, "m", &g, &why);
+    e = e ? e : goodbye_end(g, GOODBYE_ERROR, "a --test-map run reads the account's password from W_CLIENT_PASSWORD, and it is not set", &why);
+    goodbye_free(g);
+    t_luajit_read(receipt, got, sizeof got);
+    check(!e && strstr(got, "|0|error|a --test-map run reads the account's password from W_CLIENT_PASSWORD, and it is not set"),
+          e ? why.text : "an error ends it with its sentence as why, and replaces the earlier receipt whole");
+    e = goodbye_begin(receipt, "m", &g, &why);
+    e = e ? e : goodbye_end(g, GOODBYE_ERROR, NULL, &why);
+    goodbye_free(g);
+    t_luajit_read(receipt, got, sizeof got);
+    check(!e && strstr(got, "|error|the client stopped on an error, with no sentence"), "an error with no sentence says that it has none");
+    e = goodbye_begin(receipt, "m", &g, &why);
+    e = e ? e : goodbye_end(g, GOODBYE_LOST_CONNECTION, "not written", &why);
+    goodbye_free(g);
+    t_luajit_read(receipt, got, sizeof got);
+    check(!e && strstr(got, "|lost-connection|nil"), "lost-connection, with no why (a sentence is only kept with error)");
+    /* }}} */
+
+    /* {{{ a receipt that can't be written */
+    snprintf(path, sizeof path, "%s/no-such-folder/receipt.lua", root);
+    e = goodbye_begin(path, "m", &g, &why);
+    check(e == W_ERR_NOT_FOUND && !g && strstr(why.text, "isn't there"), "a receipt in a folder that isn't there: refused at the start, before any window");
+    check(goodbye_begin("", "m", &g, &why) == W_ERR_REFUSED && !g, "an empty receipt path is refused");
+    snprintf(path, sizeof path, "%s/gone", root);
+    t_mkdirs(path);
+    snprintf(line, sizeof line, "%s/receipt.lua", path);
+    e = goodbye_begin(line, "m", &g, &why);
+    rmdir(path);
+    e = e ? e : goodbye_end(g, GOODBYE_CLOSED, NULL, &why);
+    check(e == W_ERR_IO && strstr(why.text, "temporary file") && strstr(why.text, "wasn't written"), "its folder taken away during the run: W_ERR_IO at the end, said so");
+    goodbye_free(g);
+    snprintf(path, sizeof path, "%s/a-folder.lua", outdir);
+    t_mkdirs(path);
+    e = goodbye_begin(path, "m", &g, &why);
+    e = e ? e : goodbye_end(g, GOODBYE_CLOSED, NULL, &why);
+    check(e == W_ERR_IO && strstr(why.text, "renamed") && t_count_starting(outdir, ".a-folder.lua.") == 0,
+          "a receipt's name taken by a folder: the rename fails, W_ERR_IO, and the temporary file is removed");
+    goodbye_free(g);
+    check(goodbye_end(NULL, GOODBYE_CLOSED, NULL, &why) == W_OK, "a run with no receipt: goodbye_frame and goodbye_end do nothing");
+    goodbye_frame(NULL);
+    /* }}} */
+
+    t_remove_tree(root);
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -783,6 +1115,11 @@ int main(int argc, char **argv)
      * so before the archives, which stop the program when there are none */
     printf("the asset resolver\n");
     resolver_tests(dir);
+    /* }}} */
+
+    /* {{{ the test map's launch and receipt (1109): folders made here, no game data */
+    printf("the test map's launch and its goodbye receipt\n");
+    test_map_tests(dir);
     /* }}} */
 
     /* {{{ the archives */

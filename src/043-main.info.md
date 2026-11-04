@@ -38,3 +38,17 @@ Usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--
                     530 Outland, 571 Northrend) at world (X, Y)
   --pose ID MS      (pictures) hold her in animation ID (AnimationData.dbc:
                     0 stand, 5 run, 13 walk backwards, 38 jump ...) at MS
+  --assets DIR      where the settings' packs and overlays are (DIR/packs,
+                    DIR/overlays; 105a); scripts/run gives assets/
+
+A map handed in by world-edit-to-execute's editor (its Test Map button;
+issue 1109, 067-test-map.h):
+  --test-map FOLDER the converted map's build folder, in front of the
+                    asset overlays for this run only
+  --receipt FILE    where the goodbye receipt goes when the client ends
+                    (068-goodbye.h); a crash leaves none
+  --camera X,Y      start there (world yards) instead of the map's start
+  --realm HOST:PORT the local AzerothCore's login server (127.0.0.1:3724)
+  --account NAME    the account; its password only from W_CLIENT_PASSWORD
+An option the client doesn't know, or one short of its values, stops the
+start (with a receipt, in a test-map run).

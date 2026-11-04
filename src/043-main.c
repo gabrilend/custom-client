@@ -35,6 +35,20 @@
  *                     530 Outland, 571 Northrend) at world (X, Y)
  *   --pose ID MS      (pictures) hold her in animation ID (AnimationData.dbc:
  *                     0 stand, 5 run, 13 walk backwards, 38 jump ...) at MS
+ *   --assets DIR      where the settings' packs and overlays are (DIR/packs,
+ *                     DIR/overlays; 105a); scripts/run gives assets/
+ *
+ * A map handed in by world-edit-to-execute's editor (its Test Map button;
+ * issue 1109, 067-test-map.h):
+ *   --test-map FOLDER the converted map's build folder, in front of the
+ *                     asset overlays for this run only
+ *   --receipt FILE    where the goodbye receipt goes when the client ends
+ *                     (068-goodbye.h); a crash leaves none
+ *   --camera X,Y      start there (world yards) instead of the map's start
+ *   --realm HOST:PORT the local AzerothCore's login server (127.0.0.1:3724)
+ *   --account NAME    the account; its password only from W_CLIENT_PASSWORD
+ * An option the client doesn't know, or one short of its values, stops the
+ * start (with a receipt, in a test-map run).
  */
 #include "023-anim.h"
 #include "013-errors.h"
@@ -59,12 +73,16 @@
 #include "037-sky.h"
 #include "036-texture.h"
 #include "040-water.h"
+#include "060-resolver.h"
+#include "067-test-map.h"
+#include "068-goodbye.h"
 
 #include "raylib.h"
 #include "raymath.h"
 #include "rlgl.h"
 
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,6 +207,9 @@ typedef struct {
     Water *water;                                     /* the water drawn (040-water.h) */
     Sky *sky;                                         /* the sky (037-sky.h) */
     Prefetch *pf;                                     /* the reader-ahead (034-prefetch.h) */
+    TestMap *test_map;                                /* a map handed in by the editor (067-test-map.h; 1109), or NULL */
+    Goodbye *bye;                                     /* its goodbye receipt (068-goodbye.h), or NULL */
+    Resolver *assets;                                 /* a test map's resolver, its folder first of the overlays (060-resolver.h) */
 } App;
 /* }}} */
 /* build one spawn's figure; 0, or 1 when its look can't be built (said
@@ -378,6 +399,35 @@ static void refresh_tiles(App *app)
 /* }}} */
 
 /* {{{ main */
+/* {{{ the client's own options and how many values each takes, checked
+ * with the test map's (067-test-map.h); main reads them */
+static const ClientOption CLIENT_OPTIONS[] = {
+    { "--maps", 1 }, { "--settings", 1 }, { "--world", 1 }, { "--no-read-ahead", 0 }, { "--client", 1 }, { "--shot", 1 },
+    { "--zoom", 1 }, { "--front", 0 }, { "--turn", 1 }, { "--pitch", 1 }, { "--pose", 2 }, { "--clock", 1 }, { "--hour", 1 },
+    { "--face", 1 }, { "--walk", 1 }, { "--walking", 0 }, { "--dive", 1 }, { "--wait", 1 }, { "--wear", 1 }, { "--map", 3 },
+    { "--goto", 2 }, { "--assets", 1 }, { NULL, 0 },
+};
+/* }}} */
+
+/* {{{ static start_failed: the start can't go on: said on the terminal and,
+ * in a test-map run, in its goodbye receipt (1109); the window closed if it
+ * is open; gives back the exit status */
+static int start_failed(App *app, int status, const char *format, ...) __attribute__((format(printf, 3, 4)));
+static int start_failed(App *app, int status, const char *format, ...)
+{
+    char text[600];
+    va_list ap;
+    va_start(ap, format);
+    vsnprintf(text, sizeof text, format, ap);
+    va_end(ap);
+    fprintf(stderr, "%s\n", text);
+    WWhy why;
+    if (goodbye_end(app->bye, GOODBYE_ERROR, text, &why)) fprintf(stderr, "%s\n", why.text);
+    if (IsWindowReady()) CloseWindow();
+    return status;
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     App *app = calloc(1, sizeof *app);
@@ -387,7 +437,7 @@ int main(int argc, char **argv)
     app->LOOK = (CharacterLook){ 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
     app->view = (FollowCam){ .yaw = (float)START_O, .pitch = 0.35f, .dist = 12.0f, .rest_pitch = 0.35f };
     app->read_ahead = 1;
-    const char *maps = NULL, *client = NULL, *shot = NULL, *settings_file = NULL;
+    const char *maps = NULL, *client = NULL, *shot = NULL, *settings_file = NULL, *assets_dir = NULL;
     int pose_id = -1;                                    /* --pose: hold her in this animation */
     double start_ms = 0;                                 /* --clock: the world's animations start this far in */
     double face_deg = 0;                                 /* --face: her start facing turned this far (left) */
@@ -404,12 +454,29 @@ int main(int argc, char **argv)
     struct tm *lt = localtime(&now);
     float hours = (float)lt->tm_hour + (float)lt->tm_min / 60.0f;
     float pose_ms = 0;
+    /* {{{ a map handed in by the editor (1109): read first, so anything that
+     * stops the start from here on is written in its receipt; the password
+     * leaves the environment once read, so nothing this client starts
+     * inherits it */
+    WWhy why;
+    WErr asked = test_map_parse(argc, argv, CLIENT_OPTIONS, getenv(TEST_MAP_PASSWORD_VARIABLE), &app->test_map, &why);
+    unsetenv(TEST_MAP_PASSWORD_VARIABLE);
+    if (app->test_map) {
+        WWhy no_receipt;
+        if (goodbye_begin(test_map_receipt(app->test_map), test_map_folder(app->test_map), &app->bye, &no_receipt)) {
+            fprintf(stderr, "%s\n", no_receipt.text);       /* no receipt can be written: the editor reads its absence as a crash */
+            return 2;
+        }
+    }
+    if (asked) return start_failed(app, 2, "%s", why.text);
+    /* }}} */
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--maps") && i + 1 < argc) maps = argv[++i];
         else if (!strcmp(argv[i], "--settings") && i + 1 < argc) settings_file = argv[++i];
         else if (!strcmp(argv[i], "--world") && i + 1 < argc) app->world_dir = argv[++i];
         else if (!strcmp(argv[i], "--no-read-ahead")) app->read_ahead = 0;
         else if (!strcmp(argv[i], "--client") && i + 1 < argc) client = argv[++i];
+        else if (!strcmp(argv[i], "--assets") && i + 1 < argc) assets_dir = argv[++i];
         else if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) app->view.dist = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--front")) { app->view.yaw = (float)(START_O + PI); app->view.pitch = 0.1f; app->cam_held = 1; }
@@ -425,15 +492,20 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--wait") && i + 1 < argc) wait_s = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--wear") && i + 1 < argc) {
             char bad[200];
-            if (character_wear_text(app->WEAR_OVER, argv[++i], bad, sizeof bad)) {
-                fprintf(stderr, "--wear: \"%s\" isn't slot:look (slots: shirt legs feet wrists chest hands tabard waist head shoulders back mainhand offhand)\n", bad);
-                return 2;
-            }
+            if (character_wear_text(app->WEAR_OVER, argv[++i], bad, sizeof bad))
+                return start_failed(app, 2, "--wear: \"%s\" isn't slot:look (slots: shirt legs feet wrists chest hands tabard waist head shoulders back mainhand offhand)", bad);
         }
         else if (!strcmp(argv[i], "--map") && i + 3 < argc) { app->map_id = atoi(argv[++i]); app->start_x = atof(argv[++i]); app->start_y = atof(argv[++i]); }
         else if (!strcmp(argv[i], "--goto") && i + 2 < argc) { goto_x = atof(argv[++i]); goto_y = atof(argv[++i]); go_to = 1; }
     }
-    if (!maps || !client) { fprintf(stderr, "usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--shot FILE] [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]\n"); return 2; }
+    if (!maps || !client) {
+        fprintf(stderr, "usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--assets DIR] [--shot FILE] [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]\n"
+                        "       [--test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME]]   (the password from W_CLIENT_PASSWORD)\n");
+        return start_failed(app, 2, "the client needs --maps (the server's map files) and --client (the game's Data folder); scripts/run gives both");
+    }
+    /* --camera (1109): she starts there, the camera behind her as at any start */
+    double camera_x, camera_y;
+    if (app->test_map && test_map_camera(app->test_map, &camera_x, &camera_y)) { app->start_x = camera_x; app->start_y = camera_y; }
 
     /* the settings: defaults, then the player's file; a line it refuses is
      * named on the terminal and skipped (173b1) */
@@ -444,20 +516,19 @@ int main(int argc, char **argv)
     int win_w, win_h;
     settings_resolution(settings_text(app->settings, "gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
 
-    WWhy why;
     maps_world_init(&app->world, maps, app->map_id);
     float gx, gy;
     float z = maps_world_height(&app->world, (float)app->start_x, (float)app->start_y, &gx, &gy);
-    if (z < -10000) { fprintf(stderr, "no ground at the start (%.1f, %.1f) in map %d from %s: is the maps folder right?\n", app->start_x, app->start_y, app->map_id, maps); return 1; }
+    if (z < -10000) return start_failed(app, 1, "no ground at the start (%.1f, %.1f) in map %d from %s: is the maps folder right?", app->start_x, app->start_y, app->map_id, maps);
     /* the steepest walkable ground, from the server's navigation tiles
      * (data-files/mmaps beside data-files/maps) */
     char mmaps[600];
     snprintf(mmaps, sizeof mmaps, "%s", maps);
     char *cut = strstr(mmaps, "/maps");
-    if (!cut) { fprintf(stderr, "the maps folder %s doesn't end in /maps; can't find mmaps beside it\n", maps); return 1; }
+    if (!cut) return start_failed(app, 1, "the maps folder %s doesn't end in /maps; can't find mmaps beside it", maps);
     strcpy(cut, "/mmaps");
     float max_slope = navmesh_slope_read(mmaps, app->map_id, &why);
-    if (max_slope < 0) { fprintf(stderr, "%s\n", why.text); return 1; }
+    if (max_slope < 0) return start_failed(app, 1, "%s", why.text);
     mover_init(&app->elf, app->start_x, app->start_y, z, START_O + face_deg * PI / 180, SPEED, max_slope);
     app->view.yaw = (float)app->elf.o + (app->view.yaw - (float)START_O);   /* the camera keeps its place behind her */
     app->ox = floor(app->start_x); app->oy = floor(app->start_y);
@@ -473,12 +544,24 @@ int main(int argc, char **argv)
     textures_init(&app->textures, (int)settings_num(app->settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = figure_shader();                  /* the figures' bending and lighting (041-figure.h) */
-    if (mpq_chain_open(&app->chain, client, "enUS", &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (mpq_chain_open(&app->chain, client, "enUS", &why)) return start_failed(app, 1, "%s", why.text);
+    /* {{{ a test map's folder in front of the asset overlays, for this run
+     * only (1109): the resolver opens on it now, so a folder that isn't
+     * there stops the start by name. The readers still ask the archives
+     * directly (each moves to the resolver with its own issue, docs/045),
+     * so nothing is drawn from the folder yet. */
+    if (app->test_map) {
+        ResolverPlace place;
+        if (test_map_place(app->test_map, app->settings, assets_dir, &app->chain, &place, &why) || resolver_open(&place, &app->assets, &why))
+            return start_failed(app, 1, "%s", why.text);
+        printf("test map: %s, the first of %d overlay%s\n", test_map_folder(app->test_map), place.noverlays, place.noverlays == 1 ? "" : "s");
+    }
+    /* }}} */
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
     app->figures = figures_new(&app->chain, &app->textures);                      /* makes her, the bystanders and the creatures (041-figure.h) */
-    if (character_start_outfit(&app->chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (character_start_outfit(&app->chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why)) return start_failed(app, 1, "%s", why.text);
     for (int k = 0; k < SLOT_COUNT; ++k) if (app->WEAR_OVER[k]) app->LOOK.items[k] = app->WEAR_OVER[k];
-    if (figure_from_character(app->figures, &app->her, &app->LOOK, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (figure_from_character(app->figures, &app->her, &app->LOOK, &why)) return start_failed(app, 1, "%s", why.text);
     static const int NEEDED[] = { MOVE_STAND, MOVE_RUN, MOVE_WALK, MOVE_WALK_BACK, MOVE_SHUFFLE_LEFT, MOVE_SHUFFLE_RIGHT, MOVE_JUMP_START, MOVE_JUMP, MOVE_JUMP_END, MOVE_FALL };
     for (unsigned i = 0; i < sizeof NEEDED / sizeof NEEDED[0]; ++i)
         if (anim_find(&app->her.anim, NEEDED[i], 0) < 0) fprintf(stderr, "her animations: her model has no animation %d; she stands instead\n", NEEDED[i]);
@@ -510,29 +593,28 @@ int main(int argc, char **argv)
         const char *from;
         unsigned char *mt = mpq_chain_read(&app->chain, "DBFilesClient\\Map.dbc", &len, &from);
         Dbc maps_table;
-        if (!mt || dbc_open(&maps_table, mt, len, &why)) { fprintf(stderr, "Map.dbc: %s\n", mt ? why.text : "not in the archives"); CloseWindow(); return 1; }
+        if (!mt || dbc_open(&maps_table, mt, len, &why)) return start_failed(app, 1, "Map.dbc: %s", mt ? why.text : "not in the archives");
         int found = 0;
         for (uint32_t r = 0; r < maps_table.rows && !found; ++r)
             if ((int)dbc_u32(&maps_table, r, 1) == app->map_id) { snprintf(app->map_name, sizeof app->map_name, "%s", dbc_text(&maps_table, r, 2)); found = 1; }
         free(mt);
-        if (!found) { fprintf(stderr, "no map %d in Map.dbc\n", app->map_id); CloseWindow(); return 1; }
+        if (!found) return start_failed(app, 1, "no map %d in Map.dbc", app->map_id);
     }
-    if (ground_place_init(&app->ground_place, &app->chain, app->map_name, &app->world, app->ox, app->oy, &why) || !(app->ground = ground_new(&app->ground_place, &app->textures, &why))) {
-        fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1;
-    }
+    if (ground_place_init(&app->ground_place, &app->chain, app->map_name, &app->world, app->ox, app->oy, &why) || !(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
+        return start_failed(app, 1, "%s", why.text);
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
     app->pf = prefetch_start(&app->chain, app->map_name, app->read_ahead);
     prefetch_prepare_ground(app->pf, &app->ground_place, ground_on_card, app->ground);
     app->solids = collide_new(app->ox, app->oy);
     app->waters = liquid_new();
     app->water = water_new(&app->chain, &app->textures, &why);
-    if (!app->water) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (!app->water) return start_failed(app, 1, "%s", why.text);
     app->doodads = doodads_new(&app->chain, &app->textures, app->solids, app->waters, app->water, &why);
-    if (!app->doodads) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (!app->doodads) return start_failed(app, 1, "%s", why.text);
     app->horizon = horizon_new(&app->chain, app->map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
-    if (light_open(&lights, &app->chain, &why)) { fprintf(stderr, "%s\n", why.text); CloseWindow(); return 1; }
+    if (light_open(&lights, &app->chain, &why)) return start_failed(app, 1, "%s", why.text);
     app->sky = sky_new();
     LightNow light;
     int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
@@ -545,10 +627,14 @@ int main(int argc, char **argv)
         snprintf(path, sizeof path, "%s/creatures-%d.tsv", app->world_dir, app->map_id);
         WErr got = creatures_read(path, &app->spawns, &why);
         /* no list: said, and the world runs without creatures; a broken one stops the client */
-        if (got != W_OK && got != W_ERR_NOT_FOUND) { fprintf(stderr, "creatures: %s\n", why.text); CloseWindow(); return 1; }
+        if (got != W_OK && got != W_ERR_NOT_FOUND) return start_failed(app, 1, "creatures: %s", why.text);
         if (got == W_ERR_NOT_FOUND) fprintf(stderr, "creatures: %s\n", why.text);
         else printf("creatures: %d spawns on this map in %s\n", app->spawns.n, path);
     } else fprintf(stderr, "creatures: no --world folder given; running without creatures\n");
+    /* the login, realm and character screens (Phase 5 and 6) aren't built:
+     * every run, a test map's too, goes straight into the world. When they
+     * are, a test-map run passes over them, logging in to its realm with its
+     * account and W_CLIENT_PASSWORD's password (067-test-map.h; 1109) */
     refresh_tiles(app);
     stream_creatures(app, 60.0);                              /* all those near her at the start */
     printf("creatures: %d standing round her (built in %.2f s)\n", app->nstanding, app->creature_build_s);
@@ -806,6 +892,7 @@ int main(int argc, char **argv)
         app->phase_s[PH_FIGURES_DRAW] += GetTime() - figures_t0;
         EndMode3D();
         TIMED(PH_FINISH, EndDrawing());
+        goodbye_frame(app->bye);                                /* counted for the receipt (1109) */
 
         /* --shot: after 3 world-seconds, the picture, then quit */
         if (shot && ++frames == 60 + (int)((walk_s + dive_s + wait_s) * 20)) {   /* 3 world-seconds after any walk: particles have filled out */
@@ -886,10 +973,18 @@ int main(int argc, char **argv)
     free(app->standing);
     free(app->built_of);
     creatures_free(&app->spawns);
+    if (app->assets) resolver_report(app->assets, stdout);
+    resolver_free(app->assets);                               /* before the archives it reads from */
     mpq_chain_close(&app->chain);
     maps_world_free(&app->world);
     settings_free(app->settings);
+    /* the goodbye receipt, last (1109): its being there says the run ended
+     * by itself, not in a crash */
+    WErr bye = goodbye_end(app->bye, GOODBYE_CLOSED, NULL, &why);
+    if (bye) fprintf(stderr, "%s\n", why.text);
+    goodbye_free(app->bye);
+    test_map_free(app->test_map);
     free(app);
-    return 0;
+    return bye ? 1 : 0;
 }
 /* }}} */
