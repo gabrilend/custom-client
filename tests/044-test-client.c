@@ -43,6 +43,7 @@
 #include "../src/060-resolver.h"
 #include "../src/067-test-map.h"
 #include "../src/068-goodbye.h"
+#include "../src/061-mdx.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -224,6 +225,104 @@ static void check_vmap_placements(const char *dir, const AdtTile *t, int *pairs,
         }
         fclose(f);
     }
+}
+/* }}} */
+
+/* {{{ a small WC3 model written here (401 step 2): the writer's pieces.
+ * A chunk is its tag, its byte count and its body; a record with a size
+ * of its own counts itself; both are counted when closed. */
+typedef struct { unsigned char b[4096]; size_t n; } Bytes;
+static void put32(Bytes *o, uint32_t v) { for (int i = 0; i < 4; ++i) o->b[o->n++] = (unsigned char)(v >> (8 * i)); }
+static void put16(Bytes *o, uint16_t v) { o->b[o->n++] = (unsigned char)v; o->b[o->n++] = (unsigned char)(v >> 8); }
+static void putf(Bytes *o, float f) { uint32_t v; memcpy(&v, &f, 4); put32(o, v); }
+static void puttag(Bytes *o, const char *t) { memcpy(o->b + o->n, t, 4); o->n += 4; }
+static void putname(Bytes *o, const char *s, size_t len) { memset(o->b + o->n, 0, len); memcpy(o->b + o->n, s, strlen(s)); o->n += len; }
+static void putext(Bytes *o, float r) { putf(o, r); for (int i = 0; i < 3; ++i) putf(o, -r); for (int i = 0; i < 3; ++i) putf(o, r); }
+static void patch32(Bytes *o, size_t at, uint32_t v) { for (int i = 0; i < 4; ++i) o->b[at + i] = (unsigned char)(v >> (8 * i)); }
+static size_t open_chunk(Bytes *o, const char *t) { puttag(o, t); put32(o, 0); return o->n; }
+static void close_chunk(Bytes *o, size_t body) { patch32(o, body - 4, (uint32_t)(o->n - body)); }
+static size_t open_record(Bytes *o) { put32(o, 0); return o->n - 4; }
+static void close_record(Bytes *o, size_t at) { patch32(o, at, (uint32_t)(o->n - at)); }
+static unsigned char *find_tag(Bytes *o, const char *t) { for (size_t i = 0; i + 4 <= o->n; ++i) if (!memcmp(o->b + i, t, 4)) return o->b + i; return NULL; }
+/* a geoset: points (x y z, three a point), normals (as many as given),
+ * triangles, its material; one matrix group, all points in it */
+static void put_geoset(Bytes *o, const float *v, int nv, int nn, const uint16_t *tri, int nt, uint32_t material)
+{
+    size_t g = open_record(o);
+    puttag(o, "VRTX"); put32(o, (uint32_t)nv); for (int i = 0; i < nv * 3; ++i) putf(o, v[i]);
+    puttag(o, "NRMS"); put32(o, (uint32_t)nn); for (int i = 0; i < nn; ++i) { putf(o, 0); putf(o, 1); putf(o, 0); }
+    puttag(o, "PTYP"); put32(o, 1); put32(o, 4);
+    puttag(o, "PCNT"); put32(o, 1); put32(o, (uint32_t)nt);
+    puttag(o, "PVTX"); put32(o, (uint32_t)nt); for (int i = 0; i < nt; ++i) put16(o, tri[i]);
+    puttag(o, "GNDX"); put32(o, (uint32_t)nv); for (int i = 0; i < nv; ++i) o->b[o->n++] = 0;
+    puttag(o, "MTGC"); put32(o, 1); put32(o, 1);
+    puttag(o, "MATS"); put32(o, 1); put32(o, 0);
+    put32(o, material); put32(o, 0); put32(o, 0);
+    putext(o, 10); put32(o, 0);
+    puttag(o, "UVAS"); put32(o, 1);
+    puttag(o, "UVBS"); put32(o, (uint32_t)nv); for (int i = 0; i < nv; ++i) { putf(o, (float)i); putf(o, 0.5f); }
+    close_record(o, g);
+}
+/* The model: three sequences ("Stand Ready" first, then "Stand 1" from
+ * 1000 to 2000, "Death"); two pictures (team colour, a named one); two
+ * materials (team colour under a blended skin whose alpha is animated;
+ * one additive, unshaded, two-sided, unfogged, sphere-mapped layer);
+ * three geosets (a square, a triangle with no normals that its geoset
+ * animation hides at Stand's start, a triangle naming a material that
+ * isn't there); two bones and a helper, their pivots. */
+static void made_mdx(Bytes *o)
+{
+    o->n = 0;
+    puttag(o, "MDLX");
+    size_t c = open_chunk(o, "VERS"); put32(o, 800); close_chunk(o, c);
+    c = open_chunk(o, "MODL"); putname(o, "Made here", 80); putname(o, "", 260); putext(o, 20); put32(o, 150); close_chunk(o, c);
+    c = open_chunk(o, "SEQS");
+    static const char *const names[3] = { "Stand Ready", "Stand 1", "Death" };
+    static const uint32_t from[3] = { 0, 1000, 3000 }, to[3] = { 900, 2000, 4000 };
+    for (int i = 0; i < 3; ++i) {
+        putname(o, names[i], 80); put32(o, from[i]); put32(o, to[i]); putf(o, 0); put32(o, i == 2); putf(o, 0); put32(o, 0); putext(o, 20);
+    }
+    close_chunk(o, c);
+    c = open_chunk(o, "TEXS");
+    put32(o, 1); putname(o, "", 260); put32(o, 0);
+    put32(o, 0); putname(o, "Textures\\Made.blp", 260); put32(o, 3);
+    close_chunk(o, c);
+    c = open_chunk(o, "MTLS");
+    size_t mat = open_record(o); put32(o, 0); put32(o, 0); puttag(o, "LAYS"); put32(o, 2);
+    size_t ly = open_record(o); put32(o, 0); put32(o, 0); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); close_record(o, ly);
+    ly = open_record(o); put32(o, 2); put32(o, 0); put32(o, 1); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 0.8f);
+    puttag(o, "KMTA"); put32(o, 3); put32(o, 1); put32(o, (uint32_t)-1);
+    put32(o, 0); putf(o, 0.2f); put32(o, 1000); putf(o, 0.6f); put32(o, 2000); putf(o, 0.9f);
+    close_record(o, ly); close_record(o, mat);
+    mat = open_record(o); put32(o, 0); put32(o, 0); puttag(o, "LAYS"); put32(o, 1);
+    ly = open_record(o); put32(o, 4); put32(o, 1 | 2 | 16 | 32); put32(o, 1); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); close_record(o, ly);
+    close_record(o, mat);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOS");
+    static const float sq[12] = { 0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0 }, tr[9] = { 0, 0, 5, 5, 0, 5, 5, 5, 5 }, tr2[9] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    static const uint16_t sq_t[6] = { 0, 1, 2, 0, 2, 3 }, tr_t[3] = { 0, 1, 2 };
+    put_geoset(o, sq, 4, 4, sq_t, 6, 0);
+    put_geoset(o, tr, 3, 0, tr_t, 3, 1);
+    put_geoset(o, tr2, 3, 3, tr_t, 3, 7);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOA");
+    size_t ga = open_record(o); putf(o, 1); put32(o, 0); putf(o, 1); putf(o, 1); putf(o, 1); put32(o, 1);
+    puttag(o, "KGAO"); put32(o, 2); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 1); put32(o, 1000); putf(o, 0);
+    close_record(o, ga);
+    close_chunk(o, c);
+    c = open_chunk(o, "BONE");
+    size_t nd = open_record(o); putname(o, "root", 80); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 256);
+    puttag(o, "KGTR"); put32(o, 2); put32(o, 1); put32(o, (uint32_t)-1);
+    put32(o, 1000); putf(o, 0); putf(o, 0); putf(o, 0); put32(o, 2000); putf(o, 10); putf(o, 0); putf(o, 0);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    nd = open_record(o); putname(o, "arm", 80); put32(o, 1); put32(o, 0); put32(o, 256); close_record(o, nd); put32(o, 1); put32(o, (uint32_t)-1);
+    close_chunk(o, c);
+    c = open_chunk(o, "HELP");
+    nd = open_record(o); putname(o, "ref", 80); put32(o, 2); put32(o, 1); put32(o, 0); close_record(o, nd);
+    close_chunk(o, c);
+    c = open_chunk(o, "PIVT");
+    for (int i = 0; i < 9; ++i) putf(o, (float)i);
+    close_chunk(o, c);
 }
 /* }}} */
 
@@ -1120,6 +1219,75 @@ int main(int argc, char **argv)
     /* {{{ the test map's launch and receipt (1109): folders made here, no game data */
     printf("the test map's launch and its goodbye receipt\n");
     test_map_tests(dir);
+    /* }}} */
+
+    /* {{{ WC3's models (MDX, issue 401 step 2): one written here. It needs
+     * none of the game's files, so it comes before the archives, which
+     * end the program when the client's files aren't there. Every WC3
+     * model in war3.mpq is held to world-edit-to-execute's Lua reader by
+     * tests/062-mdx-matches-lua.lua. */
+    printf("WC3's models (MDX)\n");
+    {
+        static Bytes fb;
+        made_mdx(&fb);
+        MdxModel x;
+        WWhy mw;
+        int read = mdx_read(fb.b, fb.n, &x, &mw) == W_OK;
+        check(read, read ? "a WC3 model written here reads" : mw.text);
+        if (read) {
+            M2Model *d = &x.model;
+            check(x.version == 800 && !strcmp(x.name, "Made here") && x.blend_time == 150 && x.nsequences == 3,
+                  "its version (800), name, blend time and three sequences");
+            check(mdx_sequence(&x, "stand") == 1 && mdx_sequence(&x, "death") == 2 && mdx_sequence(&x, "walk") == 0,
+                  "\"stand\" is Stand 1, not Stand Ready; a name it hasn't gives the first");
+            check(d->ntextures == 2 && d->textures[0].kind == M2_TEXTURE_WC3 + 1 && d->textures[1].kind == 0
+                  && !strcmp(d->textures[1].file, "Textures\\Made.blp") && d->textures[1].flags == 3,
+                  "its pictures: team colour as WC3's replaceable 1, kept apart from the game's kinds; a named one, wrapping both ways");
+            snprintf(line, sizeof line, "every geoset's points in one list (%u of 10), the triangle's after the square's", d->nvertices);
+            check(d->nvertices == 10 && x.geosets[1].vertices.first == 4 && d->vertices[5].x == 5 && d->vertices[5].z == 5, line);
+            check(d->vertices[4].nx == 0 && d->vertices[4].nz == 1 && d->vertices[0].ny == 1 && d->vertices[5].u == 1 && d->vertices[5].v == 0.5f,
+                  "a geoset with no normals faces up; normals and picture positions as given elsewhere");
+            check(d->npieces == 3 && d->pieces[0].count == 6 && d->pieces[1].first == 6 && d->pieces[1].count == 3 && d->indices[6] == 4
+                  && d->pieces[1].id == 1, "a piece a geoset, its triangles as model point numbers");
+            check(d->nunits == 4, "a unit a geoset and material layer (2 + 1), and one plain unit for a geoset whose material isn't there");
+            if (d->nunits == 4) {
+                M2Unit *u = d->units;
+                check(u[0].blend == 0 && u[0].texture == 0 && u[1].blend == 2 && u[1].texture == 1 && u[0].piece == 0 && u[1].piece == 0,
+                      "the square: team colour (opaque) under its blended skin, WC3's filter modes as M2's blends");
+                check(u[2].blend == 4 && u[2].flags == (0x1 | 0x2 | 0x4) && u[2].uvset[0] == -1,
+                      "an add-alpha layer: unshaded, unfogged and two-sided as M2's flags, sphere-mapped as a reflection");
+                snprintf(line, sizeof line, "the skin's alpha at rest is its track's at Stand 1's start (%.3f; 0.6, not 0.2 at 0 nor 0.8 unanimated)", u[1].alpha);
+                check(near(u[1].alpha, 0.6, 1e-6), line);
+                check(u[2].alpha == 0 && u[0].alpha == 1, "the triangle is hidden at rest, its geoset animation's alpha 0 at Stand's start");
+                check(x.unit_layer[3] == -1 && u[3].blend == 0 && u[3].alpha == 1 && u[3].tex[0] == 0 && u[3].piece == 2,
+                      "the geoset with no such material: one plain opaque layer, the first picture");
+            }
+            int ref = mdx_node(&x, 2);
+            check(x.nnodes == 3 && ref == 2 && x.nodes[ref].kind == MDX_HELPER && x.nodes[ref].parent == 1 && x.npivots == 3
+                  && x.nodes[0].geoset == 0 && x.nodes[1].geoset == 1 && x.pivots[2][1] == 7,
+                  "two bones and a helper, each by its id, with its parent and pivot");
+            double v[4], def[3] = { 0, 0, 0 };
+            const MdxTrack *t = mdx_track(&x, x.nodes[0].tracks, "KGTR");
+            int n = mdx_sample(&x, t, 1500, def, 3, 1, 1000, 2000, 0, v);
+            check(t && n == 3 && near(v[0], 5, 1e-12) && v[1] == 0, "the root's move halfway through Stand 1: halfway (5, 0, 0)");
+            n = mdx_sample(&x, mdx_track(&x, x.nodes[1].tracks, "KGTR"), 1500, def, 3, 1, 1000, 2000, 0, v);
+            check(n == 3 && v[0] == 0, "a node with no move track: the default");
+            mdx_free(&x);
+        }
+        static Bytes cut;
+        cut = fb;
+        check(mdx_read(cut.b, cut.n / 2, &x, &mw) == W_ERR_CORRUPT && mw.text[0], "cut in half: corrupt, with where it stopped");
+        cut.b[0] = 'X';
+        check(mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT, "no MDLX mark: corrupt");
+        cut = fb;
+        unsigned char *kg = find_tag(&cut, "KGAO");
+        if (kg) memcpy(kg, "KZZZ", 4);
+        check(kg && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "KZZZ"), "a track tag no record has: corrupt, naming it");
+        cut = fb;
+        unsigned char *nr = find_tag(&cut, "NRMS");
+        if (nr) memcpy(nr, "NRMX", 4);
+        check(nr && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "NRMS"), "a geoset whose normals are misnamed: corrupt, saying what was expected");
+    }
     /* }}} */
 
     /* {{{ the archives */
