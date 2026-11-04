@@ -11,7 +11,7 @@ VM is wired in and no addon loader exists.
 |----|-------|--------|------------|
 | 701 | [The Lua environment](./701-the-lua-environment.md) | not started | LuaJIT on the build machine |
 | 702 | [The XML reader](./702-the-xml-reader.md) | partly built | 701 (running its scripts), 709 (acting on their taint) |
-| 703 | [Frames: anchors, scale, and layers](./703-frames-anchors-and-layers.md) | not started | 702, 701 |
+| 703 | [Frames: anchors, scale, and layers](./703-frames-anchors-and-layers.md) | partly built | the input part (raising on click, input order), 705 (its Lua methods) |
 | 704 | [Events and the per-frame update](./704-events-and-the-per-frame-update.md) | not started | 703 |
 | 705 | [The interface functions](./705-interface-functions.md) | not started | 703, 704 |
 | 706 | [The addon loader](./706-the-addon-loader.md) | not started | 701, 702, 704 |
@@ -41,3 +41,15 @@ scripts kept with their taint, and the interface log
 test program on files it writes, alone and under the address and
 undefined-behaviour checkers. Running the scripts waits for 701, acting
 on their taint for 709. 701 and 706 written.
+
+2026-11-04: 703's window-free part built on branch
+`claude/frames-and-anchors` (stacked on `claude/framexml-reader`): the
+frame tree (`src/071-frames.c`: anchors into rectangles with the
+waiting list and its limits, circles left unplaced, scale, clamping,
+strata and levels, shown and visible, draw layers and the draw order,
+two quirk switches) and 066's objects built into it
+(`src/072-frames-xml.c`, the "XML level 0" switch), both in CORE; 73
+checks in the test program on C calls and XML it writes, alone and
+under the address and undefined-behaviour checkers, and fuzz runs that
+found one fix. Input order, raising on click and the Lua methods wait
+for the input part, 704 and 705.
