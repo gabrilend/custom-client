@@ -40,6 +40,7 @@ picture options; this page doesn't copy numbers that go stale.
 | `022-m2.c` | models (`.m2` + `00.skin`) | points, pieces, units (pictures, layers, blends, tints), solid shapes |
 | `061-mdx.c` | Warcraft III's models (`.mdx`, from `war3.mpq`) | the same points, pieces and units as `022-m2.c` gives, and beside them its sequences, skeleton (bones, helpers, pivots) and animated values (for 402); not yet drawn by any part |
 | `023-anim.c` | the same models (and `.anim` files) | skeletons, animations, poses, bent points, picture animations |
+| `069-mdx-anim.c` | Warcraft III's models as `061-mdx.c` reads them | every node's matrix at a moment of a sequence, the matrix groups the points follow (in the same shape as `023-anim.c`'s poses), each unit's alpha, the attachment points; not yet drawn by any part |
 | `024-particles.c` | the same models | particle emitters, and their particles run over time |
 | `021-wmo.c` | buildings (root + group files) | materials, furniture sets, parts' points and batches, solid flags, pools |
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |

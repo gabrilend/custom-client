@@ -40,6 +40,7 @@
 #include "../src/021-wmo.h"
 #include "../src/049-jpeg.h"
 #include "../src/061-mdx.h"
+#include "../src/069-mdx-anim.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -222,7 +223,7 @@ static void check_vmap_placements(const char *dir, const AdtTile *t, int *pairs,
 /* {{{ a small WC3 model written here (401 step 2): the writer's pieces.
  * A chunk is its tag, its byte count and its body; a record with a size
  * of its own counts itself; both are counted when closed. */
-typedef struct { unsigned char b[4096]; size_t n; } Bytes;
+typedef struct { unsigned char b[16384]; size_t n; } Bytes;
 static void put32(Bytes *o, uint32_t v) { for (int i = 0; i < 4; ++i) o->b[o->n++] = (unsigned char)(v >> (8 * i)); }
 static void put16(Bytes *o, uint16_t v) { o->b[o->n++] = (unsigned char)v; o->b[o->n++] = (unsigned char)(v >> 8); }
 static void putf(Bytes *o, float f) { uint32_t v; memcpy(&v, &f, 4); put32(o, v); }
@@ -315,6 +316,153 @@ static void made_mdx(Bytes *o)
     for (int i = 0; i < 9; ++i) putf(o, (float)i);
     close_chunk(o, c);
 }
+/* }}} */
+
+/* {{{ a WC3 model written here to be posed (402 step 4): its writer's pieces.
+ * A track: its tag, way, global sequence, then each key's frame and
+ * value (`width` floats), with an in and an out tangent for ways 2 and 3
+ * (vals holds them in that order). A node: its name, id, parent, flags,
+ * then its tracks, counted when closed. */
+static void put_track(Bytes *o, const char *tag, uint32_t way, int32_t global, int nkeys, int width,
+                      const int32_t *frames, const float *vals)
+{
+    int each = width * (way > 1 ? 3 : 1);
+    puttag(o, tag); put32(o, (uint32_t)nkeys); put32(o, way); put32(o, (uint32_t)global);
+    for (int k = 0; k < nkeys; ++k) { put32(o, (uint32_t)frames[k]); for (int i = 0; i < each; ++i) putf(o, vals[k * each + i]); }
+}
+static size_t open_node(Bytes *o, const char *name, int32_t id, int32_t parent, uint32_t flags)
+{
+    size_t at = open_record(o);
+    putname(o, name, 80); put32(o, (uint32_t)id); put32(o, (uint32_t)parent); put32(o, flags);
+    return at;
+}
+/* a geoset with its own matrix groups: each point's group, the groups' sizes, their nodes' ids */
+static void put_grouped(Bytes *o, const float *v, int nv, uint32_t material, const unsigned char *vg, int nvg,
+                        const uint32_t *sizes, int nsizes, const uint32_t *ids, int nids)
+{
+    size_t g = open_record(o);
+    puttag(o, "VRTX"); put32(o, (uint32_t)nv); for (int i = 0; i < nv * 3; ++i) putf(o, v[i]);
+    puttag(o, "NRMS"); put32(o, (uint32_t)nv); for (int i = 0; i < nv; ++i) { putf(o, 0); putf(o, 0); putf(o, 1); }
+    puttag(o, "PTYP"); put32(o, 1); put32(o, 4);
+    puttag(o, "PCNT"); put32(o, 1); put32(o, 3);
+    puttag(o, "PVTX"); put32(o, 3); put16(o, 0); put16(o, 1); put16(o, 2);
+    puttag(o, "GNDX"); put32(o, (uint32_t)nvg); for (int i = 0; i < nvg; ++i) o->b[o->n++] = vg[i];
+    puttag(o, "MTGC"); put32(o, (uint32_t)nsizes); for (int i = 0; i < nsizes; ++i) put32(o, sizes[i]);
+    puttag(o, "MATS"); put32(o, (uint32_t)nids); for (int i = 0; i < nids; ++i) put32(o, ids[i]);
+    put32(o, material); put32(o, 0); put32(o, 0);
+    putext(o, 10); put32(o, 0);
+    puttag(o, "UVAS"); put32(o, 1);
+    puttag(o, "UVBS"); put32(o, (uint32_t)nv); for (int i = 0; i < nv * 2; ++i) putf(o, 0);
+    close_record(o, g);
+}
+/* The model: Stand (0 to 1000) and Walk (2000 to 3000); one global
+ * sequence of 400 ms; a chain of bones four deep, each with one way:
+ *   root  (id 0, pivot 0 0 0)    moves in a straight line, (0, 0, 0) to (10, 0, 0) over Stand
+ *   upper (id 1, pivot 10 0 0)   turns with way 0: none, then a quarter about z from 500
+ *   lower (id 2, pivot 20 0 0)   stretches along a hermite curve, flat tangents, 1 to 3
+ *   hand  (id 3, pivot 30 0 0)   moves along a bezier, both keys at 0, tangents lifting it 4 in z
+ * a helper on the hand turning on the global sequence (id 4: none, half
+ * a turn about z at 200, none again at 400), an attachment on the hand
+ * (id 5, pivot 30 0 5), a billboarded bone on upper (id 6, no tracks).
+ * Two geosets: the first's points in groups {root}, {lower, hand},
+ * {root} again; the second's naming a group it hasn't (standing as made).
+ * One material layer at alpha 0.5; the first geoset's animation fades
+ * it out by way 0 at 600. */
+static void posed_mdx(Bytes *o)
+{
+    const float s = sqrtf(0.5f);
+    o->n = 0;
+    puttag(o, "MDLX");
+    size_t c = open_chunk(o, "VERS"); put32(o, 800); close_chunk(o, c);
+    c = open_chunk(o, "MODL"); putname(o, "Posed here", 80); putname(o, "", 260); putext(o, 20); put32(o, 150); close_chunk(o, c);
+    c = open_chunk(o, "SEQS");
+    static const char *const names[2] = { "Stand", "Walk" };
+    for (int i = 0; i < 2; ++i) {
+        putname(o, names[i], 80); put32(o, (uint32_t)(i * 2000)); put32(o, (uint32_t)(i * 2000 + 1000));
+        putf(o, 0); put32(o, 0); putf(o, 0); put32(o, 0); putext(o, 20);
+    }
+    close_chunk(o, c);
+    c = open_chunk(o, "GLBS"); put32(o, 400); close_chunk(o, c);
+    c = open_chunk(o, "TEXS"); put32(o, 0); putname(o, "Textures\\Posed.blp", 260); put32(o, 0); close_chunk(o, c);
+    c = open_chunk(o, "MTLS");
+    size_t mat = open_record(o); put32(o, 0); put32(o, 0); puttag(o, "LAYS"); put32(o, 1);
+    size_t ly = open_record(o); put32(o, 2); put32(o, 0); put32(o, 0); put32(o, (uint32_t)-1); put32(o, 0); putf(o, 0.5f); close_record(o, ly);
+    close_record(o, mat);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOS");
+    static const float sq[12] = { 0, 0, 0, 30, 0, 0, 30, 0, 0, 0, 10, 0 }, tri[9] = { 1, 1, 1, 2, 2, 2, 3, 3, 3 };
+    static const unsigned char vg0[4] = { 0, 1, 1, 2 }, vg1[3] = { 0, 0, 5 };
+    static const uint32_t sz0[3] = { 1, 2, 1 }, id0[4] = { 0, 2, 3, 0 }, sz1[1] = { 1 }, id1[1] = { 1 };
+    put_grouped(o, sq, 4, 0, vg0, 4, sz0, 3, id0, 4);
+    put_grouped(o, tri, 3, 0, vg1, 3, sz1, 1, id1, 1);
+    close_chunk(o, c);
+    c = open_chunk(o, "GEOA");
+    size_t ga = open_record(o); putf(o, 1); put32(o, 0); putf(o, 1); putf(o, 1); putf(o, 1); put32(o, 0);
+    static const int32_t fade_at[2] = { 0, 600 };
+    static const float fade[2] = { 1, 0 };
+    put_track(o, "KGAO", 0, -1, 2, 1, fade_at, fade);
+    close_record(o, ga);
+    close_chunk(o, c);
+    c = open_chunk(o, "BONE");
+    static const int32_t ends[2] = { 0, 1000 }, turn_at[2] = { 0, 500 };
+    static const float moves[6] = { 0, 0, 0, 10, 0, 0 };
+    size_t nd = open_node(o, "root", 0, -1, 256); put_track(o, "KGTR", 1, -1, 2, 3, ends, moves);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    float turns[8] = { 0, 0, 0, 1, 0, 0, s, s };
+    nd = open_node(o, "upper", 1, 0, 256); put_track(o, "KGRT", 0, -1, 2, 4, turn_at, turns);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    static const float stretch[18] = { 1, 1, 1, 0, 0, 0, 0, 0, 0, 3, 3, 3, 0, 0, 0, 0, 0, 0 };
+    nd = open_node(o, "lower", 2, 1, 256); put_track(o, "KGSC", 2, -1, 2, 3, ends, stretch);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    static const float lift[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 4, 0, 0, 0 };
+    nd = open_node(o, "hand", 3, 2, 256); put_track(o, "KGTR", 3, -1, 2, 3, ends, lift);
+    close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    nd = open_node(o, "billboarded", 6, 1, 256 | 8); close_record(o, nd); put32(o, 0); put32(o, (uint32_t)-1);
+    close_chunk(o, c);
+    c = open_chunk(o, "HELP");
+    static const int32_t spin_at[3] = { 0, 200, 400 };
+    static const float spin[12] = { 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1 };
+    nd = open_node(o, "spinner", 4, 3, 0); put_track(o, "KGRT", 1, 0, 3, 4, spin_at, spin); close_record(o, nd);
+    close_chunk(o, c);
+    c = open_chunk(o, "ATCH");
+    size_t at = open_record(o);
+    nd = open_node(o, "Hand Ref", 5, 3, 2048); close_record(o, nd);
+    putname(o, "", 260); put32(o, 0);
+    close_record(o, at);
+    close_chunk(o, c);
+    c = open_chunk(o, "PIVT");
+    static const float piv[21] = { 0, 0, 0, 10, 0, 0, 20, 0, 0, 30, 0, 0, 0, 0, 0, 30, 0, 5, 10, 0, 0 };
+    for (int i = 0; i < 21; ++i) putf(o, piv[i]);
+    close_chunk(o, c);
+}
+/* bones alone (no pieces, one sequence): `n` of them, bone k's parent
+ * parents[k] (n <= 80) */
+static void bones_mdx(Bytes *o, int n, const int32_t *parents)
+{
+    o->n = 0;
+    puttag(o, "MDLX");
+    size_t c = open_chunk(o, "VERS"); put32(o, 800); close_chunk(o, c);
+    c = open_chunk(o, "SEQS");
+    putname(o, "Stand", 80); put32(o, 0); put32(o, 1000); putf(o, 0); put32(o, 0); putf(o, 0); put32(o, 0); putext(o, 20);
+    close_chunk(o, c);
+    c = open_chunk(o, "BONE");
+    static const int32_t ends[2] = { 0, 1000 };
+    static const float moves[6] = { 0, 0, 0, 1, 0, 0 };
+    for (int k = 0; k < n; ++k) {
+        char name[24];
+        snprintf(name, sizeof name, "link %d", k);
+        size_t nd = open_node(o, name, k, parents[k], 256); put_track(o, "KGTR", 1, -1, 2, 3, ends, moves);
+        close_record(o, nd); put32(o, (uint32_t)-1); put32(o, (uint32_t)-1);
+    }
+    close_chunk(o, c);
+}
+/* a 3 x 4 matrix (rows) applied to a point */
+static void apply34(const double w[12], double x, double y, double z, double out[3])
+{
+    for (int r = 0; r < 3; ++r) out[r] = w[r * 4] * x + w[r * 4 + 1] * y + w[r * 4 + 2] * z + w[r * 4 + 3];
+}
+/* within 1e-4: the file's turns are floats, so a quarter turn is a quarter to about 1e-7 */
+static int near3(const double a[3], double x, double y, double z) { return near(a[0], x, 1e-4) && near(a[1], y, 1e-4) && near(a[2], z, 1e-4); }
 /* }}} */
 
 /* {{{ static run: seconds of steps of 0.01 s */
@@ -496,6 +644,111 @@ int main(int argc, char **argv)
         unsigned char *nr = find_tag(&cut, "NRMS");
         if (nr) memcpy(nr, "NRMX", 4);
         check(nr && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "NRMS"), "a geoset whose normals are misnamed: corrupt, saying what was expected");
+    }
+    /* }}} */
+
+    /* {{{ WC3's models posed (402 step 4): the model written here, at and
+     * between keys and past a sequence's end, by every way. Needs none of
+     * the game's files. Held to world-edit-to-execute's Lua (anim.lua)
+     * by tests/070-mdx-anim-matches-lua.lua. */
+    printf("WC3's models posed\n");
+    {
+        static Bytes pb;
+        posed_mdx(&pb);
+        MdxModel x;
+        MdxRig rig;
+        WWhy mw;
+        int read = mdx_read(pb.b, pb.n, &x, &mw) == W_OK;
+        check(read, read ? "a WC3 model with a skeleton written here reads" : mw.text);
+        int built = read && mdx_rig_build(&x, &rig, &mw) == W_OK;
+        if (read) check(built, built ? "its rig builds" : mw.text);
+        if (built) {
+            static const int32_t want[7] = { 0, 1, 2, 6, 3, 4, 5 };
+            int order = rig.nnodes == 7;
+            for (uint32_t k = 0; order && k < 7; ++k) order = rig.nodes[k].id == want[k];
+            check(order && rig.nodes[0].parent == -1 && rig.nodes[4].parent == 2 && rig.nodes[5].parent == 4,
+                  "its nodes posed parents first: by depth, then by id (0, 1, 2, 6, 3, 4, 5)");
+            check(rig.ngroups == 3 && rig.point_group[0] == rig.point_group[3] && rig.point_group[0] != 0
+                  && rig.point_group[1] == rig.point_group[2] && rig.groups[rig.point_group[1]].count == 2,
+                  "its groups: the empty one, {root} (the first geoset names it twice: kept once) and {lower, hand}");
+            check(rig.geoset_groups[1].count == 0 && rig.point_group[4] == 0 && rig.point_group[6] == 0 && rig.on_clock == 1,
+                  "a geoset whose point names a group it hasn't stands as made (group 0); the helper follows a global sequence");
+            double w[7][12], w2[7][12], p[3];
+            float alpha[2], poses[3][16];
+            WErr e = mdx_rig_pose(&rig, 0, 500, 0, w, alpha, &mw);
+            check(e == W_OK, e == W_OK ? "Stand poses at 500" : mw.text);
+            apply34(w[0], 0, 0, 0, p);
+            check(near3(p, 5, 0, 0), "the root halfway along its straight line: (5, 0, 0)");
+            apply34(w[1], 20, 0, 0, p);
+            check(near3(p, 15, 10, 0), "upper's way 0 turn at its key (a quarter about its pivot): (20, 0, 0) goes to (15, 10, 0)");
+            apply34(w[2], 30, 0, 0, p);
+            check(near3(p, 15, 30, 0), "lower's hermite stretch halfway: 2, so (30, 0, 0) goes to (15, 30, 0)");
+            apply34(w[4], 30, 0, 0, p);
+            check(near3(p, 15, 30, 6), "the hand's bezier lift halfway: 3 though both keys are 0, under three parents: (15, 30, 6)");
+            check(!memcmp(w[3], w[1], sizeof w[1]), "the billboarded bone turns with its parent (as anim.lua; WC3's facing the camera is not built)");
+            check(mdx_rig_attachment(&rig, (const double (*)[12])w, 5, p) == 1 && near3(p, 15, 30, 16) && mdx_rig_attachment(&rig, (const double (*)[12])w, 4, p) == 0,
+                  "the attachment on the hand at (15, 30, 16); a helper is no attachment");
+            check(alpha[0] == 0.5f && alpha[1] == 0.5f, "both units' alpha: the layer's 0.5, the geoset animation's 1 before 600");
+            mdx_rig_groups(&rig, (const double (*)[12])w, poses);
+            float in[3] = { 30, 0, 0 }, nin[3] = { 1, 0, 0 }, out[3], nout[3];
+            mdx_rig_skin_point(&rig, (const float (*)[16])poses, 1, in, out, nin, nout);
+            check(near(out[0], 15, 1e-4) && near(out[1], 30, 1e-4) && near(out[2], 3, 1e-4) && near(nout[1], 1, 1e-6),
+                  "a point of {lower, hand} follows their average: (30, 0, 0) to (15, 30, 3), facing turned a quarter");
+            mdx_rig_skin_point(&rig, (const float (*)[16])poses, 6, in, out, NULL, NULL);
+            check(out[0] == 30 && out[1] == 0 && poses[0][0] == 1 && poses[0][12] == 0, "a point of group 0 stays where it was made");
+            mdx_rig_pose(&rig, 0, 250, 0, w, alpha, &mw);
+            apply34(w[2], 30, 0, 0, p);
+            snprintf(line, sizeof line, "a quarter of the way, the hermite stretch is 1.3125, not a straight line's 1.5 (%.4f)", (p[0] - 2.5 - 20) / 10);
+            check(near(p[0], 35.625, 1e-9) && near(p[1], 0, 1e-9), line);
+            apply34(w[1], 20, 0, 0, p);
+            check(near3(p, 22.5, 0, 0), "upper's way 0 turn holds the earlier key until the next: none at 250");
+            mdx_rig_pose(&rig, 0, 1500, 0, w, alpha, &mw);
+            apply34(w[0], 0, 0, 0, p);
+            check(near3(p, 10, 0, 0) && alpha[0] == 0, "past Stand's end the last keys hold: the root at (10, 0, 0), the first geoset faded out");
+            mdx_rig_pose(&rig, 0, -100, 0, w, alpha, &mw);
+            apply34(w[0], 0, 0, 0, p);
+            check(near3(p, 0, 0, 0), "before Stand's start the first keys hold");
+            mdx_rig_pose(&rig, 1, 2500, 0, w, alpha, &mw);
+            apply34(w[4], 30, 0, 0, p);
+            check(near3(p, 30, 0, 0) && alpha[0] == 0.5f, "Walk, with no keys inside it, stands at rest (its geoset shown: the fade is only Stand's)");
+            mdx_rig_pose(&rig, 0, 500, 0, w, NULL, &mw);
+            check(!memcmp(w[5], w[4], sizeof w[4]), "the global helper at clock 0: no turn, the hand's matrix");
+            mdx_rig_pose(&rig, 0, 500, 100, w, NULL, &mw);
+            mdx_rig_pose(&rig, 0, 500, 500, w2, NULL, &mw);
+            apply34(w[5], 1, 0, 0, p);
+            double h[3];
+            apply34(w[4], 0, 1, 0, h);
+            check(near3(p, h[0], h[1], h[2]) && !memcmp(w[5], w2[5], sizeof w[5]),
+                  "the global helper at clock 100: a quarter turn (halfway to half), and the same at 500 (400 later, its loop)");
+            e = mdx_rig_pose(&rig, 2, 0, 0, w, alpha, &mw);
+            check(e == W_ERR_NOT_FOUND && strstr(mw.text, "no sequence 2"), "a sequence the model hasn't: not found, saying which");
+            mdx_rig_free(&rig);
+        }
+        if (read) mdx_free(&x);
+
+        /* parents round in a loop, and a chain seventy deep: C's own rules */
+        static const int32_t loop[3] = { 1, 0, 2 };
+        bones_mdx(&pb, 3, loop);
+        read = mdx_read(pb.b, pb.n, &x, &mw) == W_OK && mdx_rig_build(&x, &rig, &mw) == W_OK;
+        check(read && rig.nnodes == 3 && rig.nodes[0].id == 1 && rig.nodes[0].parent == -1 && rig.nodes[1].id == 2 && rig.nodes[1].parent == -1
+              && rig.nodes[2].id == 0 && rig.nodes[2].parent == 0,
+              "parents round in a loop (0 under 1 under 0) are cut once, where the walk up from 0 comes back: 1 a root, 0 under it; a bone its own parent a root");
+        if (read) { mdx_rig_free(&rig); mdx_free(&x); }
+        int32_t deep[70];                                  /* the root last (id 69), so the walk up from id 0 climbs all seventy */
+        for (int k = 0; k < 70; ++k) deep[k] = k == 69 ? -1 : k + 1;
+        bones_mdx(&pb, 70, deep);
+        read = mdx_read(pb.b, pb.n, &x, &mw) == W_OK && mdx_rig_build(&x, &rig, &mw) == W_OK;
+        int chained = read && rig.nnodes == 70;
+        for (uint32_t k = 0; chained && k < 70; ++k) chained = rig.nodes[k].id == 69 - (int32_t)k && rig.nodes[k].parent == (int32_t)k - 1;
+        if (chained) {
+            static double dw[70][12];
+            mdx_rig_pose(&rig, 0, 1000, 0, dw, NULL, &mw);
+            double q[3];
+            apply34(dw[69], 0, 0, 0, q);
+            chained = near3(q, 70, 0, 0);
+        }
+        check(chained, "a chain seventy deep keeps every parent (anim.lua's guard stops at 64): its end moved 70 by seventy moves of 1");
+        if (read) { mdx_rig_free(&rig); mdx_free(&x); }
     }
     /* }}} */
 

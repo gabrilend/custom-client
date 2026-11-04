@@ -95,6 +95,13 @@ in `src/`.
   as M2's material flags, replaceable pictures as their own kinds.
 - Held field by field to the Lua reader by
   `tests/062-mdx-matches-lua.lua`.
+- Posed since 2026-11-04 by `src/069-mdx-anim.c` (issue 402 step 4; the
+  C twin of world-edit-to-execute's `src/assets/anim.lua`): a node's
+  matrix is its parent's times its move, turn and stretch about its
+  pivot, sampled from the keys inside the playing sequence (or its
+  global sequence's loop); a point follows the average of its matrix
+  group's nodes, so each group is one of the drawing's bones. Held bit
+  for bit to the Lua by `tests/070-mdx-anim-matches-lua.lua`.
 
 ## WMO — world map objects (buildings, dungeons)
 
