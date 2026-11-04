@@ -35,7 +35,10 @@ which puts replacement packs, the server's assets and loose overlay
 folders in front of the archives, with a placeholder after them. It is
 built and tested, but every reader below still asks the archives
 directly; each part switches to it with its own issue (204 for
-pictures first).
+pictures first). A test-map run (`--test-map`, issue 1109: a map handed
+in by world-edit-to-execute's editor) opens one, with the map's folder
+first of the overlays, and ends by writing a goodbye receipt the editor
+reads back (`067-test-map.c`, `068-goodbye.c`).
 
 ## 2. From the archives to things in memory (no window needed)
 

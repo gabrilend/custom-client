@@ -13,12 +13,20 @@ of this client.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 1108 | [Phase 11 demo](./1108-phase-demo.md) | pending | Phase 4, Phase 7 |
-| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | pending (decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer) | 401, 302, 105a, world-edit-to-execute's W02 |
+| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet). Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
 
 The capstone names the issues to be written when the phase begins
 (1101 the RTS camera, 1102 picking, 1103 selection, 1104 orders, 1105 the
 command card, 1106 the minimap, 1107 loading a converted map); 1109 shares
 1101 to 1103.
+
+2026-11-04: 1109's step 1. `--test-map FOLDER --receipt FILE` (with
+`--camera`, `--realm`, `--account`, the password from
+`W_CLIENT_PASSWORD`) opens the client with the map's folder first of the
+resolver's overlays and writes a goodbye receipt when it ends, which the
+editor reads back; the contract is in 1109. 52 checks in the test
+program; the main program's part is compile-checked only (no raylib
+where it was written).
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.
