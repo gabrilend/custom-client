@@ -41,6 +41,8 @@
 #include "../src/049-jpeg.h"
 #include "../src/065-xml.h"
 #include "../src/066-framexml.h"
+#include "../src/071-frames.h"
+#include "../src/072-frames-xml.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -707,6 +709,599 @@ static void check_framexml(void)
 }
 /* }}} 702 checks */
 
+/* {{{ 703 helpers: frames, anchors and layers (071-frames, 072-frames-xml) */
+static int fr_resized;                               /* `resized` calls heard */
+static int fr_watch = FRAMES_NONE, fr_poke = FRAMES_NONE;
+static Frames *fr_tree;                              /* the tree fr_on_resized changes */
+static void fr_on_resized(void *ctx, int id)         /* OnSizeChanged that widens another frame each time: never settles */
+{
+    (void)ctx;
+    Frames *f = fr_tree;
+    ++fr_resized;
+    if (id == fr_watch && fr_poke != FRAMES_NONE) {
+        WWhy why;
+        frames_set_width(f, fr_poke, frames_set_width_of(f, fr_poke) + 1, &why);
+    }
+}
+static int fr_counted;
+static void fr_count(void *ctx, int id) { (void)ctx; (void)id; ++fr_counted; }
+static int fr_xml_warned;
+static void fr_xml_warn(void *ctx, const char *file, int line, const char *sentence) { (void)ctx; (void)file; (void)line; (void)sentence; ++fr_xml_warned; }
+static int fr_exists(void *ctx, const char *name) { return frames_find(ctx, name) != FRAMES_NONE; }
+
+static int fr_near(const FramesRect *r, double l, double rt, double b, double t)
+{
+    return r->placed && near(r->left, l, 1e-9) && near(r->right, rt, 1e-9) && near(r->bottom, b, 1e-9) && near(r->top, t, 1e-9);
+}
+static int fr_frame(Frames *f, const char *name, int parent, double w, double h)
+{
+    WWhy why;
+    int id = frames_new_frame(f, "Frame", name, parent, &why);
+    if (id != FRAMES_NONE) { frames_set_width(f, id, w, &why); frames_set_height(f, id, h, &why); }
+    return id;
+}
+/* where `id` is in a draw order, -1 when not */
+static int fr_index(const FramesDrawItem *d, int n, int id)
+{
+    for (int i = 0; i < n; ++i) if (d[i].id == id) return i;
+    return -1;
+}
+
+/* The reference for the random trees: each object placed once all it is
+ * tied to are, by the same rules worked out again here, as many rounds as
+ * there are objects; then "in a circle" is "reaches itself through
+ * unplaced objects". No clamping. */
+typedef struct { int nanch; FramesAnchor a[9]; double w, h; double scale; int parent; } FrRef;
+static void fr_reference(const FrRef *o, int n, double screen_w, FramesRect *out, int *loop)
+{
+    double eff[200];
+    for (int i = 0; i < n; ++i) { double s = 1; for (int c = i; c >= 0; c = o[c].parent) s *= o[c].scale; eff[i] = s; }
+    for (int i = 0; i < n; ++i) memset(&out[i], 0, sizeof out[i]);
+    for (int round = 0; round <= n; ++round)
+        for (int i = 0; i < n; ++i) {
+            if (out[i].placed || !o[i].nanch) continue;
+            int ok = 1, hx[3] = { 0 }, hy[3] = { 0 };
+            double ax[3] = { 0 }, ay[3] = { 0 };
+            for (int k = 0; k < o[i].nanch && ok; ++k) {
+                const FramesAnchor *a = &o[i].a[k];
+                FramesRect s = { 1, 0, screen_w, 0, 768 };
+                const FramesRect *r = a->relative == FRAMES_SCREEN ? &s : &out[a->relative];
+                if (!r->placed) { ok = 0; break; }
+                int rp = a->relative_point, p = a->point;
+                double x = rp % 3 == 0 ? r->left : rp % 3 == 2 ? r->right : (r->left + r->right) / 2;
+                double y = rp / 3 == 0 ? r->top : rp / 3 == 2 ? r->bottom : (r->top + r->bottom) / 2;
+                x += a->x * eff[i]; y += a->y * eff[i];
+                int kx = p % 3, ky = 2 - p / 3;
+                if (!hx[kx]) { hx[kx] = 1; ax[kx] = x; }
+                if (!hy[ky]) { hy[ky] = 1; ay[ky] = y; }
+            }
+            if (!ok) continue;
+            double lo[2], hi[2];
+            for (int axn = 0; axn < 2; ++axn) {
+                int *h = axn ? hy : hx;
+                double *at = axn ? ay : ax, size = (axn ? o[i].h : o[i].w) * eff[i];
+                if (h[0] && h[2]) { lo[axn] = at[0]; hi[axn] = at[2]; }
+                else if (h[0] && h[1]) { lo[axn] = at[0]; hi[axn] = 2 * at[1] - at[0]; }
+                else if (h[1] && h[2]) { hi[axn] = at[2]; lo[axn] = 2 * at[1] - at[2]; }
+                else if (h[0]) { lo[axn] = at[0]; hi[axn] = at[0] + size; }
+                else if (h[2]) { hi[axn] = at[2]; lo[axn] = at[2] - size; }
+                else { lo[axn] = at[1] - size / 2; hi[axn] = at[1] + size / 2; }
+            }
+            out[i] = (FramesRect){ 1, lo[0], hi[0], lo[1], hi[1] };
+        }
+    for (int i = 0; i < n; ++i) {
+        loop[i] = 0;
+        if (out[i].placed) continue;
+        int seen[200] = { 0 }, stack[200], sp = 0;
+        stack[sp++] = i;
+        while (sp && !loop[i]) {
+            int v = stack[--sp];
+            for (int k = 0; k < o[v].nanch; ++k) {
+                int w = o[v].a[k].relative;
+                if (w < 0 || out[w].placed) continue;
+                if (w == i) { loop[i] = 1; break; }
+                if (!seen[w]) { seen[w] = 1; stack[sp++] = w; }
+            }
+        }
+    }
+}
+/* }}} 703 helpers */
+
+/* {{{ 703 checks */
+static void check_frames(void)
+{
+    char line[600];
+    WWhy why;
+    FramesRect r;
+    printf("frames, anchors and layers (071-frames, 072-frames-xml, issue 703)\n");
+
+    /* {{{ every anchor point, against the screen */
+    {
+        Frames *f = frames_new(NULL, &why);
+        if (!f) { check(0, "a frame tree"); return; }
+        check(!frames_set_screen(f, 1920, 1080, &why) && near(frames_screen_width(f), 768.0 * 16 / 9, 1e-9),
+              "a 1920 x 1080 screen is 768 tall and 1365.33 wide in interface units");
+        frames_set_screen(f, 1024, 768, &why);
+        int screen = fr_frame(f, "ScreenFrame", FRAMES_NONE, 0, 0);
+        frames_set_all_points(f, screen, FRAMES_NONE, &why);
+        frames_rect(f, screen, &r);
+        check(fr_near(&r, 0, 1024, 0, 768) && frames_point_count(f, screen) == 2, "setAllPoints with no parent fills the screen (two anchors: TOPLEFT, BOTTOMRIGHT)");
+        int ok = 1;
+        const double L[3] = { 0, 462, 924 }, B[3] = { 718, 359, 0 };
+        for (int p = 0; p < FRAMES_POINT_COUNT; ++p) {
+            int id = fr_frame(f, NULL, screen, 100, 50);
+            frames_set_point(f, id, (FramesPoint)p, FRAMES_NONE, (FramesPoint)p, 0, 0, &why);
+            frames_rect(f, id, &r);
+            ok &= fr_near(&r, L[p % 3], L[p % 3] + 100, B[p / 3], B[p / 3] + 50);
+            FramesAnchor a;
+            ok &= frames_point_at(f, id, 0, &a) && a.relative == screen && a.relative_point == (FramesPoint)p;
+        }
+        check(ok, "each of the nine points of a 100 x 50 frame at the same point of its parent: the corners, the edges' middles and the centre where they should be; relativeTo left out is the parent");
+        int off = fr_frame(f, NULL, screen, 100, 50);
+        frames_set_point(f, off, FRAMES_TOPLEFT, screen, FRAMES_CENTER, 10, -20, &why);
+        frames_rect(f, off, &r);
+        check(fr_near(&r, 522, 622, 314, 364), "TOPLEFT at the parent's CENTER, offset 10, -20: left 522, top 364");
+        frames_set_point(f, off, FRAMES_TOPLEFT, screen, FRAMES_BOTTOMLEFT, 0, 0, &why);
+        frames_rect(f, off, &r);
+        check(frames_point_count(f, off) == 1 && fr_near(&r, 0, 100, -50, 0), "a second anchor at the same point replaces the first");
+        check(frames_set_point(f, off, FRAMES_TOP, off, FRAMES_TOP, 0, 0, &why) == W_ERR_REFUSED, "a frame anchored to itself is refused");
+        check(frames_set_point(f, off, FRAMES_TOP, 9999, FRAMES_TOP, 0, 0, &why) == W_ERR_NOT_FOUND, "an anchor to no such object is refused");
+        check(frames_set_point(f, off, FRAMES_POINT_COUNT, FRAMES_SCREEN, FRAMES_TOP, 0, 0, &why) == W_ERR_REFUSED
+              && frames_set_point(f, off, FRAMES_TOP, FRAMES_SCREEN, FRAMES_TOP, NAN, 0, &why) == W_ERR_REFUSED, "a point not of the nine, or an offset not a number, refused");
+        check(frames_point_from_name("bottomRight") == FRAMES_BOTTOMRIGHT && frames_point_from_name("MIDDLE") == FRAMES_POINT_COUNT
+              && !strcmp(frames_point_name(FRAMES_TOPLEFT), "TOPLEFT") && frames_strata_from_name("fullscreen_dialog") == FRAMES_FULLSCREEN_DIALOG
+              && frames_layer_from_name("Highlight") == FRAMES_LAYER_HIGHLIGHT, "points, strata and layers by name, any case");
+
+        /* {{{ edges from two frames; size from anchors against the set size */
+        int a = fr_frame(f, "EdgeA", screen, 50, 50), b = fr_frame(f, "EdgeB", screen, 50, 50);
+        frames_set_point(f, a, FRAMES_TOPLEFT, FRAMES_NONE, FRAMES_TOPLEFT, 100, -100, &why);
+        frames_set_point(f, b, FRAMES_TOPLEFT, FRAMES_NONE, FRAMES_TOPLEFT, 400, -100, &why);
+        int c = fr_frame(f, "EdgeC", screen, 0, 20);
+        frames_set_point(f, c, FRAMES_LEFT, a, FRAMES_RIGHT, 0, 0, &why);
+        frames_set_point(f, c, FRAMES_RIGHT, b, FRAMES_LEFT, 0, 0, &why);
+        frames_rect(f, c, &r);
+        check(fr_near(&r, 150, 400, 633, 653) && near(frames_width(f, c), 250, 1e-9),
+              "LEFT to one frame's RIGHT and RIGHT to another's LEFT: both edges (150 to 400), 250 wide with no width set, its set height kept");
+        int d = fr_frame(f, NULL, screen, 30, 10);
+        frames_set_point(f, d, FRAMES_LEFT, a, FRAMES_RIGHT, 0, 0, &why);
+        frames_rect(f, d, &r);
+        check(fr_near(&r, 150, 180, 638, 648), "only a width and a left anchor: the right edge is left + width");
+        int z = fr_frame(f, NULL, screen, 0, 0);
+        frames_set_point(f, z, FRAMES_TOPRIGHT, a, FRAMES_BOTTOMLEFT, 0, 0, &why);
+        frames_rect(f, z, &r);
+        check(fr_near(&r, 100, 100, 618, 618), "one anchor and no size: placed, 0 wide and 0 tall at the point");
+        int mid = fr_frame(f, NULL, screen, 0, 10);
+        frames_set_point(f, mid, FRAMES_LEFT, a, FRAMES_LEFT, 0, 0, &why);
+        frames_set_point(f, mid, FRAMES_CENTER, a, FRAMES_RIGHT, 0, 0, &why);
+        frames_rect(f, mid, &r);
+        check(fr_near(&r, 100, 200, 638, 648), "a left edge and a middle: the right edge as far past the middle (100 to 200)");
+        int over = fr_frame(f, NULL, screen, 999, 999);
+        frames_set_all_points(f, over, a, &why);
+        frames_rect(f, over, &r);
+        check(fr_near(&r, 100, 150, 618, 668), "anchors win over the set size (setAllPoints to a 50 x 50 frame, size 999 set)");
+        check(near(frames_width(f, over), 999, 1e-9) && near(frames_height(f, over), 999, 1e-9),
+              "quirk \"set size over laid-out size\", the original: GetWidth and GetHeight give the set 999");
+        frames_free(f);
+        FramesOptions corrected = { .size_from_layout = 1 };
+        f = frames_new(&corrected, &why);
+        over = fr_frame(f, NULL, FRAMES_NONE, 999, 999);
+        int fifty = fr_frame(f, NULL, FRAMES_NONE, 50, 50);
+        frames_set_point(f, fifty, FRAMES_CENTER, FRAMES_NONE, FRAMES_CENTER, 0, 0, &why);
+        frames_set_all_points(f, over, fifty, &why);
+        check(near(frames_width(f, over), 50, 1e-9) && near(frames_height(f, over), 50, 1e-9), "and with the correction on: the laid-out 50");
+        frames_free(f);
+        /* }}} */
+    }
+    /* }}} */
+
+    /* {{{ chains, a frame tied to one made later, a circle */
+    {
+        FramesOptions opt = { .resized = fr_count };
+        Frames *f = frames_new(&opt, &why);
+        int chain[10];
+        for (int i = 0; i < 10; ++i) {
+            chain[i] = fr_frame(f, NULL, FRAMES_NONE, 10, 10);
+            if (i) frames_set_point(f, chain[i], FRAMES_TOPLEFT, chain[i - 1], FRAMES_BOTTOMRIGHT, 1, -1, &why);
+            else frames_set_point(f, chain[i], FRAMES_TOPLEFT, FRAMES_SCREEN, FRAMES_TOPLEFT, 0, 0, &why);
+        }
+        frames_rect(f, chain[9], &r);
+        check(fr_near(&r, 99, 109, 659, 669), "a chain ten deep, each frame's TOPLEFT at the last one's BOTTOMRIGHT + (1, -1): the tenth at 99, 669");
+        frames_set_point(f, chain[0], FRAMES_TOPLEFT, FRAMES_SCREEN, FRAMES_TOPLEFT, 5, 0, &why);
+        frames_rect(f, chain[9], &r);
+        check(fr_near(&r, 104, 114, 659, 669), "moving the first moves the tenth");
+
+        int later[20];
+        for (int i = 0; i < 20; ++i) later[i] = fr_frame(f, NULL, FRAMES_NONE, 4, 4);
+        for (int i = 0; i < 19; ++i) frames_set_point(f, later[i], FRAMES_BOTTOMLEFT, later[i + 1], FRAMES_TOPLEFT, 0, 0, &why);
+        frames_set_point(f, later[19], FRAMES_BOTTOMLEFT, FRAMES_SCREEN, FRAMES_BOTTOMLEFT, 0, 0, &why);
+        fr_counted = 0;
+        frames_layout(f);
+        frames_rect(f, later[0], &r);
+        check(fr_near(&r, 0, 4, 76, 80) && fr_counted == 20,
+              "twenty frames each tied to the one made after it: all placed in one layout, each computed once (the first at 76 to 80 up)");
+
+        int ring[3], tail;
+        for (int i = 0; i < 3; ++i) ring[i] = fr_frame(f, NULL, FRAMES_NONE, 10, 10);
+        for (int i = 0; i < 3; ++i) frames_set_point(f, ring[i], FRAMES_TOPLEFT, ring[(i + 1) % 3], FRAMES_BOTTOMRIGHT, 0, 0, &why);
+        tail = fr_frame(f, NULL, FRAMES_NONE, 10, 10);
+        frames_set_point(f, tail, FRAMES_TOPLEFT, ring[0], FRAMES_BOTTOMRIGHT, 0, 0, &why);
+        int unplaced = 1;
+        for (int i = 0; i < 3; ++i) { frames_rect(f, ring[i], &r); unplaced &= !r.placed && frames_unplaced(f, ring[i]) == FRAMES_IN_LOOP; }
+        frames_rect(f, tail, &r);
+        check(unplaced && !r.placed && frames_unplaced(f, tail) == FRAMES_WAITS,
+              "a circle of three frames: all three unplaced, said to be in a circle; a fourth tied to it unplaced, waiting on it; nothing fails");
+        FramesDrawItem items[64];
+        int nd = frames_draw_order(f, items, 64);
+        check(fr_index(items, nd, ring[0]) < 0 && fr_index(items, nd, tail) < 0 && fr_index(items, nd, chain[9]) >= 0, "and none of them is drawn");
+        frames_clear_points(f, ring[2]);
+        frames_set_point(f, ring[2], FRAMES_TOPLEFT, FRAMES_SCREEN, FRAMES_TOPLEFT, 100, -100, &why);
+        frames_rect(f, ring[0], &r);
+        FramesRect t;
+        frames_rect(f, tail, &t);
+        check(fr_near(&r, 120, 130, 638, 648) && fr_near(&t, 130, 140, 628, 638) && frames_unplaced(f, ring[1]) == FRAMES_PLACED,
+              "breaking the circle places all four");
+        check(frames_unplaced(f, fr_frame(f, NULL, FRAMES_NONE, 5, 5)) == FRAMES_NO_ANCHORS, "a frame with no anchors is unplaced, with none");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ layout's limits: a size change handler that never settles */
+    {
+        FramesOptions opt = { .resized = fr_on_resized };
+        Frames *f = fr_tree = frames_new(&opt, &why);
+        int q = fr_frame(f, NULL, FRAMES_NONE, 10, 10), p = fr_frame(f, NULL, FRAMES_NONE, 0, 10);
+        frames_set_point(f, q, FRAMES_LEFT, FRAMES_SCREEN, FRAMES_LEFT, 0, 0, &why);
+        frames_set_point(f, p, FRAMES_LEFT, FRAMES_SCREEN, FRAMES_LEFT, 0, 0, &why);
+        frames_set_point(f, p, FRAMES_RIGHT, q, FRAMES_RIGHT, 0, 0, &why);
+        fr_watch = p; fr_poke = q; fr_resized = 0;
+        frames_layout(f);
+        int heard = fr_resized;
+        snprintf(line, sizeof line, "a frame whose size change widens the frame it is tied to: one layout stops after %d computings of each (%d heard), and returns", FRAMES_MAX_TRIES, heard);
+        check(heard == 2 * FRAMES_MAX_TRIES - 1 || heard == 2 * FRAMES_MAX_TRIES, line);
+        check(near(frames_set_width_of(f, q), 16, 0), "it stops with the widened frame's seventh width (16) set and not yet laid out");
+        fr_watch = fr_poke = FRAMES_NONE;
+        frames_layout(f);
+        frames_rect_screen(f, p, &r);
+        check(r.placed && near(r.right, 16, 1e-9), "what it left is carried to the next layout: once the handler stops, both reach 16");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ scale */
+    {
+        Frames *f = frames_new(NULL, &why);
+        int g = fr_frame(f, "Scaled", FRAMES_NONE, 100, 100), h = fr_frame(f, "Inner", g, 40, 40);
+        check(frames_set_scale(f, g, 0, &why) == W_ERR_REFUSED && frames_set_scale(f, g, -1, &why) == W_ERR_REFUSED && near(frames_scale(f, g), 1, 0), "scale 0, and below, refused");
+        frames_set_scale(f, g, 2, &why);
+        frames_set_scale(f, h, 0.5, &why);
+        check(near(frames_effective_scale(f, h), 1, 1e-12), "a child at 0.5 under a parent at 2 is at 1");
+        frames_set_point(f, g, FRAMES_TOPLEFT, FRAMES_SCREEN, FRAMES_TOPLEFT, 10, -10, &why);
+        frames_set_point(f, h, FRAMES_TOPLEFT, g, FRAMES_TOPLEFT, 10, -10, &why);
+        FramesRect s;
+        frames_rect(f, g, &r);
+        frames_rect_screen(f, g, &s);
+        check(fr_near(&s, 20, 220, 548, 748) && fr_near(&r, 10, 110, 274, 374) && near(frames_width(f, g), 100, 1e-9),
+              "at scale 2, offset (10, -10) and size 100 are doubled on screen (20 to 220), and read back in its own units (10 to 110)");
+        frames_rect_screen(f, h, &s);
+        check(fr_near(&s, 30, 70, 698, 738), "the child at 1: its offset and size as given, from the parent's corner");
+        frames_set_scale(f, g, 4, &why);
+        frames_rect_screen(f, h, &s);
+        frames_rect(f, h, &r);
+        check(near(frames_effective_scale(f, h), 2, 1e-12) && fr_near(&s, 60, 140, 628, 708) && near(r.left, 30, 1e-9),
+              "the parent's scale to 4: the child's effective scale follows (2), and so does its rectangle (60 to 140 on screen, 30 in its units)");
+        frames_set_scale(f, g, 4 + 1e-7, &why);
+        check(frames_scale(f, g) == 4, "a scale change under 2.4e-7 is ignored");
+        int tex = frames_new_region(f, "Texture", NULL, h, FRAMES_LAYER_ARTWORK, 0, &why);
+        check(near(frames_effective_scale(f, tex), 2, 1e-12) && frames_set_scale(f, tex, 2, &why) == W_ERR_REFUSED, "a region takes its frame's scale and has none of its own");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ strata and levels */
+    {
+        Frames *f = frames_new(NULL, &why);
+        int top = fr_frame(f, NULL, FRAMES_NONE, 10, 10), kid = fr_frame(f, NULL, top, 10, 10), grand = fr_frame(f, NULL, kid, 10, 10);
+        check(frames_strata(f, top) == FRAMES_MEDIUM && frames_level(f, top) == 0 && frames_strata(f, kid) == FRAMES_MEDIUM && frames_level(f, kid) == 1 && frames_level(f, grand) == 2,
+              "a frame with no parent starts MEDIUM at level 0; each child at its parent's strata and level + 1");
+        frames_set_strata(f, top, FRAMES_HIGH, &why);
+        frames_set_level(f, top, 10, &why);
+        check(frames_strata(f, grand) == FRAMES_HIGH && frames_level(f, kid) == 11 && frames_level(f, grand) == 12, "children follow their parent's strata and level");
+        frames_set_level(f, kid, 3, &why);
+        frames_set_level(f, top, 20, &why);
+        check(frames_level(f, kid) == 3 && frames_level(f, grand) == 4, "a child with its own level keeps it; its own children follow it");
+        frames_set_strata(f, kid, FRAMES_LOW, &why);
+        frames_set_strata(f, top, FRAMES_DIALOG, &why);
+        check(frames_strata(f, kid) == FRAMES_LOW && frames_strata(f, grand) == FRAMES_LOW, "likewise its own strata");
+        frames_set_strata(f, kid, FRAMES_STRATA_PARENT, &why);
+        check(frames_strata(f, grand) == FRAMES_DIALOG, "and PARENT follows the parent again");
+        int lone = fr_frame(f, NULL, FRAMES_NONE, 1, 1);
+        frames_set_level(f, lone, 500, &why);
+        check(frames_level(f, lone) == 128, "quirk \"raise limit\", the original: level 500 asked from 0 gives 128");
+        frames_set_level(f, lone, -5, &why);
+        check(frames_level(f, lone) == 0, "a level below 0 is held at 0");
+        int tex = frames_new_region(f, "Texture", NULL, top, FRAMES_LAYER_ARTWORK, 0, &why);
+        check(frames_set_level(f, tex, 1, &why) == W_ERR_REFUSED && frames_set_strata(f, tex, FRAMES_LOW, &why) == W_ERR_REFUSED, "a region has no strata or level of its own");
+        frames_free(f);
+        FramesOptions corrected = { .raise_unlimited = 1 };
+        f = frames_new(&corrected, &why);
+        lone = fr_frame(f, NULL, FRAMES_NONE, 1, 1);
+        frames_set_level(f, lone, 500, &why);
+        check(frames_level(f, lone) == 500, "and with the correction on: 500");
+        frames_free(f);
+
+        /* drawing order: strata, then level, then the newest shown on top */
+        f = frames_new(NULL, &why);
+        int high = fr_frame(f, "High", FRAMES_NONE, 10, 10), med = fr_frame(f, "Med", FRAMES_NONE, 10, 10);
+        int z1 = fr_frame(f, "Z1", FRAMES_NONE, 10, 10), z2 = fr_frame(f, "Z2", FRAMES_NONE, 10, 10);
+        int ids[4] = { high, med, z1, z2 };
+        for (int i = 0; i < 4; ++i) frames_set_point(f, ids[i], FRAMES_CENTER, FRAMES_SCREEN, FRAMES_CENTER, 0, 0, &why);
+        frames_set_strata(f, high, FRAMES_HIGH, &why);
+        frames_set_level(f, med, 5, &why);
+        FramesDrawItem d[16];
+        int n = frames_draw_order(f, d, 16);
+        check(n == 4 && fr_index(d, n, z1) < fr_index(d, n, z2) && fr_index(d, n, z2) < fr_index(d, n, med) && fr_index(d, n, med) < fr_index(d, n, high),
+              "drawn bottom to top: MEDIUM 0 (Z1, then Z2, made later), MEDIUM 5, then HIGH 0 above them all");
+        frames_hide(f, z1);
+        frames_show(f, z1);
+        n = frames_draw_order(f, d, 16);
+        check(fr_index(d, n, z2) < fr_index(d, n, z1), "Z1 hidden and shown again: now the newest shown, so on top of Z2");
+        check(frames_draw_order(f, d, 2) == 4 && d[1].id == z1, "a short list gets the bottom of the order, and the count of all");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ layers and sublevels; hiding a parent; parents */
+    {
+        Frames *f = frames_new(NULL, &why);
+        int fr = fr_frame(f, "Painted", FRAMES_NONE, 10, 10);
+        frames_set_point(f, fr, FRAMES_CENTER, FRAMES_SCREEN, FRAMES_CENTER, 0, 0, &why);
+        int t[6];
+        const FramesLayer layer[6] = { FRAMES_LAYER_ARTWORK, FRAMES_LAYER_BACKGROUND, FRAMES_LAYER_ARTWORK, FRAMES_LAYER_OVERLAY, FRAMES_LAYER_ARTWORK, FRAMES_LAYER_HIGHLIGHT };
+        const int sub[6] = { 0, 0, -2, 0, 0, 0 };
+        for (int i = 0; i < 6; ++i) { t[i] = frames_new_region(f, "Texture", NULL, fr, layer[i], sub[i], &why); frames_set_all_points(f, t[i], FRAMES_NONE, &why); }
+        FramesDrawItem d[16];
+        int n = frames_draw_order(f, d, 16);
+        const int want[7] = { fr, t[1], t[2], t[0], t[4], t[3], t[5] };
+        int ok = n == 7;
+        for (int i = 0; i < 7 && ok; ++i) ok = d[i].id == want[i];
+        check(ok && d[6].layer == FRAMES_LAYER_HIGHLIGHT && d[1].frame == fr && d[1].is_region,
+              "a frame, then its regions by layer (BACKGROUND, ARTWORK, OVERLAY, HIGHLIGHT), then sublevel (ARTWORK -2 before 0), then the order made");
+        frames_set_draw_layer(f, t[1], FRAMES_LAYER_OVERLAY, 7, &why);
+        n = frames_draw_order(f, d, 16);
+        check(d[n - 2].id == t[1] && d[n - 3].id == t[3], "SetDrawLayer to OVERLAY 7 puts it above OVERLAY 0");
+        FramesLayer gl; int gs;
+        frames_draw_layer(f, t[1], &gl, &gs);
+        check(gl == FRAMES_LAYER_OVERLAY && gs == 7 && frames_set_draw_layer(f, t[1], FRAMES_LAYER_OVERLAY, 8, &why) == W_ERR_REFUSED
+              && frames_new_region(f, "Texture", NULL, fr, FRAMES_LAYER_ARTWORK, -9, &why) == FRAMES_NONE, "the layer reads back; sublevels outside -8 to 7 are refused");
+
+        int kid = fr_frame(f, "Kid", fr, 5, 5);
+        frames_set_point(f, kid, FRAMES_CENTER, FRAMES_NONE, FRAMES_CENTER, 0, 0, &why);
+        int ktex = frames_new_region(f, "Texture", NULL, kid, FRAMES_LAYER_ARTWORK, 0, &why);
+        frames_set_all_points(f, ktex, FRAMES_NONE, &why);
+        frames_hide(f, fr);
+        n = frames_draw_order(f, d, 16);
+        check(frames_is_shown(f, kid) && !frames_is_visible(f, kid) && !frames_is_visible(f, ktex) && n == 0,
+              "hiding a parent: its child is still shown but not visible, nor is the child's texture; nothing is drawn");
+        frames_rect(f, kid, &r);
+        check(r.placed, "a hidden frame is still laid out");
+        frames_show(f, fr);
+        check(frames_is_visible(f, kid) && frames_is_visible(f, ktex) && frames_draw_order(f, d, 16) == 9, "shown again: all visible and drawn");
+        frames_hide(f, t[0]);
+        check(frames_draw_order(f, d, 16) == 8 && frames_is_visible(f, fr), "a hidden region isn't drawn; its frame still is");
+
+        check(frames_set_parent(f, fr, kid, &why) == W_ERR_REFUSED && frames_set_parent(f, fr, fr, &why) == W_ERR_REFUSED, "SetParent to its own child, or to itself, is refused");
+        check(frames_set_parent(f, ktex, FRAMES_NONE, &why) == W_ERR_REFUSED && frames_set_parent(f, kid, ktex, &why) == W_ERR_REFUSED, "a region needs a frame, and a region can't be a parent");
+        int other = fr_frame(f, "Other", FRAMES_NONE, 1, 1);
+        frames_set_scale(f, other, 3, &why);
+        frames_set_parent(f, kid, other, &why);
+        frames_rect_screen(f, kid, &r);
+        check(frames_parent(f, kid) == other && frames_child_count(f, fr) == 0 && frames_child_at(f, other, 0) == kid && frames_region_at(f, kid, 0) == ktex
+              && near(r.right - r.left, 15, 1e-9) && near((r.left + r.right) / 2, 512, 1e-9),
+              "SetParent moves it under a frame at scale 3: its children lists change, it grows to 15, and it stays tied to its old parent's centre");
+        check(frames_find(f, "Kid") == kid && frames_find(f, "Nobody") == FRAMES_NONE && !strcmp(frames_name(f, kid), "Kid") && !strcmp(frames_type(f, ktex), "Texture"),
+              "objects found by name; names and types read back");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ clamping */
+    {
+        Frames *f = frames_new(NULL, &why);
+        int c = fr_frame(f, NULL, FRAMES_NONE, 100, 100), follower = fr_frame(f, NULL, FRAMES_NONE, 10, 10);
+        frames_set_point(f, c, FRAMES_TOPLEFT, FRAMES_SCREEN, FRAMES_TOPLEFT, -50, 50, &why);
+        frames_set_point(f, follower, FRAMES_TOPLEFT, c, FRAMES_BOTTOMRIGHT, 0, 0, &why);
+        frames_set_clamped(f, c, 1);
+        frames_rect(f, c, &r);
+        FramesRect fo;
+        frames_rect(f, follower, &fo);
+        check(fr_near(&r, 0, 100, 668, 768) && fr_near(&fo, 100, 110, 658, 668), "clamped to the screen: slid back inside, and what is tied to it follows");
+        frames_set_clamp_insets(f, c, 20, 0, -10, 0);
+        frames_rect(f, c, &r);
+        check(fr_near(&r, -20, 80, 678, 778), "with insets (20 on the left, -10 at the top): that much may go off screen");
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ from the interface's XML (066), and CreateFrame with a template */
+    for (int corrected = 0; corrected < 2; ++corrected) {
+        static const char *const XML =
+            "<Ui>\n"
+            "  <Frame name=\"XmlTemplate\" virtual=\"true\" frameStrata=\"DIALOG\">\n"
+            "    <Size x=\"200\" y=\"100\"/>\n"
+            "    <Layers>\n"
+            "      <Layer level=\"BACKGROUND\"><Texture name=\"$parentBg\" setAllPoints=\"true\"/></Layer>\n"
+            "      <Layer level=\"ARTWORK\" textureSubLevel=\"2\">\n"
+            "        <Texture name=\"$parentIcon\"><Size x=\"16\" y=\"16\"/><Anchors><Anchor point=\"TOPLEFT\"><Offset x=\"4\" y=\"-4\"/></Anchor></Anchors></Texture>\n"
+            "      </Layer>\n"
+            "      <Layer level=\"ARTWORK\" textureSubLevel=\"-1\">\n"
+            "        <FontString name=\"$parentText\"><Anchors><Anchor point=\"LEFT\" relativeTo=\"$parentIcon\" relativePoint=\"RIGHT\"/></Anchors></FontString>\n"
+            "      </Layer>\n"
+            "    </Layers>\n"
+            "  </Frame>\n"
+            "  <Frame name=\"XmlBox\" parent=\"UIParent\" inherits=\"XmlTemplate\" frameLevel=\"5\">\n"
+            "    <Anchors><Anchor point=\"CENTER\"/></Anchors>\n"
+            "    <Frames>\n"
+            "      <Button name=\"$parentClose\" scale=\"0.5\">\n"
+            "        <Size><AbsDimension x=\"32\" y=\"32\"/></Size>\n"
+            "        <Anchors><Anchor point=\"TOPRIGHT\"><Offset><AbsDimension x=\"-2\" y=\"-2\"/></Offset></Anchor></Anchors>\n"
+            "        <NormalTexture file=\"Interface\\Up\"/>\n"
+            "        <HighlightTexture file=\"Interface\\Glow\"/>\n"
+            "        <ButtonText name=\"$parentText\"/>\n"
+            "      </Button>\n"
+            "      <Frame name=\"$parentHidden\" hidden=\"true\" setAllPoints=\"true\"/>\n"
+            "    </Frames>\n"
+            "  </Frame>\n"
+            "  <Frame name=\"XmlZero\" parent=\"UIParent\" frameLevel=\"0\"/>\n"
+            "  <Frame name=\"XmlBadStrata\" parent=\"UIParent\" frameStrata=\"NOPE\"/>\n"
+            "  <Frame name=\"XmlClamped\" parent=\"UIParent\" clampedToScreen=\"true\">\n"
+            "    <Size x=\"100\" y=\"100\"/><Anchors><Anchor point=\"TOPLEFT\" x=\"-50\" y=\"50\"/></Anchors>\n"
+            "  </Frame>\n"
+            "  <Font name=\"XmlFont\"/>\n"
+            "</Ui>\n";
+        Frames *f = frames_new(NULL, &why);
+        int ui = fr_frame(f, "UIParent", FRAMES_NONE, 0, 0);       /* made by the scripts in the original; by a C call here */
+        frames_set_all_points(f, ui, FRAMES_NONE, &why);
+        FxmlOptions fo = { .ctx = f, .frame_exists = fr_exists };
+        Fxml *fx = fxml_new(&fo, &why);
+        FramesXmlOptions xo = { .level_zero = corrected, .warn = fr_xml_warn };
+        FramesXml *x = frames_xml_new(f, &xo, &why);
+        fr_xml_warned = 0;
+        WErr e = fxml_load(fx, "Interface\\AddOns\\Boxes\\Boxes.xml", XML, strlen(XML), "Boxes", &why);
+        WErr b = frames_xml_catch_up(x, fx, &why);
+        int box = frames_find(f, "XmlBox"), bg = frames_find(f, "XmlBoxBg"), icon = frames_find(f, "XmlBoxIcon"), text = frames_find(f, "XmlBoxText");
+        int close = frames_find(f, "XmlBoxClose"), hidden = frames_find(f, "XmlBoxHidden"), zero = frames_find(f, "XmlZero"), bad = frames_find(f, "XmlBadStrata");
+        int clamped = frames_find(f, "XmlClamped"), ctext = frames_find(f, "XmlBoxCloseText");
+        if (corrected) {
+            check(!e && !b && zero != FRAMES_NONE && frames_level(f, zero) == 0 && fr_xml_warned == 1,
+                  "quirk \"XML level 0\" with the correction on: frameLevel 0 is accepted; one warning left (the strata)");
+        } else {
+            check(!e && !b && box >= 0 && bg >= 0 && icon >= 0 && text >= 0 && close >= 0 && hidden >= 0 && ctext >= 0 && frames_find(f, "XmlFont") == FRAMES_NONE,
+                  "a file the test writes: its frames and regions built in the tree, by their names worked out; the font isn't an object of the tree");
+            frames_rect(f, box, &r);
+            check(fr_near(&r, 412, 612, 334, 434) && frames_parent(f, box) == ui && frames_strata(f, box) == FRAMES_DIALOG && frames_level(f, box) == 5,
+                  "XmlBox: its template's 200 x 100 at UIParent's centre, under UIParent (made by a C call), its template's DIALOG, frameLevel 5");
+            FramesRect ri, rt;
+            frames_rect(f, icon, &ri);
+            frames_rect(f, text, &rt);
+            frames_rect(f, bg, &r);
+            check(fr_near(&r, 412, 612, 334, 434) && fr_near(&ri, 416, 432, 414, 430) && fr_near(&rt, 432, 432, 422, 422),
+                  "its regions: the background on all points, the icon 16 x 16 at (4, -4), the text tied to the icon's right ($parentIcon)");
+            FramesLayer l1, l2, l3; int s1, s2, s3;
+            frames_draw_layer(f, bg, &l1, &s1); frames_draw_layer(f, icon, &l2, &s2); frames_draw_layer(f, text, &l3, &s3);
+            check(l1 == FRAMES_LAYER_BACKGROUND && l2 == FRAMES_LAYER_ARTWORK && s2 == 2 && l3 == FRAMES_LAYER_ARTWORK && s3 == -1,
+                  "each region in its <Layer>'s level, at its textureSubLevel");
+            FramesDrawItem d[64];
+            int n = frames_draw_order(f, d, 64);
+            check(fr_index(d, n, box) < fr_index(d, n, bg) && fr_index(d, n, bg) < fr_index(d, n, text) && fr_index(d, n, text) < fr_index(d, n, icon)
+                  && fr_index(d, n, icon) < fr_index(d, n, close) && fr_index(d, n, clamped) < fr_index(d, n, box) && fr_index(d, n, hidden) < 0,
+                  "drawn: XmlBox (DIALOG) above XmlClamped (MEDIUM); its background, ARTWORK -1, ARTWORK 2, then its close button (level 6); the hidden child not at all");
+            FramesRect rs;
+            frames_rect_screen(f, close, &rs);
+            frames_rect(f, close, &r);
+            check(fr_near(&rs, 595, 611, 417, 433) && near(r.left, 1190, 1e-9) && near(frames_width(f, close), 32, 1e-9) && near(frames_effective_scale(f, close), 0.5, 1e-12)
+                  && frames_level(f, close) == 6 && frames_strata(f, close) == FRAMES_DIALOG,
+                  "the close button at scale 0.5: 16 x 16 on screen, (-2, -2) from the corner as -1, -1; GetLeft 1190 and GetWidth 32 in its own units; DIALOG level 6");
+            int normal = frames_region_at(f, close, 0), glow = frames_region_at(f, close, 1);
+            FramesRect rn, rc;
+            frames_rect_screen(f, normal, &rn);
+            frames_rect_screen(f, ctext, &rc);
+            FramesLayer gl; int gs;
+            frames_draw_layer(f, glow, &gl, &gs);
+            check(fr_near(&rn, 595, 611, 417, 433) && gl == FRAMES_LAYER_HIGHLIGHT && fr_near(&rc, 603, 603, 425, 425),
+                  "its NormalTexture fills it, its HighlightTexture is in HIGHLIGHT, its ButtonText sits at its centre");
+            frames_rect(f, hidden, &r);
+            check(!frames_is_shown(f, hidden) && fr_near(&r, 412, 612, 334, 434), "hidden=\"true\": not shown, still laid out (setAllPoints)");
+            check(frames_level(f, zero) == 1 && frames_strata(f, bad) == FRAMES_MEDIUM && fr_xml_warned == 2,
+                  "quirk \"XML level 0\", the original: frameLevel 0 refused with a warning (level 1, from UIParent); a strata not of the nine is a warning too");
+            frames_rect(f, clamped, &r);
+            check(fr_near(&r, 0, 100, 668, 768), "clampedToScreen=\"true\": anchored half off the top left, slid back on");
+            const FxmlObject *made = NULL;
+            int id = FRAMES_NONE;
+            WErr ce = fxml_create(fx, "Frame", "Made", "UIParent", "XmlTemplate", "Boxes", &made, &why);
+            WErr cb = made ? frames_xml_build(x, made, &id, &why) : W_ERR_NOT_FOUND;
+            check(!ce && !cb && id == frames_find(f, "Made") && frames_strata(f, id) == FRAMES_DIALOG && near(frames_width(f, id), 200, 1e-9)
+                  && frames_region_count(f, id) == 3 && frames_unplaced(f, id) == FRAMES_NO_ANCHORS,
+                  "CreateFrame(\"Frame\", \"Made\", UIParent, \"XmlTemplate\") through 066 and here: the template's strata, size and three regions, and no anchors yet");
+            frames_set_point(f, id, FRAMES_CENTER, FRAMES_NONE, FRAMES_CENTER, 0, 0, &why);
+            frames_rect(f, frames_find(f, "MadeIcon"), &r);
+            check(fr_near(&r, 416, 432, 414, 430), "anchored by a C call standing in for SetPoint: its icon follows");
+            int again;
+            check(!frames_xml_build(x, made, &again, &why) && again == id && !frames_xml_catch_up(x, fx, &why) && frames_count(f) == 17,
+                  "an object already built isn't built again");
+        }
+        frames_xml_free(x);
+        fxml_free(fx);
+        frames_free(f);
+    }
+    /* }}} */
+
+    /* {{{ random trees against the reference */
+    {
+        uint32_t seed = 703;
+        int trees = 400, steps = 0, disagree = 0, loops = 0;
+        char first[300] = "";
+        for (int tree = 0; tree < trees; ++tree) {
+            Frames *f = frames_new(NULL, &why);
+            FrRef ref[200];
+            int n = 2 + (int)(fx_rand(&seed) % 60);
+            for (int i = 0; i < n; ++i) {
+                int parent = i && fx_rand(&seed) % 3 ? (int)(fx_rand(&seed) % (unsigned)i) : FRAMES_NONE;
+                ref[i] = (FrRef){ 0, { { 0 } }, (double)(fx_rand(&seed) % 50), (double)(fx_rand(&seed) % 50), 1, parent };
+                fr_frame(f, NULL, parent, ref[i].w, ref[i].h);
+            }
+            for (int step = 0; step < 30; ++step, ++steps) {
+                int i = (int)(fx_rand(&seed) % (unsigned)n);
+                switch (fx_rand(&seed) % 8) {
+                case 0: case 1: case 2: {                 /* an anchor, to anyone (later-made, looping) or the screen */
+                    int rel = fx_rand(&seed) % 5 ? (int)(fx_rand(&seed) % (unsigned)n) : FRAMES_SCREEN;
+                    if (rel == i) rel = FRAMES_SCREEN;
+                    FramesAnchor a = { (FramesPoint)(fx_rand(&seed) % 9), rel, (FramesPoint)(fx_rand(&seed) % 9), (double)(fx_rand(&seed) % 41) - 20, (double)(fx_rand(&seed) % 41) - 20 };
+                    frames_set_point(f, i, a.point, a.relative, a.relative_point, a.x, a.y, &why);
+                    int k = 0;
+                    while (k < ref[i].nanch && ref[i].a[k].point != a.point) ++k;
+                    ref[i].a[k] = a;
+                    if (k == ref[i].nanch) ++ref[i].nanch;
+                    break;
+                }
+                case 3: frames_clear_points(f, i); ref[i].nanch = 0; break;
+                case 4: ref[i].scale = 0.25 * (1 + fx_rand(&seed) % 12); frames_set_scale(f, i, ref[i].scale, &why); break;
+                case 5: ref[i].w = fx_rand(&seed) % 80; frames_set_width(f, i, ref[i].w, &why); break;
+                case 6: {                                 /* a new parent, unless it would loop */
+                    int p = fx_rand(&seed) % 4 ? (int)(fx_rand(&seed) % (unsigned)n) : FRAMES_NONE;
+                    int loopy = 0;
+                    for (int c = p; c >= 0 && !loopy; c = ref[c].parent) loopy = c == i;
+                    WErr pe = frames_set_parent(f, i, p, &why);
+                    if (loopy != (pe == W_ERR_REFUSED)) { ++disagree; if (!first[0]) snprintf(first, sizeof first, "tree %d: SetParent's loop refusal", tree); }
+                    if (!loopy) ref[i].parent = p;
+                    break;
+                }
+                default: frames_layout(f); break;         /* a layout in between, so later ones start from a laid-out tree */
+                }
+                if (fx_rand(&seed) % 3) continue;
+                FramesRect want[200];
+                int loop[200];
+                fr_reference(ref, n, frames_screen_width(f), want, loop);
+                for (int k = 0; k < n; ++k) {
+                    FramesRect got;
+                    frames_rect_screen(f, k, &got);
+                    FramesUnplaced u = frames_unplaced(f, k);
+                    int same = got.placed == want[k].placed && (!got.placed || (near(got.left, want[k].left, 1e-6) && near(got.right, want[k].right, 1e-6)
+                               && near(got.bottom, want[k].bottom, 1e-6) && near(got.top, want[k].top, 1e-6)))
+                               && (got.placed || (u == FRAMES_IN_LOOP) == loop[k]);
+                    loops += loop[k];
+                    if (!same) { ++disagree; if (!first[0]) snprintf(first, sizeof first, "tree %d step %d object %d: placed %d/%d, why %d, loop %d", tree, step, k, got.placed, want[k].placed, (int)u, loop[k]); }
+                }
+            }
+            frames_free(f);
+        }
+        snprintf(line, sizeof line, "%d random trees (%d changes; %d objects found in circles) laid out as the reference lays them out, circles found alike%s%s",
+                 trees, steps, loops, disagree ? ": " : "", first);
+        check(!disagree && loops > 0, line);
+    }
+    /* }}} */
+}
+/* }}} 703 checks */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -814,6 +1409,10 @@ int main(int argc, char **argv)
 
     /* {{{ the interface's XML (702): files written here, so it runs with no game data */
     check_framexml();
+    /* }}} */
+
+    /* {{{ frames, anchors and layers (703): built here from C calls and from XML written here */
+    check_frames();
     /* }}} */
 
     /* {{{ the archives */
