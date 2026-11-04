@@ -22,7 +22,8 @@ Two threads run through every phase:
 Build, logging, config, file access, MPQ chain with loose overlays, DBC with
 data-described layouts, BLP read and write, the shared reader library, and
 the test scenes' client half (109). The resolver waits for the first
-replacement ([012](./012-asset-replacement-and-provenance.md)). No window yet.
+replacement ([012](./012-asset-replacement-and-provenance.md)); built
+ahead of it on 2026-11-04 (105a), with no drawing part asking it yet. No window yet.
 
 Issues:
 - [101-build-system](../issues/101-build-system.md)

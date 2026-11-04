@@ -12,9 +12,9 @@ The phase ends with a runnable demo that touches every Phase 1 piece.
 | 101 | [Build system](./101-build-system.md)           | partly built | —          |
 | 102 | [Logging and errors](./102-logging-and-errors.md) | partly built | 101        |
 | 103 | [Config loader](./103-config-loader.md)         | partly built | 101, 102   |
-| 104 | [Filesystem abstraction](./104-fs-abstraction.md) | pending  | 103        |
+| 104 | [Filesystem abstraction](./104-fs-abstraction.md) | partly built | 103        |
 | 105 | [MPQ chain (read and write)](./105-mpq-reader.md) | partly built | 104        |
-| 105a | [Loose overlays and asset resolver](./105a-loose-overlays-and-asset-resolver.md) | pending | 104, 105 |
+| 105a | [Loose overlays and asset resolver](./105a-loose-overlays-and-asset-resolver.md) | partly built | 104, 105 |
 | 106 | [DBC parser with data-described layouts](./106-dbc-parser.md) | partly built | 105        |
 | 107 | [BLP read and write](./107-blp-parser.md)       | partly built | 105        |
 | 107a | [WC3's pictures (BLP1)](./completed/107a-wc3-pictures-blp1.md) | completed | 105 |
@@ -63,3 +63,13 @@ program, with workers and render threads only (the owner's choice; the
 design and measurements from world-edit-to-execute 515).
 
 2026-10-07: 110 paused until soramech has timers and standing tasks.
+
+2026-11-04: 105a partly built, ahead of the first replacement (the
+owner asked for it as background work): the asset resolver
+(`src/060-resolver.c`: packs, the server's assets, overlays, the
+archives, a built-in placeholder; counts per kind and place; strict
+mode), the pack manifest's format (`manifest.lua`, a Lua table of
+plain data, docs/012 "The pack manifest") and its reader, and 104's
+case-folded folder index (`src/059-loose-folders.c`). 58 checks in the
+test program, needing no game data. Left: the Phase 1 demo printing the
+table (108), and the drawing parts asking the resolver (204 first).

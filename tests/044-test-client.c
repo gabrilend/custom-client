@@ -39,14 +39,20 @@
 #include "../src/032-sight.h"
 #include "../src/021-wmo.h"
 #include "../src/049-jpeg.h"
+#include "../src/059-loose-folders.h"
+#include "../src/060-resolver.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
 
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#undef W_OK                              /* <unistd.h>'s access() mode (2) would hide 013-errors.h's W_OK (0): every == W_OK below would test for 2 */
 
 static int checks, fails;
 
@@ -226,6 +232,448 @@ static void run(Mover *m, MoverInput in, double seconds, MoverGround g)
 }
 /* }}} */
 
+/* {{{ 105a: the asset resolver's tests, on folders and an archive made here
+ * (no game data needed): a pack replacing an archive's file, an overlay
+ * beating the archives, a missing file standing in as a placeholder with
+ * its warning, strict mode refusing it, and the folder index and the
+ * manifest reader under them (059). Everything is made under
+ * DIR/tmp/shared-memory/test-resolver and removed after. */
+
+/* {{{ static the fixtures' writers */
+static void t_mkdirs(const char *path)
+{
+    char p[700];
+    snprintf(p, sizeof p, "%s", path);
+    for (char *c = p + 1; *c; ++c)
+        if (*c == '/') { *c = '\0'; mkdir(p, 0755); *c = '/'; }
+    mkdir(p, 0755);
+}
+static void t_write(const char *dir, const char *name, const void *bytes, size_t len)
+{
+    char path[900];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    char *slash = strrchr(path, '/');
+    *slash = '\0';
+    t_mkdirs(path);
+    *slash = '/';
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(bytes, 1, len, f); fclose(f); }
+}
+static void t_write_text(const char *dir, const char *name, const char *text) { t_write(dir, name, text, strlen(text)); }
+static void t_remove_tree(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) { unlink(path); return; }
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char sub[900];
+        snprintf(sub, sizeof sub, "%s/%s", path, e->d_name);
+        t_remove_tree(sub);
+    }
+    closedir(d);
+    rmdir(path);
+}
+/* one manifest entry, the fields a test varies and the rest fixed (paths in
+ * long brackets, so their backslashes are kept as written) */
+static void t_entry(char *out, size_t n, const char *replaces, const char *file, const char *kind, double score)
+{
+    snprintf(out, n,
+             "    { replaces = [[%s]], file = [[%s]], kind = \"%s\",\n"
+             "      id = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\n"
+             "      route = \"hand\", lineage = \"independent\",\n"
+             "      scores = { { score = %g, date = \"2026-11-01\" } }, seal = false },\n", replaces, file, kind, score);
+}
+/* }}} */
+
+/* {{{ static t_write_mpq: a version 1 archive of whole stored files (no
+ * compression, no scrambled files), its two tables scrambled as every
+ * archive's are, so 015-mpq.c reads it as it reads the game's */
+static uint32_t t_crypt[1280];
+static void t_crypt_make(void)
+{
+    uint32_t seed = 0x00100001;
+    for (int i1 = 0; i1 < 256; ++i1)
+        for (int i = 0, i2 = i1; i < 5; ++i, i2 += 256) {
+            seed = (seed * 125 + 3) % 0x2AAAAB;
+            uint32_t hi = (seed & 0xFFFF) << 16;
+            seed = (seed * 125 + 3) % 0x2AAAAB;
+            t_crypt[i2] = hi | (seed & 0xFFFF);
+        }
+}
+static void t_scramble(uint32_t *w, size_t count, uint32_t key)
+{
+    uint32_t seed = 0xEEEEEEEE;
+    for (size_t i = 0; i < count; ++i) {
+        seed += t_crypt[0x400 + (key & 0xFF)];
+        uint32_t plain = w[i];
+        w[i] = plain ^ (key + seed);
+        key = ((~key << 0x15) + 0x11111111) | (key >> 0x0B);
+        seed = plain + seed + (seed << 5) + 3;
+    }
+}
+static void t_le32(unsigned char *p, uint32_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24); }
+static void t_write_mpq(const char *path, const char *const *names, const char *const *contents, int n)
+{
+    enum { NHASH = 16 };
+    t_crypt_make();
+    size_t data_len = 0;
+    for (int i = 0; i < n; ++i) data_len += strlen(contents[i]);
+    size_t hash_at = 32 + data_len, block_at = hash_at + NHASH * 16, total = block_at + (size_t)n * 16;
+    unsigned char *s = calloc(1, total);
+    memcpy(s, "MPQ\x1a", 4);
+    t_le32(s + 4, 32); t_le32(s + 8, (uint32_t)total);
+    s[12] = 0; s[14] = 3;                                   /* version 1 (written 0), sectors of 4096 */
+    t_le32(s + 16, (uint32_t)hash_at); t_le32(s + 20, (uint32_t)block_at); t_le32(s + 24, NHASH); t_le32(s + 28, (uint32_t)n);
+    uint32_t hashes[NHASH * 4], *blocks = calloc((size_t)n * 4, 4);
+    memset(hashes, 0xFF, sizeof hashes);
+    size_t at = 32;
+    for (int i = 0; i < n; ++i) {
+        size_t len = strlen(contents[i]);
+        memcpy(s + at, contents[i], len);
+        blocks[i * 4 + 0] = (uint32_t)at; blocks[i * 4 + 1] = (uint32_t)len; blocks[i * 4 + 2] = (uint32_t)len;
+        blocks[i * 4 + 3] = 0x80000000u | 0x01000000u;      /* there, one piece */
+        at += len;
+        uint32_t slot = mpq_hash(names[i], 0) % NHASH;
+        while (hashes[slot * 4 + 3] != 0xFFFFFFFFu) slot = (slot + 1) % NHASH;
+        hashes[slot * 4 + 0] = mpq_hash(names[i], 1); hashes[slot * 4 + 1] = mpq_hash(names[i], 2);
+        hashes[slot * 4 + 2] = 0; hashes[slot * 4 + 3] = (uint32_t)i;
+    }
+    t_scramble(hashes, NHASH * 4, mpq_hash("(hash table)", 3));
+    t_scramble(blocks, (size_t)n * 4, mpq_hash("(block table)", 3));
+    for (int i = 0; i < NHASH * 4; ++i) t_le32(s + hash_at + (size_t)i * 4, hashes[i]);
+    for (int i = 0; i < n * 4; ++i) t_le32(s + block_at + (size_t)i * 4, blocks[i]);
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(s, 1, total, f); fclose(f); }
+    free(blocks);
+    free(s);
+}
+/* }}} */
+
+/* {{{ static t_asker: a thread asking the same three assets 100 times (the
+ * reading-ahead thread and the main thread share one resolver) */
+static void *t_asker(void *arg)
+{
+    static const char *const ask[] = { "Creature\\Wolf\\Wolf.m2", "Textures\\Ground.blp", "Creature\\Bear\\Bear.m2" };
+    long bad = 0;
+    for (int i = 0; i < 300; ++i) {
+        AssetAnswer a;
+        WWhy why;
+        if (asset_resolve((Resolver *)arg, ask[i % 3], i % 3 == 1 ? ASSET_TEXTURE : ASSET_MODEL, &a, &why)) ++bad;
+        asset_answer_free(&a);
+    }
+    return (void *)bad;
+}
+/* }}} */
+
+static void resolver_tests(const char *dir)
+{
+    char root[400], path[900], line[1000], text[4000], one[600], two[600];
+    WWhy why;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-resolver", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the resolver's fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the folder index (059; issue 104's acceptance, in part) */
+    check(!fs_normalise("Creature\\Wolf\\\\Wolf.M2", line, sizeof line) && !strcmp(line, "creature/wolf/wolf.m2")
+          && !fs_normalise("/./a//B/./c", path, sizeof path) && !strcmp(path, "a/b/c") && fs_normalise("\\./", line, sizeof line) == 1,
+          "names fold to small letters and forward slashes, doubled slashes and ./ parts gone; nothing left is refused");
+    snprintf(path, sizeof path, "%s/index", root);
+    t_write_text(path, "Creature/Wolf/Wolf.M2", "w");
+    t_write_text(path, "readme.txt", "r");
+    FsIndex *ix = NULL;
+    check(!fs_index_folder(path, &ix, &why) && fs_index_count(ix) == 2, "a folder is indexed: its two files, one two folders down");
+    const char *real = fs_index_find(ix, "creature\\wolf\\wolf.m2");
+    snprintf(line, sizeof line, "%s/Creature/Wolf/Wolf.M2", path);
+    check(real && !strcmp(real, line), "a pack's Creature/Wolf/Wolf.M2 is found by creature\\wolf\\wolf.m2, its real spelling given back");
+    check(!fs_index_find(ix, "creature/wolf/wolf.skin") && !fs_index_find(ix, "creature/wolf"), "a name the folder lacks finds nothing, and neither does a folder");
+    fs_index_free(ix);
+    snprintf(path, sizeof path, "%s/twice", root);
+    t_write_text(path, "Art/A.blp", "1");
+    t_write_text(path, "art/a.BLP", "2");
+    WErr e = fs_index_folder(path, &ix, &why);
+    check(e == W_ERR_REFUSED && !ix && strstr(why.text, "Art/A.blp") && strstr(why.text, "art/a.BLP"),
+          "two names that differ only by capitals: refused, both named");
+    snprintf(path, sizeof path, "%s/no-such-folder", root);
+    check(fs_index_folder(path, &ix, &why) == W_ERR_NOT_FOUND, "a folder that isn't there: W_ERR_NOT_FOUND");
+    /* }}} */
+
+    /* {{{ the manifest (059) */
+    const char *full =
+        "-- a pack made by hand for the tests\n"
+        "--[[ a block comment,\n over two lines ]]\n"
+        "return {\n"
+        "    format = 1,\n"
+        "    name = 'Wolves, \\\"redrawn\\\"',\n"
+        "    entries = {\n"
+        "        {\n"
+        "            replaces = \"Creature\\\\Wolf\\\\Wolf.m2\", file = \"wolf/wolf.m2\", kind = \"model\",\n"
+        "            id = \"3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b\",\n"
+        "            route = \"generate\", lineage = \"independent\",\n"
+        "            generation = { prompt = [[a grey wolf,\nlow poly]], seed = \"18446744073709551615\",\n"
+        "                           workflow = \"abc\", models = { \"one\", \"two\" } },\n"
+        "            scores = { { score = 0.25, date = \"2026-10-01\", by = \"W05a\" }; { score = 6.2e-1, date = \"2026-10-30\" } },\n"
+        "            seal = { build = 12340, date = \"2026-11-01\" },\n"
+        "            transcript = \"llm-transcripts/nov-01-26.md:120-180\",\n"
+        "            wc3 = { scale = 1.5, team_colour = true },\n"
+        "        },\n"
+        "        { replaces = \"Textures/Ground.blp\", file = \"ground.blp\", kind = \"texture\",\n"
+        "          id = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\n"
+        "          route = \"search\", lineage = \"derived\", licence = \"CC0-1.0, someone, https://example.org/ground\" },\n"
+        "    },\n"
+        "}\n";
+    PackManifest *m = NULL;
+    e = pack_manifest_parse(full, strlen(full), "test manifest", &m, &why);
+    check(!e && m && m->count == 2 && !strcmp(m->name, "Wolves, \"redrawn\""), e ? why.text : "a full manifest reads: its name (escapes undone) and two entries");
+    if (m && m->count == 2) {
+        const PackEntry *w = &m->entries[0], *g = &m->entries[1];
+        check(!strcmp(w->key, "creature/wolf/wolf.m2") && w->kind == ASSET_MODEL && w->route == PACK_ROUTE_GENERATE && w->lineage == PACK_LINEAGE_INDEPENDENT,
+              "the wolf: its folded path, kind, route and lineage");
+        check(w->has_seed && w->seed == UINT64_MAX && !strcmp(w->prompt, "a grey wolf,\nlow poly") && w->nmodels == 2 && !strcmp(w->models[1], "two"),
+              "its generation record: a 64-bit seed held exactly (written as digits), a long-bracket prompt, two model names");
+        check(w->nscores == 2 && near(pack_entry_latest(w), 0.62, 1e-12) && !strcmp(w->scores[0].by, "W05a") && !strcmp(w->scores[1].by, ""),
+              "two scores, oldest first; the latest is the last (0.62)");
+        check(w->sealed && w->seal_build == 12340 && !strcmp(w->seal_date, "2026-11-01") && !strcmp(w->transcript, "llm-transcripts/nov-01-26.md:120-180"),
+              "the seal (stock build 12340, checked 2026-11-01) and where the transcript of its making is");
+        check(!g->sealed && g->nscores == 0 && pack_entry_latest(g) < 0 && strstr(g->licence, "CC0-1.0") && !g->has_generation,
+              "the ground: searched, with its licence; no scores yet, so none latest; no seal");
+    }
+    pack_manifest_free(m);
+    /* each mistake refused, with the code a caller branches on and a sentence naming it */
+    struct { const char *text, *finds; WErr code; const char *what; } wrong[] = {
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'hand', linage = 'derived' } } }",
+          "linage", W_ERR_REFUSED, "a misspelt field (linage) is refused by name" },
+        { "return { format = 2, name = 'x', entries = {} }", "format 2", W_ERR_UNSUPPORTED, "a newer format: W_ERR_UNSUPPORTED" },
+        { "return { format = os.exit(), name = 'x', entries = {} }", "line 1", W_ERR_CORRUPT, "a call where data should be: refused as not data, with its line" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'generate', lineage = 'derived' } } }",
+          "generation record", W_ERR_REFUSED, "a generated asset with no generation record" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'hand', lineage = 'derived', scores = { { score = 1.5, date = '2026-01-01' } } } } }",
+          "1.5", W_ERR_REFUSED, "a score past 1" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'hand', lineage = 'derived', scores = { { score = 0.5, date = '2026-02-01' }, { score = 0.6, date = '2026-01-01' } } } } }",
+          "oldest first", W_ERR_REFUSED, "scores out of date order" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'hand', lineage = 'derived', seal = true } } }",
+          "W05c", W_ERR_REFUSED, "a seal of plain true (it must name the build and date it was checked)" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = '%s', route = 'generate', lineage = 'derived', generation = { seed = 12 } } } }",
+          "string of digits", W_ERR_REFUSED, "a seed written as a number (LuaJIT would round a large one)" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'A\\\\b', file = 'a', kind = 'model', id = '%s', route = 'hand', lineage = 'derived' },\n"
+          "{ replaces = 'a/B', file = 'b', kind = 'model', id = '%s', route = 'hand', lineage = 'derived' } } }",
+          "both replace", W_ERR_REFUSED, "two entries replacing one path (spelt differently)" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'mesh', id = '%s', route = 'hand', lineage = 'derived' } } }",
+          "not one of", W_ERR_REFUSED, "a kind that isn't one" },
+        { "return { format = 1, name = 'x', entries = { { replaces = 'a', file = 'a', kind = 'model', id = 'ABC', route = 'hand', lineage = 'derived' } } }",
+          "SHA-256", W_ERR_REFUSED, "an id that isn't a SHA-256" },
+        { "return { format = 1, name = 'x', name = 'y', entries = {} }", "twice", W_ERR_CORRUPT, "a key given twice" },
+        { "return { format = 1, name = \"no end, entries = {} }", "doesn't close", W_ERR_CORRUPT, "a string that never closes" },
+    };
+    const char *hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    for (size_t i = 0; i < sizeof wrong / sizeof wrong[0]; ++i) {
+        snprintf(text, sizeof text, wrong[i].text, hex, hex);
+        why.text[0] = '\0';
+        e = pack_manifest_parse(text, strlen(text), "test manifest", &m, &why);
+        snprintf(line, sizeof line, "%s: %s (%s)", wrong[i].what, w_err_name(e), why.text);
+        check(e == wrong[i].code && !m && strstr(why.text, wrong[i].finds), line);
+    }
+    check(!pack_manifest_parse("return { format = 1, name = 'empty', entries = {}, }", 52, "t", &m, &why) && m && m->count == 0,
+          "a pack with nothing in it yet (entries = {}, a comma after the last item) reads");
+    pack_manifest_free(m);
+    /* }}} */
+
+    /* {{{ the fixtures: an archive, two packs, an overlay */
+    char data[520], pack1[520], pack2[520], overlay[520], broken[520];
+    snprintf(data, sizeof data, "%s/Data", root);
+    t_mkdirs(data);
+    snprintf(path, sizeof path, "%s/patch.MPQ", data);
+    const char *const names[] = { "Creature\\Wolf\\Wolf.m2", "Textures\\Ground.blp", "Sound\\Howl.wav" };
+    const char *const bytes[] = { "the archive's wolf", "the archive's ground", "the archive's howl" };
+    t_write_mpq(path, names, bytes, 3);
+    MpqChain chain;
+    e = mpq_chain_open(&chain, data, "enUS", &why);
+    check(!e && chain.count == 1, e ? why.text : "a made-up archive opens as a chain of one");
+    if (e) { t_remove_tree(root); return; }
+
+    snprintf(pack1, sizeof pack1, "%s/packs/wolves", root);
+    t_entry(one, sizeof one, "Creature\\Wolf\\Wolf.m2", "Wolf/WOLF.m2", "model", 0.62);
+    t_entry(two, sizeof two, "Creature\\Cat\\Cat.m2", "cat.m2", "model", 0.3);
+    snprintf(text, sizeof text, "return {\n  format = 1, name = \"Wolves\",\n  entries = {\n%s%s  },\n}\n", one, two);
+    t_write_text(pack1, "manifest.lua", text);
+    t_write_text(pack1, "wolf/Wolf.m2", "the pack's wolf");
+    t_write_text(pack1, "cat.m2", "the pack's cat");
+    t_write_text(pack1, "notes.txt", "a file no entry names");
+    snprintf(pack2, sizeof pack2, "%s/packs/second", root);
+    t_entry(one, sizeof one, "creature/wolf/wolf.m2", "w.m2", "model", 0.9);
+    t_entry(two, sizeof two, "Sound\\Howl.wav", "howl.wav", "model", 0.9);    /* listed as a model: asked for as a sound, refused */
+    snprintf(text, sizeof text, "return { format = 1, name = \"Second\", entries = {\n%s%s} }\n", one, two);
+    t_write_text(pack2, "MANIFEST.LUA", text);
+    t_write_text(pack2, "w.m2", "the second pack's wolf");
+    t_write_text(pack2, "howl.wav", "the second pack's howl");
+    snprintf(overlay, sizeof overlay, "%s/overlays/map", root);
+    t_write_text(overlay, "TEXTURES/ground.BLP", "the overlay's ground");
+    /* }}} */
+
+    /* {{{ the lookup, its order and its counts */
+    ResolverPlace place = { .npacks = 2, .noverlays = 1, .chain = &chain, .distinctness = 0.5, .trace = 1 };
+    snprintf(place.packs[0], sizeof place.packs[0], "%s", pack1);
+    snprintf(place.packs[1], sizeof place.packs[1], "%s", pack2);
+    snprintf(place.overlays[0], sizeof place.overlays[0], "%s", overlay);
+    char *log = NULL;
+    size_t log_len = 0;
+    place.log = open_memstream(&log, &log_len);
+    Resolver *r = NULL;
+    e = resolver_open(&place, &r, &why);
+    check(!e && r, e ? why.text : "the resolver opens two packs, an overlay and the archive");
+    if (e) { fclose(place.log); free(log); mpq_chain_close(&chain); t_remove_tree(root); return; }
+    AssetAnswer a;
+    e = asset_resolve(r, "CREATURE/wolf/wolf.M2", ASSET_MODEL, &a, &why);
+    check(!e && a.source == ASSET_FROM_PACK && a.len == 15 && !memcmp(a.data, "the pack's wolf", 15) && !strcmp(a.from, pack1),
+          "a pack file replaces the archive's file of the same logical path, in any spelling (105a's acceptance)");
+    check(a.entry && near(pack_entry_latest(a.entry), 0.62, 1e-12) && !a.entry->sealed, "and the answer carries its manifest entry: its score and seal");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Creature\\Wolf\\Wolf.m2", ASSET_MODEL, &a, &why);
+    check(!e && a.source == ASSET_FROM_PACK && !memcmp(a.data, "the pack's wolf", 15), "the first pack listed outranks the second, which replaces the wolf too");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Textures\\Ground.blp", ASSET_TEXTURE, &a, &why);
+    check(!e && a.source == ASSET_FROM_OVERLAY && a.len == 20 && !memcmp(a.data, "the overlay's ground", 20) && !strcmp(a.from, overlay),
+          "an overlay's file beats the archive's");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Sound\\Howl.wav", ASSET_SOUND, &a, &why);
+    check(e == W_ERR_REFUSED && !a.data && strstr(why.text, "lists it as a model"),
+          "a pack entry of another kind than asked for: refused, naming both kinds");
+    e = asset_resolve(r, "Creature\\Cat\\Cat.m2", ASSET_MODEL, &a, &why);
+    check(!e && a.source == ASSET_FROM_PACK && !memcmp(a.data, "the pack's cat", 14), "the cat, from the pack (score 0.3: below the threshold)");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Creature\\Bear\\Bear.m2", ASSET_MODEL, &a, &why);
+    check(!e && a.source == ASSET_FROM_PLACEHOLDER && !strcmp(a.from, "built in"), "a model in no pack, folder or archive: a placeholder stands in");
+    AssetAnswer skin;
+    e = asset_resolve(r, "Creature\\Bear\\Bear00.skin", ASSET_MODEL, &skin, &why);
+    M2Model box;
+    WErr me = (e || !a.data) ? W_ERR_NOT_FOUND : m2_read(a.data, a.len, skin.data, skin.len, &box, &why);
+    check(!me && box.nvertices == 8 && box.nindices == 36 && box.npieces == 1 && box.nunits == 1,
+          me ? why.text : "the placeholder model and its .skin are an M2 the model reader takes: a box, 8 corners, 12 triangles");
+    if (!me) {
+        float lo = 1e9f, hi = -1e9f;
+        for (uint32_t i = 0; i < box.nvertices; ++i) { if (box.vertices[i].z < lo) lo = box.vertices[i].z; if (box.vertices[i].z > hi) hi = box.vertices[i].z; }
+        check(lo == 0 && hi == 1, "standing on the ground, a yard high");
+        m2_free(&box);
+    }
+    asset_answer_free(&a);
+    asset_answer_free(&skin);
+    e = asset_resolve(r, "Textures\\Missing.blp", ASSET_TEXTURE, &a, &why);
+    BlpImage img = { 0 };
+    WErr be = (e || !a.data) ? W_ERR_NOT_FOUND : blp_decode(a.data, a.len, &img, &why);
+    check(!be && img.width == 8 && img.height == 8 && img.rgba[0] == 255 && img.rgba[1] == 0 && img.rgba[2] == 255
+          && img.rgba[2 * 4] == 0 && img.rgba[2 * 4 + 2] == 0 && img.rgba[3] == 255,
+          be ? why.text : "the placeholder picture is a BLP2 the picture reader takes: 8 x 8, magenta and black squares");
+    if (!be) blp_free(&img);
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Sound\\Missing.wav", ASSET_SOUND, &a, &why);
+    check(!e && a.len > 44 && !memcmp(a.data, "RIFF", 4) && !memcmp(a.data + 8, "WAVE", 4), "the placeholder sound is a WAV (the beep)");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Fonts\\Missing.ttf", ASSET_FONT, &a, &why);
+    check(!e && a.source == ASSET_FROM_PLACEHOLDER && a.len == 0, "a font's placeholder is empty: the client's built-in font");
+    asset_answer_free(&a);
+    e = asset_resolve(r, "Creature\\Bear\\Bear.m2", ASSET_MODEL, &a, &why);
+    asset_answer_free(&a);
+    check(asset_resolve(r, "", ASSET_MODEL, &a, &why) == W_ERR_REFUSED && asset_resolve(r, "x", (AssetKind)99, &a, &why) == W_ERR_REFUSED,
+          "an empty name, or a kind outside the list: refused");
+    AssetCounts c;
+    asset_counts(r, &c);
+    check(c.by[ASSET_MODEL][ASSET_FROM_PACK] == 2 && c.distinct[ASSET_MODEL] == 1 && c.by[ASSET_MODEL][ASSET_FROM_PLACEHOLDER] == 2
+          && c.by[ASSET_TEXTURE][ASSET_FROM_OVERLAY] == 1 && c.by[ASSET_TEXTURE][ASSET_FROM_PLACEHOLDER] == 1
+          && c.by[ASSET_SOUND][ASSET_FROM_PACK] == 0 && c.by[ASSET_SOUND][ASSET_FROM_PLACEHOLDER] == 1 && c.by[ASSET_FONT][ASSET_FROM_PLACEHOLDER] == 1,
+          "counted once per asset, by kind and place: models 2 from the pack (1 past the threshold) and 2 placeholders; asked again, not again; refused, not at all");
+    check(c.placeholder_answers == 6, "placeholders counted every time they stood in (6: the bear twice)");
+    check(resolver_exit_status(r) == 0, "strict mode off: placeholders don't change the exit status");
+    fflush(place.log);
+    check(log && strstr(log, "pack \"Wolves\"") && strstr(log, "1 file with no entry") && strstr(log, "notes.txt"),
+          "a pack file no entry names is said at the start, by name (it is never served)");
+    check(log && strstr(log, "WARNING: the model Creature\\Bear\\Bear.m2 is in none of 2 packs, 0 server folders, 1 overlay or the archives; a box stands in"),
+          "each placeholder is a warning naming the asset and where it was looked for");
+    check(log && strstr(log, "assets: texture Textures\\Ground.blp <- overlay (") && strstr(log, "<- pack \"Wolves\"") && strstr(log, "score 0.62, replaced"),
+          "the trace names the winner of each request (and a pack asset's score)");
+    char *table = NULL;
+    size_t table_len = 0;
+    FILE *tf = open_memstream(&table, &table_len);
+    resolver_report(r, tf);
+    fclose(tf);
+    check(table && strstr(table, "model") && strstr(table, "2 (1)") && strstr(table, "placeholders stood in 6 times; strict mode off"),
+          "the counts table: a row a kind, the pack column with how many are past the threshold");
+    if (table) fputs(table, stdout);
+    free(table);
+    pthread_t askers[4];
+    long bad = 0;
+    for (int i = 0; i < 4; ++i) pthread_create(&askers[i], NULL, t_asker, r);
+    for (int i = 0; i < 4; ++i) { void *got; pthread_join(askers[i], &got); bad += (long)got; }
+    AssetCounts after;
+    asset_counts(r, &after);
+    c.placeholder_answers += 4 * 100;
+    check(bad == 0 && !memcmp(&after, &c, sizeof c), "four threads asking the same assets at once: every answer given, each asset still counted once, every placeholder counted");
+    resolver_free(r);
+    /* the archive answers what no folder has: a resolver with no folders at all */
+    place.npacks = 0; place.noverlays = 0; place.trace = 0;
+    e = resolver_open(&place, &r, &why);
+    if (!e) {
+        e = asset_resolve(r, "Sound\\Howl.wav", ASSET_SOUND, &a, &why);
+        check(!e && a.source == ASSET_FROM_BLIZZARD && a.len == 18 && !memcmp(a.data, "the archive's howl", 18) && a.from && strstr(a.from, "patch.MPQ"),
+              "with no folders, the archive's file answers, naming the archive");
+        asset_answer_free(&a);
+        resolver_free(r);
+    } else check(0, why.text);
+    /* }}} */
+
+    /* {{{ strict mode */
+    place.strict = 1;
+    e = resolver_open(&place, &r, &why);
+    if (!e) {
+        e = asset_resolve(r, "Creature\\Bear\\Bear.m2", ASSET_MODEL, &a, &why);
+        check(e == W_ERR_NOT_FOUND && !a.data && strstr(why.text, "strict mode"), "strict mode: a placeholder is an error, W_ERR_NOT_FOUND, no bytes");
+        check(resolver_exit_status(r) == 1, "and the program's exit status for its assets turns to 1 (105a's acceptance: a non-zero exit)");
+        resolver_free(r);
+    } else check(0, why.text);
+    place.strict = 0;
+    /* }}} */
+
+    /* {{{ broken packs stop the start, by name */
+    place.npacks = 1;
+    snprintf(place.packs[0], sizeof place.packs[0], "%s", overlay);
+    e = resolver_open(&place, &r, &why);
+    check(e == W_ERR_NOT_FOUND && !r && strstr(why.text, "no manifest.lua"), "a pack folder with no manifest: W_ERR_NOT_FOUND, said so");
+    snprintf(broken, sizeof broken, "%s/packs/broken", root);
+    t_entry(one, sizeof one, "a.blp", "not-there.blp", "texture", 0.5);
+    snprintf(text, sizeof text, "return { format = 1, name = 'broken', entries = {\n%s} }\n", one);
+    t_write_text(broken, "manifest.lua", text);
+    snprintf(place.packs[0], sizeof place.packs[0], "%s", broken);
+    e = resolver_open(&place, &r, &why);
+    check(e == W_ERR_NOT_FOUND && strstr(why.text, "not-there.blp") && strstr(why.text, "line 2"), "an entry whose file isn't in its pack: refused at the start, with its line");
+    snprintf(place.packs[0], sizeof place.packs[0], "%s/packs/none", root);
+    check(resolver_open(&place, &r, &why) == W_ERR_NOT_FOUND && strstr(why.text, "not there"), "a pack folder that isn't there");
+    /* }}} */
+
+    /* {{{ the settings */
+    Settings *rs = settings_new();
+    check(!strcmp(settings_text(rs, "assetPacks"), "") && settings_num(rs, "assetsStrict") == 0 && near(settings_num(rs, "assetsDistinctness"), 0.5, 1e-12),
+          "by default: no packs, strict mode off, the threshold 0.5");
+    check(settings_set(rs, "assetPacks", "../elsewhere", &why) == W_ERR_REFUSED && settings_set(rs, "assetPacks", "a/b", &why) == W_ERR_REFUSED
+          && settings_set(rs, "assetPacks", "a,,b", &why) == W_ERR_REFUSED && settings_set(rs, "assetsDistinctness", "1.5", &why) == W_ERR_REFUSED,
+          "pack names with a slash, a .., or an empty name between commas are refused, and so is a threshold past 1");
+    settings_set(rs, "assetPacks", "wolves,second", &why);
+    settings_set(rs, "assetOverlays", "map", &why);
+    settings_set(rs, "assetsStrict", "1", &why);
+    ResolverPlace sp;
+    e = resolver_place_from_settings(rs, root, &chain, &sp, &why);
+    snprintf(path, sizeof path, "%s/packs/second", root);
+    check(!e && sp.npacks == 2 && !strcmp(sp.packs[0], pack1) && !strcmp(sp.packs[1], path) && sp.noverlays == 1 && !strcmp(sp.overlays[0], overlay)
+          && sp.strict == 1 && near(sp.distinctness, 0.5, 1e-12) && sp.chain == &chain,
+          "the place from the settings: the named folders under assets/packs and assets/overlays, in order");
+    settings_free(rs);
+    /* }}} */
+
+    fclose(place.log);
+    free(log);
+    mpq_chain_close(&chain);
+    t_remove_tree(root);
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -329,6 +777,12 @@ int main(int argc, char **argv)
     in = none; in.forward = 1;
     for (int i = 0; i < 100; ++i) mover_step(&m, &in, 0.01, &(MoverWorld){ g_world, NULL, NULL, w });
     check(m.grounded, "a second's run from the start point on Ashenvale's real ground stays on it");
+    /* }}} */
+
+    /* {{{ the asset resolver (105a): folders and an archive made here, no game data,
+     * so before the archives, which stop the program when there are none */
+    printf("the asset resolver\n");
+    resolver_tests(dir);
     /* }}} */
 
     /* {{{ the archives */

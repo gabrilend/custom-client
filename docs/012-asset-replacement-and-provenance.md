@@ -12,6 +12,12 @@ from the owner's archives, as the working client did before the merge.
 The resolver below is built when the first replacement exists; until
 then every asset counts as borrowed.
 
+Built ahead of that, 2026-11-04 (issue 105a, background work the owner
+asked for): the resolver (`src/060-resolver.c`), the folder index and
+the pack manifest's reader under it (`src/059-loose-folders.c`). No
+drawing part asks it yet; they still read the archives directly, and
+switch to it one at a time (204 for pictures first).
+
 ## How players share assets
 
 The owner, 2026-10-07: "A plain folder of files would be converted into
@@ -23,10 +29,10 @@ or an archive. A folder is packed into an archive when it is taken in,
 and only archives travel over the network. Packing needs the archive
 writer (planned: [105](../issues/105-mpq-reader.md)).
 
-## The resolver (when the first replacement exists)
+## The resolver (built 2026-11-04, `src/060-resolver.h`)
 
 Every asset request (model, texture, animation set, particle definition,
-sound, font, interface image) goes through one function that asks four
+sound, font, interface image) goes through one function that asks five
 places in order:
 
 ```
@@ -34,9 +40,15 @@ places in order:
       │
       ├─ 1. replacement packs (loose folders, ours)          → source = "pack"
       ├─ 2. assets the server delivered (2026-10-09)         → source = "server"
-      ├─ 3. the owner's Blizzard client (MPQ chain)          → source = "blizzard"
-      └─ 4. placeholder (magenta checker / wireframe / beep) → source = "placeholder"
+      ├─ 3. overlays (loose folders: converted WC3 maps)     → source = "overlay"
+      ├─ 4. the owner's Blizzard client (MPQ chain)          → source = "blizzard"
+      └─ 5. placeholder (magenta checker / box / beep)       → source = "placeholder"
 ```
+
+Overlays (issue 105a's second step) sit after the server's assets: the
+server holds the truth about the world it runs (docs/001), so where a
+local folder and the server's delivery hold the same path, the server's
+wins. A player's own pack outranks both.
 
 The player's own packs outrank the server's assets (the owner,
 2026-10-09: "A player's own replacements are higher priority than the
@@ -55,12 +67,58 @@ Converted WC3 maps (terrain, placements) arrive the same way: as a loose
 folder layered above the MPQ chain. The W client needs no patch archive for
 them.
 
+## The pack manifest (format 1, decided 2026-11-04)
+
+A pack is a folder of files and a `manifest.lua` beside them: a Lua
+table of plain data, one entry per file, each entry the file's
+provenance record (below) with three more fields: `replaces` (the
+logical path it answers), `file` (where it is in the folder) and `kind`
+(model, texture, animation, particle, sound, font, interface). Lua,
+because world-edit-to-execute's manifests are already `manifest.lua`
+tables it loads with `loadfile` (its patch layers), and the owner
+prefers Lua; plain data only, so the client reads it with a small
+reader of its own (`src/059-loose-folders.c`) and runs no Lua for it.
+The full layout, field by field, is in `059-loose-folders.h` (and its
+`.info.md`). In short:
+
+```lua
+return {
+    format = 1,
+    name = "Wolves, redrawn",
+    entries = {
+        { replaces = "Creature\\Wolf\\Wolf.m2", file = "wolf/wolf.m2", kind = "model",
+          id = "<SHA-256 of the file, 64 hex digits>",
+          route = "generate", lineage = "independent",
+          generation = { prompt = "...", seed = "18446744073709551615", workflow = "<hash>", models = { "..." } },
+          scores = { { score = 0.41, date = "2026-10-30", by = "W05a" } },   -- oldest first
+          seal = false,                       -- or { build = 12340, date = "2026-11-01" }
+          transcript = "llm-transcripts/nov-01-26.md:120-180" },
+    },
+}
+```
+
+- A field this format doesn't have is refused (a misspelling is caught
+  at the start, by name); a later format gets a new number. One table
+  is set aside for world-edit-to-execute's own override fields (its
+  issue 504: scale, tint, team colour, every map or one): `wc3`, which
+  the client doesn't read.
+- `licence` is required for `route = "search"`, `generation` for
+  `route = "generate"`.
+- The seed is a string of digits: a 64-bit number doesn't fit the
+  53 bits LuaJIT's numbers hold exactly.
+- The seal is `false` or the stock client's build and the day it was
+  checked (world-edit-to-execute W05c).
+- Only files an entry names are served; a pack file with no entry has
+  no provenance, and is named once at the start.
+
 ## Similarity score
 
 Every replacement carries a score between 0.0 (identical to the Blizzard
 original) and 1.0 (unrelated), with a history, because art is reworked bit by
 bit. A replacement counts as **replaced** only past the distinctness
-threshold, which is a setting.
+threshold, which is a setting (`assetsDistinctness`: a score at or above
+it counts; 0.5 until the owner picks the number, world-edit-to-execute's
+open question 10).
 
 How it is measured depends on the kind of asset. Scoring code lives in
 world-edit-to-execute (issue W05a); this client reads and displays the scores.

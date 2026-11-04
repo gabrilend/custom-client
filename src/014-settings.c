@@ -9,6 +9,7 @@
 #include "014-settings.h"
 #include "013-errors.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,8 +49,21 @@
  *   fog may reach, and how many tiles load round her (one tile covers
  *   533 yards). 507 keeps the 3 x 3 the client had before; the range and
  *   step are the original's.
+ * assetPacks, assetOverlays, assetsStrict, assetsDistinctness: the asset
+ *   resolver's (issue 105a, 060-resolver.h), with no twin in the
+ *   original. The two lists name folders under the profile's
+ *   assets/packs and assets/overlays, commas between, highest priority
+ *   first; names, not paths, so a profile's settings never point outside
+ *   its own assets and the 63 characters a value holds go far. None by
+ *   default: every asset comes from the player's archives, as before.
+ *   Strict mode is off by default (a missing asset is a warning and a
+ *   placeholder). The distinctness threshold, 0.5 for now, is a stand-in
+ *   until the owner picks one (world-edit-to-execute's open question 10):
+ *   a pack asset whose latest similarity score is at or above it counts
+ *   as replaced.
  */
 static const char *check_resolution(const char *value);
+static const char *check_folder_names(const char *value);
 
 static const SettingChoice CAMERA_STYLES[] = {
     { "Only horizontal when moving", "1" },
@@ -102,6 +116,14 @@ static const SettingDecl DECLS[] = {
     { .name = "cameraYawMoveSpeed",      .section = "Mouse",      .kind = SETTING_SLIDER, .def = "180",
       .min = 90, .max = 270, .step = 10,
       .label = "Mouse Look Speed", .explain = "Adjust the speed at which you turn the camera when using mouse look." },
+    { .name = "assetPacks",              .section = "Assets",     .kind = SETTING_TEXT,   .def = "", .check = check_folder_names, .restart = 1,
+      .label = "Replacement Packs", .explain = "Folders under assets/packs whose models, pictures and sounds stand in for the original game's, highest priority first, commas between." },
+    { .name = "assetOverlays",           .section = "Assets",     .kind = SETTING_TEXT,   .def = "", .check = check_folder_names, .restart = 1,
+      .label = "Overlays", .explain = "Folders under assets/overlays (a converted Warcraft III map, for one) read before the original game's archives, highest priority first, commas between." },
+    { .name = "assetsStrict",            .section = "Assets",     .kind = SETTING_TOGGLE, .def = "0", .restart = 1,
+      .label = "Strict Assets", .explain = "Treat any asset missing from every pack, folder and archive as an error, instead of drawing a placeholder." },
+    { .name = "assetsDistinctness",      .section = "Assets",     .kind = SETTING_SLIDER, .def = "0.5", .min = 0, .max = 1, .step = 0.01, .restart = 1,
+      .label = "Distinctness Threshold", .explain = "The similarity score from which a pack's asset counts as replaced: 0 is the original itself, 1 unrelated to it." },
 };
 #define DECL_COUNT ((int)(sizeof DECLS / sizeof DECLS[0]))
 
@@ -120,6 +142,27 @@ static const char *check_resolution(const char *value)
 {
     int w, h;
     return settings_resolution(value, &w, &h) ? "not a resolution from 640x480 to 7680x4320, written WIDTHxHEIGHT" : NULL;
+}
+/* }}} */
+
+/* {{{ check_folder_names: "", or folder names with commas between (no
+ * slashes, no "." or "..", nothing empty between two commas) */
+static const char *check_folder_names(const char *value)
+{
+    if (!*value) return NULL;
+    const char *p = value;
+    for (;;) {
+        const char *start = p;
+        while (*p && *p != ',') {
+            unsigned char c = (unsigned char)*p++;
+            if (!(isalnum(c) || c == '-' || c == '_' || c == '.')) return "not folder names (letters, digits, - _ and .) with commas between";
+        }
+        size_t len = (size_t)(p - start);
+        if (len == 0) return "a folder name left empty between commas";
+        if ((len == 1 && start[0] == '.') || (len == 2 && start[0] == '.' && start[1] == '.')) return "a folder name of . or .., which would leave the folder";
+        if (!*p) return NULL;
+        ++p;
+    }
 }
 /* }}} */
 

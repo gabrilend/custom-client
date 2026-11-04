@@ -30,6 +30,13 @@ picture options; this page doesn't copy numbers that go stale.
 | The player's settings file (`assets/settings/Config.wtf`) | `014-settings.c` | the player's choices (`SET name "value"`) |
 | The creature list (`assets/world/creatures-<map>.tsv`), generated from the server's world database by wow-chat-2026's `scripts/generate-custom-client-creatures` | `035-creatures.c` | where each creature stands, its look and size (the network's stand-in, 173t) |
 
+Not in this path yet: the asset resolver (`060-resolver.c`, issue 105a),
+which puts replacement packs, the server's assets and loose overlay
+folders in front of the archives, with a placeholder after them. It is
+built and tested, but every reader below still asks the archives
+directly; each part switches to it with its own issue (204 for
+pictures first).
+
 ## 2. From the archives to things in memory (no window needed)
 
 | Reader | From | To |
