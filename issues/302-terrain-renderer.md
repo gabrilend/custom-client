@@ -37,6 +37,13 @@ Measured against the clean-room checklist's note 4.5
     4, 2, 1 (bits 4 to 6); not handled here;
   - **shine:** a chunk marked for specular gives layer 1 a reflection
     look in the no-shader path.
+- **WC3's ground** (2026-11-04): read and made ready without the window,
+  [302a](./302a-wc3-ground-read-and-prepared.md) (`src/063-w3e.c`): each
+  point's heights and water, each cell's tileset pictures and subtiles,
+  cliff and blighted cells marked, a stroke's area redone alone; checked
+  against world-edit-to-execute's Lua. Not yet drawn: painting it onto
+  the one mesh beside WoW's layers, and seating cliffs on it (docs/009
+  answer 1), are still this issue's.
 - **One quirk**, with a correction switch off by default: a scrolling
   layer's counter wraps from 64 to 0 only when it grows, so one moving
   towards negative numbers never wraps and loses precision over a very

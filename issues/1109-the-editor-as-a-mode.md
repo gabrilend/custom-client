@@ -16,8 +16,14 @@ building, and baked blocks of flat-shaded designs. It reads and writes
 again after each stroke, and plays the edited map with F5 through the
 same viewer, the game's rules run by that project's Lua simulation.
 
-This client has no editor mode, reads no WC3 ground or WC3 models yet
-(pictures, yes: 107a), and has no interface runtime for Lua (Phase 7).
+This client has no editor mode, draws no WC3 ground and reads no WC3
+models yet (pictures, yes: 107a), and has no interface runtime for Lua
+(Phase 7). WC3 ground is read and prepared since 2026-11-04
+([302a](./302a-wc3-ground-read-and-prepared.md)), with step 2's cheap
+redo: after a stroke changes points in place, `w3e_prep_area` works out
+again only those points and the cells they touch (about 0.002 ms for a
+5 x 5 stroke on a 257 x 257 ground, against 3.4 ms for all of it), and
+says which cells, so the renderer can resend just them.
 
 ## Intended behavior
 
@@ -53,7 +59,8 @@ working in between.
 
 1. The mode's frame: open a `.w3x` from a path, the top-down camera,
    the editor's Lua loaded from world-edit-to-execute's `src/editor/`.
-2. WC3 ground on the one mesh, redrawn by tile after a stroke.
+2. WC3 ground on the one mesh, redrawn by tile after a stroke (the
+   reading and the area redo: 302a, built; the mesh: 302).
 3. Models (after 401 step 2) and the designs as placeholders.
 4. The editor's panels rebuilt on Phase 7's interface runtime (XML frames
    and Lua, as WoW's own interface; open question 2, answered
