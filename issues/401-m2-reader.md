@@ -71,9 +71,15 @@ every `.mdx` in `war3.mpq` and `War3x.mpq` (`luajit
 tests/062-mdx-matches-lua.lua`, which runs it when world-edit-to-execute's
 `wc3-installs/frozen-throne/` holds them, split over every core, as
 050 does for pictures), on the owner's machine. Until then the match is
-proven only on the made models. Then a WC3 model drawn: no drawing part
-reads `mdx_read` yet (the doodads' and figures' loading is by `.m2`
-name; team colour is 404's).
+proven only on the made models. Then a WC3 model drawn: since 1109's step
+1b (2026-11-04) the figures (041) read a converted map's own `.mdx`
+with `mdx_read`, when a creature look's CreatureModelData row names it
+and its bytes start `MDLX` (world-edit-to-execute's W02c writes
+`war3mapImported\orc.mdx` so), sized by the map's yards per WC3 unit.
+It stands in its rest pose (WC3 posing is 402 step 4), its replaceable
+pictures (team colour, 404) left off and its layers hidden at rest not
+drawn. Read and checked on the converter's real output; not yet drawn
+in a window. The doodads (042) still load by `.m2` name.
 
 Not yet: choosing among the detail files by the bone limit (step 1;
 this client always takes `00.skin`), ribbons (403), the model's own

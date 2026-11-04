@@ -30,15 +30,22 @@ picture options; this page doesn't copy numbers that go stale.
 | The player's settings file (`assets/settings/Config.wtf`) | `014-settings.c` | the player's choices (`SET name "value"`) |
 | The creature list (`assets/world/creatures-<map>.tsv`), generated from the server's world database by wow-chat-2026's `scripts/generate-custom-client-creatures` | `035-creatures.c` | where each creature stands, its look and size (the network's stand-in, 173t) |
 
-Not in this path yet: the asset resolver (`060-resolver.c`, issue 105a),
-which puts replacement packs, the server's assets and loose overlay
-folders in front of the archives, with a placeholder after them. It is
-built and tested, but every reader below still asks the archives
-directly; each part switches to it with its own issue (204 for
-pictures first). A test-map run (`--test-map`, issue 1109: a map handed
-in by world-edit-to-execute's editor) opens one, with the map's folder
-first of the overlays, and ends by writing a goodbye receipt the editor
-reads back (`067-test-map.c`, `068-goodbye.c`).
+Not in this path yet, in an ordinary run: the asset resolver
+(`060-resolver.c`, issue 105a), which puts replacement packs, the
+server's assets and loose overlay folders in front of the archives, with
+a placeholder after them. Only a test-map run (`--test-map`, issue 1109:
+a map handed in by world-edit-to-execute's editor, converted by its
+W02c) opens one, with the map's folder first of the overlays, and ends
+by writing a goodbye receipt the editor reads back (`067-test-map.c`,
+`068-goodbye.c`). In that run the folder's `map.lua`
+(`073-converted-map.c`) says which map to open and where she starts;
+the client's tables are read row by row from every place that has them,
+the map's rows first (`074-tables.c`, issue 106); the ground files
+(WDT, ADT, WDL) and a creature look's own WC3 model come through the
+resolver; and while the server has no map files for the map, her
+ground's heights are made from its ADTs (`075-adt-heights.c`). Every
+other reader still asks the archives directly; each part switches with
+its own issue (204 for pictures first).
 
 ## 2. From the archives to things in memory (no window needed)
 
