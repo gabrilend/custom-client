@@ -89,11 +89,15 @@ separately, as "offer a list from the game".)
 
 ## Open questions
 
-1. **What carries the list when joining?** The hosting handshake itself
+1. ~~**What carries the list when joining?**~~ Answered 2026-11-04, the
+   owner: "the server's own join handshake." So the list rides in the
+   messages the server and this client exchange while a player joins,
+   which means AzerothCore's side of joining carries it too (a server
+   change, by module or patch). The files the player lacks then follow
+   the road docs/012 (answer 4) set for a server's assets, beside the
+   game connection. The question as asked: the hosting handshake itself
    (through AzerothCore), or an rmail message the host sends to each
-   joiner as they join? rmail was named "the only connection protocol for
-   assets that I trust" (the owner, 2026-09-23); the files likely travel
-   over it either way.
+   joiner as they join?
 
 ## Related
 

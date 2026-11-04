@@ -42,9 +42,11 @@ uses changes ("WoW addons must work as-is", docs/006).
 
 ## Suggested implementation steps
 
-1. Choose the page engine: a small embeddable HTML/CSS layout library and
-   a small JavaScript engine (C, linkable into this client), or a full
-   browser engine; record the choice and its size in docs/002.
+1. Choose the full browser engine (open question 1, answered): one that
+   a C program can embed and that draws a page into memory rather than
+   its own window, so the page lands in a texture; record the choice and
+   its size in docs/002. world-edit-to-execute's launcher embeds the same
+   one.
 2. The browser frame kind: page into texture, input passed through.
 3. The addon: window, address bar, back and forward, saved places (707).
 4. The live model box.
@@ -60,16 +62,23 @@ uses changes ("WoW addons must work as-is", docs/006).
 
 ## Open questions
 
-1. **Which page engine?** A full browser engine is large (tens of
-   megabytes) and runs everything; a small layout library plus a small
-   JavaScript engine is light but runs only pages written for it. The
-   catalogue page is ours, so the small one may do. Which?
-2. **Addons that made browsers in the original client.** As far as this
+1. ~~**Which page engine?**~~ Answered 2026-11-04, the owner: "full
+   browser engine." So the addon runs any website, not only pages written
+   for it; step 1 chooses which full engine can be embedded in a C
+   program and draw into a texture. The question as asked: a full browser
+   engine is large (tens of megabytes) and runs everything; a small
+   layout library plus a small JavaScript engine is light but runs only
+   pages written for it. Which?
+2. ~~**Addons that made browsers in the original client.**~~ Answered
+   2026-11-04: there were none to copy. The owner: "oh, I was wrong.
+   Well, let's build one then." The question as asked: as far as this
    project knows, a 3.3.5a addon has no network access and no page
-   engine, so in-game browsers there were made some other way (outside
-   programs drawing over the game, or later expansions' browser frame,
-   which Blizzard kept for its own windows). Which ones did the owner
-   mean? Their shape would be worth matching.
+   engine; which in-game browsers did the owner mean?
+
+The page is shown, never handed off: neither this client nor
+world-edit-to-execute's launcher opens the user's own web browser. The
+owner: "the user could visit the page on their browser, or view it in
+their client / launcher. the client / launcher don't open the browser."
 
 ## Related
 
