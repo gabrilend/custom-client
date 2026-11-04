@@ -36,6 +36,13 @@
 #            on map ID at world X, Y: 0 Eastern Kingdoms, 1 Kalimdor, 530
 #            Outland, 571 Northrend).
 #   --no-read-ahead (with or without --shot) no second thread reading tiles ahead
+#   --test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME]
+#            a map handed in by world-edit-to-execute's editor (its Test Map
+#            button; issue 1109): passed on to the client as they are, the
+#            password in W_CLIENT_PASSWORD. A failure here, before the client
+#            starts (no maps folder, no client, a build that fails), leaves no
+#            receipt, which the editor reports as a crash; this script's own
+#            message says why.
 
 # {{{ set_dir
 DIR="/mnt/kaun/custom-client"
@@ -55,12 +62,12 @@ CLIENT="${CLIENT:-/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data}"
 SETTINGS="${DIR}/assets/settings/Config.wtf"
 mkdir -p "$(dirname "${SETTINGS}")"
 
-ARGS=(--maps "${MAPS}" --client "${CLIENT}" --settings "${SETTINGS}" --world "${DIR}/assets/world")
+ARGS=(--maps "${MAPS}" --client "${CLIENT}" --settings "${SETTINGS}" --world "${DIR}/assets/world" --assets "${DIR}/assets")
 if [[ "${1:-}" == "--shot" ]]; then
     shift
     ARGS+=(--shot "${DIR}/tmp/shared-memory/shot.png")
 fi
-ARGS+=("$@")                                     # the picture options and --no-read-ahead
+ARGS+=("$@")                                     # the picture options, --no-read-ahead, a test map's options
 
 BIN="${DIR}/tmp/tmp/build/w-client"
 if [[ ! -x "${BIN}" ]] || [[ -n "$(find "${DIR}/src" -newer "${BIN}" -name '*.[ch]' -print -quit)" ]]; then
