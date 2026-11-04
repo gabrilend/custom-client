@@ -13,8 +13,8 @@
  * in the world, and for each cell which ground pictures to lay and which
  * piece of each, so the pictures blend into each other the way the game
  * blends them. Cells on a cliff or under blight are marked so the
- * renderer can paint them its own way. After an edit (the editor as a
- * mode, issue 1109) only the changed area is worked out again.
+ * renderer can paint them its own way. After an edit (in an editor,
+ * through the FFI) only the changed area is worked out again.
  *
  * File layout (little-endian; version 11, the only version Blizzard's
  * editors write; any other version is read with the same layout, as the

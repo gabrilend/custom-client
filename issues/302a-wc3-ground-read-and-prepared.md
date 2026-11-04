@@ -37,8 +37,10 @@ Built 2026-11-04 (branch `claude/wc3-ground-reader`, not yet merged).
     count of textured cells. Which tileset pictures are extended (twice
     as wide) is the caller's to say, as in the Lua, since only the
     pictures know.
-  - `w3e_prep_area` (for [1109](./1109-the-editor-as-a-mode.md), the
-    editor redrawing the ground after each stroke): after the caller
+  - `w3e_prep_area` (for an editor redrawing the ground after each
+    stroke; world-edit-to-execute's editor, which keeps its own Lua
+    renderer since 2026-11-04, can call it through the FFI once this
+    reader replaces `w3e.lua`): after the caller
     changes a rectangle of points in place, redoes only those points
     and the cells with one of them as a corner, and says which cells.
     A 5 x 5 stroke on a 257 x 257 ground takes about 0.002 ms here
@@ -91,8 +93,9 @@ Checked:
 world-edit-to-execute's Lua ground reader retires: every WC3 map's
 ground reads in the W client to the numbers the Lua gives, and the
 client prepares it for drawing itself, so the one ground mesh (302) can
-take WC3's tilesets and the editor mode (1109) can redraw a stroke's
-area alone.
+take WC3's tilesets for play (Test Map,
+[1109](./1109-test-map-from-the-editor.md)), and an editor can redraw a
+stroke's area alone.
 
 ## Suggested implementation steps
 
@@ -137,7 +140,7 @@ round.
   renderer can paint bare cells its own way without working it out
   again; and whether water shows at each point.
 - **Left out, as not reading:** the Lua's `w3e.write` (the editor's
-  saving, 1109 step 5) and `w3e.format` (a text summary); the stand-in
+  saving, which stays in world-edit-to-execute) and `w3e.format` (a text summary); the stand-in
   tileset pictures of `ground.lua` and the cell colours of
   `map_scene.terrain_arrays` (placeholder art, the drawing side's); the
   bilinear height sampler of `map_scene` (demo code, not one of the
@@ -168,8 +171,8 @@ round.
 ## Related
 
 - [302](./302-terrain-renderer.md) (the parent: drawing WC3 ground on
-  the one mesh), [1109](./1109-the-editor-as-a-mode.md) (step 2: the
-  ground redrawn by area after a stroke).
+  the one mesh), [1109](./1109-test-map-from-the-editor.md) (Test Map: WC3
+  ground drawn for play, which this reading feeds).
 - [107a](./completed/107a-wc3-pictures-blp1.md): the first C twin, the
   model this one follows.
 - world-edit-to-execute: `src/parsers/w3e.lua`, `src/assets/ground.lua`,
