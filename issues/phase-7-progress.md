@@ -14,6 +14,7 @@ Not started: no Lua VM is wired in, no XML parser, no addon loader.
 | 705 | [The interface functions](./705-interface-functions.md) | not started | 703, 704 |
 | 707 | [Saved variables](./707-saved-variables.md) | not started | 704 |
 | 709 | [Taint, protected functions and combat lockdown](./709-taint-and-combat-lockdown.md) | not started | 704 |
+| 710 | [A web browser addon](./710-a-web-browser-addon.md) | not started (decided 2026-11-04) | 701-706, 110f |
 | 708 | [Phase 7 demo](./708-phase-demo.md) | pending | Phase 6, 702–704, 707, 709 |
 
 These were written 2026-10-16 from the clean-room checklist's section 1
