@@ -17,6 +17,7 @@ VM is wired in and no addon loader exists.
 | 706 | [The addon loader](./706-the-addon-loader.md) | not started | 701, 702, 704 |
 | 707 | [Saved variables](./707-saved-variables.md) | not started | 704, 706 |
 | 709 | [Taint, protected functions and combat lockdown](./709-taint-and-combat-lockdown.md) | not started | 704 |
+| 710 | [A web browser addon](./710-a-web-browser-addon.md) | not started (decided 2026-11-04) | 701-706, 110f |
 | 708 | [Phase 7 demo](./708-phase-demo.md) | pending | Phase 6, 701–707, 709 |
 
 702 to 705, 707 and 709 were written 2026-10-16 from the clean-room
