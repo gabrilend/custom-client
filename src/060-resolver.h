@@ -18,7 +18,13 @@
  *   5. a placeholder built into the client, chosen by kind: a magenta
  *      and black checker picture, a box model, a short beep. Each time
  *      one stands in, a warning names it. With strict mode on it is an
- *      error instead, and the program's exit status says so.
+ *      error instead, and the program's exit status says so. A table or
+ *      a map's ground file has none: no place having it is the answer
+ *      (W_ERR_NOT_FOUND, no warning).
+ *
+ * A table is read per row (issue 106): every place's copy is asked for
+ * (asset_resolve_all), and a row in an earlier place wins over the same
+ * row in a later one (074-tables.h).
  *
  * It counts, per kind and per place, how many different assets this
  * session asked for, and how many pack assets are past the distinctness
@@ -122,6 +128,21 @@ typedef struct {
  * refused request is not. */
 WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why);
 void asset_answer_free(AssetAnswer *a);
+
+/* Every copy of `logical` of `kind`, the first place first: each pack,
+ * server folder and overlay that holds it, then the archives' (the chain
+ * gives one copy, its highest patch's). Never a placeholder. W_OK with
+ * `*n` answers in `out` (0 when no place has it), each freed with
+ * asset_answer_free; W_ERR_FULL when more than `most` places hold it;
+ * asset_resolve's refusals and W_ERR_IO. Counted as asset_resolve counts. */
+WErr asset_resolve_all(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, int most, int *n, WWhy *why);
+
+/* For readers that run with or without a resolver (one opens only in a
+ * test-map run, issue 1109's decision 4), and for a reader that tries
+ * one name and then another: the first place's copy, as asset_resolve
+ * finds it when `r` is given (else the archives alone, `chain`), but
+ * never a placeholder: W_ERR_NOT_FOUND, quietly, when no place has it. */
+WErr asset_read(Resolver *r, MpqChain *chain, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why);
 
 /* The session's counts: different assets asked for, per kind and place
  * (an asset asked for again isn't counted again); per kind, how many of

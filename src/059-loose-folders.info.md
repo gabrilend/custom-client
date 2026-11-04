@@ -35,7 +35,7 @@ a misspelt field is caught, except `wc3`):
           {
               replaces = "Creature\\Wolf\\Wolf.m2",  -- the logical path it answers (the original's)
               file     = "wolf/wolf.m2",      -- the file in this folder (any capitals, either slash)
-              kind     = "model",             -- model texture animation particle sound font interface
+              kind     = "model",             -- model texture animation particle sound font interface table ground
               id       = "3a7bd3e2...",       -- SHA-256 of the file's bytes, 64 small hex digits
               route    = "generate",          -- search generate hand restyle
               lineage  = "independent",       -- derived independent
@@ -82,6 +82,11 @@ hold only 53 bits exactly. Dates are YYYY-MM-DD.
   or is empty once folded.
 - `type AssetKind`
   {{{ the kinds of asset (docs/012, "The resolver")
+  table: one of the client's tables (DBFilesClient\Map.dbc), read per
+  row with the first place first (issue 106; 074-tables.h). ground: a
+  map's ground files (its .wdt, .wdl and each tile's .adt). Neither has
+  a placeholder: a table no place has is an error for its reader, a
+  ground file no place has is open sea.
 - `const char *asset_kind_name(AssetKind kind);`
   The kind's name as the manifest writes it ("model"), and back: -1 for a name that isn't a kind.
 - `int asset_kind_from_name(const char *name);`
@@ -104,3 +109,31 @@ hold only 53 bits exactly. Dates are YYYY-MM-DD.
 - `void pack_manifest_free(PackManifest *m);`
 - `double pack_entry_latest(const PackEntry *e);`
   The entry's latest score (its last), or -1 when it has none.
+- `type LuaDataType`
+  {{{ Lua data, any file of it
+  The manifest's reader, for any file of plain Lua data (`return` and
+  one value; the same language as above): a converted map's map.lua
+  (073-converted-map.h) among them.
+- `WErr lua_data_parse(const char *text, size_t len, const char *where, LuaData **out, WWhy *why);`
+  Reads `text` (`len` bytes; `where` names it in sentences). W_OK with
+  `*out`; W_ERR_CORRUPT for text that isn't Lua data, with its line.
+- `WErr lua_data_read(const char *path, size_t most, LuaData **out, WWhy *why);`
+  The same from a file of at most `most` bytes: W_ERR_NOT_FOUND when
+  there is none, W_ERR_REFUSED when it is larger or not a file, W_ERR_IO
+  when it can't be read.
+- `void lua_data_free(LuaData *d);`
+- `const LuaValue *lua_data_top(const LuaData *d);`
+  The value returned; a value's type (NULL is nil) and its type's name
+  in sentences ("a number"); the line it starts on (0 for NULL).
+- `LuaDataType lua_value_type(const LuaValue *v);`
+- `const char *lua_type_name(LuaDataType t);`
+- `int lua_value_line(const LuaValue *v);`
+- `double lua_value_number(const LuaValue *v);`
+  Its number (0 when it isn't one), whether it is true, its text (NULL when it isn't text).
+- `int lua_value_true(const LuaValue *v);`
+- `const char *lua_value_text(const LuaValue *v);`
+- `const LuaValue *lua_value_field(const LuaValue *t, const char *key);`
+  A table's field `key` (NULL when it has none, or isn't a table); how
+  many values it lists without keys; the i-th of them, from 1 (NULL past the end).
+- `int lua_value_listed(const LuaValue *t);`
+- `const LuaValue *lua_value_item(const LuaValue *t, int i);`

@@ -177,8 +177,10 @@ static const unsigned char *placeholder(const Resolver *r, AssetKind kind, const
         *what = "a beep"; *len = r->beep_len; return r->beep;
     case ASSET_ANIMATION:
         *what = "nothing (the resting pose)"; *len = 0; return NULL;
-    case ASSET_FONT: default:
+    case ASSET_FONT:
         *what = "nothing (the client's built-in font)"; *len = 0; return NULL;
+    case ASSET_TABLE: case ASSET_GROUND: default:
+        *what = NULL; *len = 0; return NULL;         /* none: no place having it is the answer (059-loose-folders.h) */
     }
 }
 /* }}} */
@@ -396,7 +398,7 @@ void asset_answer_free(AssetAnswer *a)
     memset(a, 0, sizeof *a);
 }
 
-WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why)
+static WErr resolve(Resolver *r, const char *logical, AssetKind kind, int stand_in, AssetAnswer *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     char key[1024];
@@ -463,11 +465,12 @@ WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer
             return W_OK;
         }
     }
-    /* 5. the placeholder, said every time */
-    count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
+    /* 5. the placeholder, said every time; a kind with none is not found, quietly (open sea; a table its reader names) */
     const char *what;
     size_t len;
     const unsigned char *bytes = placeholder(r, kind, key, &len, &what);
+    if (!what || !stand_in) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
+    count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
     char where[200];
     snprintf(where, sizeof where, "%d pack%s, %d server folder%s, %d overlay%s%s", r->npacks, r->npacks == 1 ? "" : "s",
              r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s", r->chain ? " or the archives" : ", no archives open");
@@ -481,6 +484,88 @@ WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer
     out->len = len;
     out->source = ASSET_FROM_PLACEHOLDER;
     out->from = "built in";
+    return W_OK;
+}
+WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why) { return resolve(r, logical, kind, 1, out, why); }
+/* }}} */
+
+/* {{{ asset_resolve_all: every place's copy, first place first, no placeholder */
+WErr asset_resolve_all(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, int most, int *n, WWhy *why)
+{
+    *n = 0;
+    char key[1024];
+    if (kind < 0 || kind >= ASSET_KIND_COUNT) return w_fail(why, W_ERR_REFUSED, "asked for %s as kind %d, which is not a kind", logical ? logical : "(nothing)", (int)kind);
+    if (!logical || fs_normalise(logical, key, sizeof key)) return w_fail(why, W_ERR_REFUSED, "asked for a %s with an empty or too long name", asset_kind_name(kind));
+    if (most < 1) return w_fail(why, W_ERR_REFUSED, "asked for every copy of %s with room for none", logical);
+    const char *kname = asset_kind_name(kind);
+    WErr rc = W_OK;
+#define ROOM() do { if (*n == most) { rc = w_fail(why, W_ERR_FULL, "%s is in more than %d places", logical, most); goto done; } memset(&out[*n], 0, sizeof out[*n]); } while (0)
+    for (int i = 0; i < r->npacks; ++i) {
+        Pack *p = &r->packs[i];
+        PackEntry probe = { .key = key };
+        const PackEntry *pp = &probe, **hit = bsearch(&pp, p->by_key, (size_t)p->m->count, sizeof *p->by_key, entry_order);
+        if (!hit) continue;
+        const PackEntry *e = *hit;
+        if (e->kind != kind) {
+            rc = w_fail(why, W_ERR_REFUSED, "%s was asked for as a %s, but the pack \"%s\" (%s, line %d) lists it as a %s: one of the two is wrong",
+                        logical, kname, p->m->name, p->folder, e->line, asset_kind_name(e->kind));
+            goto done;
+        }
+        ROOM();
+        if ((rc = read_file(p->real[hit - p->by_key], &out[*n].data, &out[*n].len, why))) goto done;
+        count(r, kind, key, ASSET_FROM_PACK, e);
+        out[*n].source = ASSET_FROM_PACK; out[*n].from = p->folder; out[*n].entry = e;
+        ++*n;
+    }
+    for (int k = 0; k < 2; ++k) {
+        const Loose *list = k ? r->overlays : r->server;
+        int nl = k ? r->noverlays : r->nserver;
+        for (int i = 0; i < nl; ++i) {
+            const char *real = fs_index_find(list[i].ix, key);
+            if (!real) continue;
+            ROOM();
+            if ((rc = read_file(real, &out[*n].data, &out[*n].len, why))) goto done;
+            AssetSource src = k ? ASSET_FROM_OVERLAY : ASSET_FROM_SERVER;
+            count(r, kind, key, src, NULL);
+            out[*n].source = src; out[*n].from = list[i].folder;
+            ++*n;
+        }
+    }
+    if (r->chain) {
+        char name[1024];
+        snprintf(name, sizeof name, "%s", key);
+        for (char *c = name; *c; ++c) if (*c == '/') *c = '\\';
+        const char *from = NULL;
+        size_t len = 0;
+        unsigned char *got = mpq_chain_read(r->chain, name, &len, &from);
+        if (got) {
+            if (*n == most) { free(got); rc = w_fail(why, W_ERR_FULL, "%s is in more than %d places", logical, most); goto done; }
+            memset(&out[*n], 0, sizeof out[*n]);
+            count(r, kind, key, ASSET_FROM_BLIZZARD, NULL);
+            out[*n].data = got; out[*n].len = len; out[*n].source = ASSET_FROM_BLIZZARD; out[*n].from = from;
+            ++*n;
+        }
+    }
+#undef ROOM
+done:
+    if (rc) { for (int i = 0; i < *n; ++i) asset_answer_free(&out[i]); *n = 0; return rc; }
+    if (r->trace)
+        for (int i = 0; i < *n; ++i) fprintf(r->log, "assets: %s %s <- %s (%s), copy %d of %d\n", kname, logical, asset_source_name(out[i].source), out[i].from ? out[i].from : "", i + 1, *n);
+    return W_OK;
+}
+/* }}} */
+
+/* {{{ asset_read: the resolver when there is one, else the archives alone */
+WErr asset_read(Resolver *r, MpqChain *chain, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why)
+{
+    if (r) return resolve(r, logical, kind, 0, out, why);
+    memset(out, 0, sizeof *out);
+    if (!chain) return w_fail(why, W_ERR_NOT_FOUND, "%s: no archives are open and no resolver was given", logical);
+    size_t len = 0;
+    const char *from = NULL;
+    unsigned char *got = mpq_chain_read(chain, logical, &len, &from);
+    if (!got) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the client's archives", asset_kind_name(kind), logical);
+    out->data = got; out->len = len; out->source = ASSET_FROM_BLIZZARD; out->from = from;
     return W_OK;
 }
 /* }}} */
