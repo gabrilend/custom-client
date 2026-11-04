@@ -42,8 +42,12 @@ mkdir -p "${OUT}"
 CFLAGS=(-std=c11 -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -O2 -g -Wall -Wextra -Werror -I/usr/local/include)
 
 # {{{ the parts, in reading order
-# READERS: the game's file formats, no window: the shared library is made of these
-READERS=(013-errors 015-mpq 016-dbc 017-blp 049-jpeg 020-adt 021-wmo 022-m2 023-anim 024-particles)
+# READERS: the game's file formats, no window: the shared library is made of these.
+# The interface's XML (065, 066; issue 702) is one of them: it reads files the
+# archives and addons hold, needs neither a window nor the settings store (its
+# one switch is handed in), and world-edit-to-execute can read and check
+# interface XML through the same FFI
+READERS=(013-errors 015-mpq 016-dbc 017-blp 049-jpeg 020-adt 021-wmo 022-m2 023-anim 024-particles 065-xml 066-framexml)
 # CORE: every part that needs no window (the readers and the game's arithmetic):
 # the test program links these alone
 CORE=(014-settings "${READERS[@]}" 018-maps 019-navmesh-slope 025-character 026-light 027-liquid
