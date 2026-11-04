@@ -44,10 +44,20 @@ Usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--
 A map handed in by world-edit-to-execute's editor (its Test Map button;
 issue 1109, 067-test-map.h):
   --test-map FOLDER the converted map's build folder, in front of the
-                    asset overlays for this run only
+                    asset overlays for this run only. Its map.lua
+                    (073-converted-map.h, written by world-edit-to-
+                    execute's W02c) says which map to open (its number
+                    and its folder under World\Maps) and where she
+                    starts, so --map isn't taken with it. The map's own
+                    table rows come before the archives', row by row
+                    (074-tables.h); its ground, horizon and creature
+                    looks are read from the folder first; while the
+                    server has no map files for it (W02d makes them)
+                    her ground's heights come from its own ground files
+                    (075-adt-heights.h); --world is FOLDER/world unless given
   --receipt FILE    where the goodbye receipt goes when the client ends
                     (068-goodbye.h); a crash leaves none
-  --camera X,Y      start there (world yards) instead of the map's start
+  --camera X,Y      start there (world yards) instead of map.lua's start
   --realm HOST:PORT the local AzerothCore's login server (127.0.0.1:3724)
   --account NAME    the account; its password only from W_CLIENT_PASSWORD
 An option the client doesn't know, or one short of its values, stops the

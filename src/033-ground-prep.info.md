@@ -21,9 +21,12 @@ nothing else that is shared.
 ## What it offers
 
 - `type GroundPlace`
-  Where tiles are prepared: the archives, the map's folder in them and its
-  blend-map form (from its WDT), the server's heights (for the light),
-  and the drawing origin points are placed relative to.
+  Where tiles are prepared: the archives, the resolver (NULL: the
+  archives alone; a test map's folder comes first through it, 1109), the
+  map's folder in them and its blend-map form (from its WDT), the
+  server's heights (for the light), and the drawing origin points are
+  placed relative to. The map's ground files (WDT, ADTs) are read
+  through the resolver; the ground's pictures from the archives.
 - `type GroundQuarter`
   One quarter of a tile (64 chunks of 145 points; 173u draws a quarter
   in one order): the arrays a Raylib mesh takes, filled but for the
@@ -34,7 +37,7 @@ nothing else that is shared.
   smaller copies (each half the last, down to 1 x 1) for the card.
 - `type GroundPrep`
   A tile made ready to send.
-- `WErr ground_place_init(GroundPlace *p, MpqChain *chain, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);`
+- `WErr ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);`
   Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
   with `why`.
 - `WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void *ctx, const char *name), void *ctx, GroundPrep **out, WWhy *why);`

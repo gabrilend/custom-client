@@ -55,21 +55,21 @@ void horizon_free(Horizon *h)
     free(h->wdl);
     free(h);
 }
-Horizon *horizon_new(MpqChain *chain, const char *map_name, double ox, double oy, WWhy *why)
+Horizon *horizon_new(MpqChain *chain, Resolver *assets, const char *map_name, double ox, double oy, WWhy *why)
 {
     Horizon *h = calloc(1, sizeof *h);
     why->code = W_OK;
     h->ox = ox; h->oy = oy;
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdl", map_name, map_name);
-    size_t len;
-    const char *from;
-    unsigned char *s = mpq_chain_read(chain, path, &len, &from);
-    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the archives: no far horizon", path); return h; }
-    h->wdl = malloc(sizeof *h->wdl);
+    AssetAnswer file;
     WWhy inner;
-    if (adt_wdl_read(s, len, h->wdl, &inner)) { free(s); free(h->wdl); h->wdl = NULL; w_fail(why, inner.code, "%s: %s", path, inner.text); return h; }
-    free(s);
+    WErr got = asset_read(assets, chain, path, ASSET_GROUND, &file, &inner);
+    if (got == W_ERR_NOT_FOUND) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the %s: no far horizon", path, assets ? "places asked" : "archives"); return h; }
+    if (got) { w_fail(why, got, "%s", inner.text); return h; }
+    h->wdl = malloc(sizeof *h->wdl);
+    if (adt_wdl_read(file.data, file.len, h->wdl, &inner)) { asset_answer_free(&file); free(h->wdl); h->wdl = NULL; w_fail(why, inner.code, "%s: %s", path, inner.text); return h; }
+    asset_answer_free(&file);
     h->shader = LoadShaderFromMemory(VS, FS);
     h->loc_sun = GetShaderLocation(h->shader, "sun_dir");
     h->loc_fog = GetShaderLocation(h->shader, "fog_col");
