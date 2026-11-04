@@ -45,6 +45,7 @@ picture options; this page doesn't copy numbers that go stale.
 | `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
 | `028-collide.c` | models' and buildings' solid shapes, placed | floors, walls and lines of sight (for the mover and camera) |
+| `065-xml.c`, `066-framexml.c` | the interface's XML (`Interface\FrameXML\*.xml`, addons' `.xml`) | templates, and each file's frames, regions and fonts with their templates applied, anchors, children and scripts (as text, with whose code wrote them), in load order; the interface log (issue 702) |
 
 ## 3. From memory to the screen (Raylib)
 

@@ -40,4 +40,4 @@ Sketch:
 
 ## Related
 
-- **Blocked by:** Phase 6, [702](./702-the-xml-reader.md), [703](./703-frames-anchors-and-layers.md), [704](./704-events-and-the-per-frame-update.md), [705](./705-interface-functions.md), [707](./707-saved-variables.md), [709](./709-taint-and-combat-lockdown.md).
+- **Blocked by:** Phase 6, [701](./701-the-lua-environment.md), [702](./702-the-xml-reader.md), [703](./703-frames-anchors-and-layers.md), [704](./704-events-and-the-per-frame-update.md), [705](./705-interface-functions.md), [706](./706-the-addon-loader.md), [707](./707-saved-variables.md), [709](./709-taint-and-combat-lockdown.md).

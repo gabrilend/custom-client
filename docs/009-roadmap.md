@@ -89,7 +89,7 @@ Capstone: [608-phase-demo](../issues/608-phase-demo.md).
 XML + Lua, FrameXML API surface, sandboxing, saved variables. By the end: the
 default UI loads; so does a test addon.
 
-Issues (2026-10-16, from the clean-room checklist [057](./057-what-the-original-program-decides.md)): [702](../issues/702-the-xml-reader.md), [703](../issues/703-frames-anchors-and-layers.md), [704](../issues/704-events-and-the-per-frame-update.md), [705](../issues/705-interface-functions.md), [707](../issues/707-saved-variables.md), [709](../issues/709-taint-and-combat-lockdown.md).
+Issues (2026-10-16, from the clean-room checklist [057](./057-what-the-original-program-decides.md)): [702](../issues/702-the-xml-reader.md), [703](../issues/703-frames-anchors-and-layers.md), [704](../issues/704-events-and-the-per-frame-update.md), [705](../issues/705-interface-functions.md), [707](../issues/707-saved-variables.md), [709](../issues/709-taint-and-combat-lockdown.md). Then (2026-11-04, from [006](./006-ui-and-addons.md) and [002](./002-technology-stack.md)): [701](../issues/701-the-lua-environment.md), [706](../issues/706-the-addon-loader.md).
 
 Capstone: [708-phase-demo](../issues/708-phase-demo.md).
 

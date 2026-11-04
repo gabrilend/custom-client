@@ -39,14 +39,18 @@
 #include "../src/032-sight.h"
 #include "../src/021-wmo.h"
 #include "../src/049-jpeg.h"
+#include "../src/065-xml.h"
+#include "../src/066-framexml.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int checks, fails;
 
@@ -226,6 +230,483 @@ static void run(Mover *m, MoverInput in, double seconds, MoverGround g)
 }
 /* }}} */
 
+/* {{{ 702 helpers: the interface's XML (065-xml, 066-framexml), on files
+ * written here (no game data needed). The default interface's templates,
+ * an addon using them, an addon file that isn't well-formed beside a good
+ * one it includes, and a signed Blizzard_ addon loaded later. */
+static const char *const FX_TEMPLATES =
+    "\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<!-- the default interface's templates -->\n"
+    "<Ui xmlns=\"http://www.blizzard.com/wow/ui/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
+    "    xsi:schemaLocation=\"http://www.blizzard.com/wow/ui/ ..\\FrameXML\\UI.xsd\">\n"
+    "  <Script file=\"Templates.lua\"/>\n"
+    "  <Frame name=\"BaseTemplate\" virtual=\"true\" hidden=\"true\">\n"
+    "    <Size x=\"10\" y=\"10\"/>\n"
+    "    <Layers><Layer level=\"BACKGROUND\"><Texture name=\"$parentBg\" file=\"Interface\\Bg\"/></Layer></Layers>\n"
+    "    <Scripts><OnLoad>BaseTemplate_OnLoad(self)</OnLoad></Scripts>\n"
+    "  </Frame>\n"
+    "  <Frame name=\"WideTemplate\" virtual=\"true\" inherits=\"BaseTemplate\" hidden=\"false\">\n"
+    "    <Size x=\"100\" y=\"10\"/>\n"
+    "    <Frames><Button name=\"$parentA\"/></Frames>\n"
+    "  </Frame>\n"
+    "  <Frame name=\"TallTemplate\" virtual=\"true\" alpha=\"0.5\">\n"
+    "    <Size><AbsDimension x=\"200\" y=\"40\"/></Size>\n"
+    "    <Frames><Button name=\"$parentB\"><NormalTexture file=\"Interface\\Up\"/></Button></Frames>\n"
+    "    <Scripts>\n"
+    "      <OnLoad><![CDATA[ if a < b then TallTemplate_OnLoad(self) end ]]></OnLoad>\n"
+    "      <OnShow function=\"Tall_OnShow\"/>\n"
+    "    </Scripts>\n"
+    "  </Frame>\n"
+    "  <Frame name=\"LoopA\" virtual=\"true\" inherits=\"LoopB\"><Frames><Frame name=\"$parentFromA\"/></Frames></Frame>\n"
+    "  <Frame name=\"LoopB\" virtual=\"true\" inherits=\"LoopA\"><Frames><Frame name=\"$parentFromB\"/></Frames></Frame>\n"
+    "  <Frame name=\"Shared\" virtual=\"true\" alpha=\"0.1\"/>\n"
+    "  <Frame virtual=\"true\" alpha=\"1\"/>\n"
+    "  <Frame name=\"ParentFromEarly\" virtual=\"true\" parent=\"EarlyParent\"/>\n"
+    "  <Frame name=\"NoParentLate\" virtual=\"true\"/>\n"
+    "  <Frame name=\"EarlyParent\"/>\n"
+    "  <Frame name=\"Foo\">\n"
+    "    <Frames><Frame><Frames><Button name=\"$parentButton\"/></Frames></Frame></Frames>\n"
+    "  </Frame>\n"
+    "  <Frame name=\"$PARENTTopLevel\"/>\n"
+    "  <Size x=\"1\"/>\n"
+    "</Ui>\n";
+static const char *const FX_ADDON =
+    "<Ui>\r\n"
+    "  <Script>MyAddon_Loaded = 1 &lt; 2</Script>\r\n"
+    "  <Frame name=\"Shared\" virtual=\"true\" alpha=\"0.9\"/>\r\n"
+    "  <Frame name=\"AddonOnly\" virtual=\"true\" alpha=\"0.2\"/>\r\n"
+    "  <Frame name=\"AddonOnly\" virtual=\"true\" alpha=\"0.3\"/>\r\n"
+    "  <Frame name=\"MyFrame\" parent=\"UIParent\" inherits=\"WideTemplate, TallTemplate\">\r\n"
+    "    <Anchors>\r\n"
+    "      <Anchor point=\"TOPLEFT\"/>\r\n"
+    "      <Anchor point=\"bottomright\" relativeTo=\"$parentNope\" relativePoint=\"TOPLEFT\"/>\r\n"
+    "      <Anchor point=\"MIDDLE\"/>\r\n"
+    "      <Anchor point=\"CENTER\" relativeTo=\"MyFrame\"/>\r\n"
+    "      <Anchor point=\"top\" relativeTo=\"Foo\" relativePoint=\"BOTTOM\"><Offset><AbsDimension x=\"3\" y=\"-4\"/></Offset></Anchor>\r\n"
+    "    </Anchors>\r\n"
+    "    <Scripts><OnLoad>MyFrame_OnLoad(self, \"a &amp; b\")</OnLoad></Scripts>\r\n"
+    "  </Frame>\r\n"
+    "  <Frame name=\"Looped\" inherits=\"LoopA\"/>\r\n"
+    "  <Frame name=\"Missing\" inherits=\"NoSuchTemplate,BaseTemplate\"/>\r\n"
+    "  <Frame name=\"Quirk\" inherits=\"ParentFromEarly, NoParentLate\"/>\r\n"
+    "  <Frame name=\"Lost\" parent=\"NoSuchParent\"/>\r\n"
+    "  <Frame name=\"AllPts\" setAllPoints=\"true\"><Anchors><Anchor point=\"TOP\"/></Anchors></Frame>\r\n"
+    "  <Frame name=\"Whole\" setAllPoints=\"TRUE\"/>\r\n"
+    "  <Include file=\"Broken.xml\"/>\r\n"
+    "  <Include file=\"Sub/Good.xml\"/>\r\n"
+    "  <Include/>\r\n"
+    "  <Include file=\"Absent.xml\"/>\r\n"
+    "  <Frame name=\"AfterIncludes\" inherits=\"GoodTemplate\"/>\r\n"
+    "</Ui>\r\n";
+static const char *const FX_BROKEN =                 /* <Frame> never closed */
+    "<Ui>\n  <Frame name=\"BrokenTemplate\" virtual=\"true\">\n    <Size x=\"1\"/>\n</Ui>\n";
+static const char *const FX_GOOD =
+    "<Ui><Frame name=\"GoodTemplate\" virtual=\"true\" alpha=\"0.4\"/><Frame name=\"GoodFrame\" inherits=\"AddonOnly\"/></Ui>";
+static const char *const FX_BLIZZARD =               /* a signed Blizzard_ addon, loaded on demand after the addon */
+    "<Ui><Frame name=\"AddonOnly\" virtual=\"true\" alpha=\"0.7\"/><Frame name=\"Shared\" virtual=\"true\" alpha=\"0.8\"/></Ui>";
+
+typedef struct { const char *path, *text; } FxFile;
+static const FxFile FX_FILES[] = {
+    { "Interface\\AddOns\\MyAddon\\Broken.xml", NULL },      /* FX_BROKEN */
+    { "Interface\\AddOns\\MyAddon\\Sub\\Good.xml", NULL },   /* FX_GOOD */
+};
+static WErr fx_open(void *ctx, const char *path, char **bytes, size_t *len, WWhy *why)
+{
+    (void)ctx;
+    const char *text = !strcmp(path, FX_FILES[0].path) ? FX_BROKEN : !strcmp(path, FX_FILES[1].path) ? FX_GOOD : NULL;
+    if (!text) return w_fail(why, W_ERR_NOT_FOUND, "no file %s here", path);
+    *len = strlen(text);
+    *bytes = malloc(*len);
+    if (!*bytes) return w_fail(why, W_ERR_FULL, "no memory");
+    memcpy(*bytes, text, *len);
+    return W_OK;
+}
+static int fx_exists(void *ctx, const char *name) { (void)ctx; return !strcmp(name, "UIParent"); }
+static int fx_warned;                                /* warnings heard through the callback */
+static void fx_warn(void *ctx, const FxmlWarning *w) { (void)ctx; (void)w; ++fx_warned; }
+
+/* the line `needle` first appears on in `text` */
+static int fx_line_of(const char *text, const char *needle)
+{
+    const char *at = strstr(text, needle);
+    int line = 1;
+    for (const char *p = text; at && p < at; ++p) line += *p == '\n';
+    return at ? line : 0;
+}
+/* how many warnings of a kind; the first's text and line into *text, *line */
+static int fx_count(const Fxml *fx, FxmlWarnKind kind, const char **text, int *line)
+{
+    int n = 0;
+    for (int i = 0; i < fxml_warning_count(fx); ++i) {
+        const FxmlWarning *w = fxml_warning_at(fx, i);
+        if (w->kind != kind) continue;
+        if (!n++) { if (text) *text = w->text; if (line) *line = w->line; }
+    }
+    return n;
+}
+static const FxmlObject *fx_kid(const FxmlObject *o, const char *name)
+{
+    for (int i = 0; o && i < o->nkids; ++i) if (o->kids[i]->name && !strcmp(o->kids[i]->name, name)) return o->kids[i];
+    return NULL;
+}
+static const FxmlScript *fx_script(const FxmlObject *o, const char *handler)
+{
+    for (int i = 0; o && i < o->nscripts; ++i) if (!strcmp(o->scripts[i].handler, handler)) return &o->scripts[i];
+    return NULL;
+}
+/* the default interface, then the addon, into a new handle */
+static Fxml *fx_load_all(int corrected, WErr *addon_result)
+{
+    WWhy why;
+    FxmlOptions opt = { .parent_from_any_template = corrected, .frame_exists = fx_exists, .open = fx_open, .warn = fx_warn };
+    Fxml *fx = fxml_new(&opt, &why);
+    if (!fx) return NULL;
+    if (fxml_load(fx, "Interface\\FrameXML\\Templates.xml", FX_TEMPLATES, strlen(FX_TEMPLATES), "", &why)) printf("  (%s)\n", why.text);
+    *addon_result = fxml_load(fx, "Interface\\AddOns\\MyAddon\\MyAddon.xml", FX_ADDON, strlen(FX_ADDON), "MyAddon", &why);
+    return fx;
+}
+/* every piece of an XML file through the reader: 0 read to the end, else the refusal's code (and its sentence in why) */
+static WErr xml_all(const char *text, size_t len, int *events, WWhy *why)
+{
+    XmlReader *x = xml_reader_new(text, len, why);
+    if (!x) return why->code;
+    XmlEvent ev;
+    WErr e;
+    int n = 0;
+    while (!(e = xml_next(x, &ev, why)) && ev.kind != XML_DONE) ++n;
+    if (events) *events = n;
+    xml_reader_free(x);
+    return e;
+}
+static uint32_t fx_rand(uint32_t *s) { *s = *s * 1664525u + 1013904223u; return *s >> 8; }
+/* }}} 702 helpers */
+
+/* {{{ 702 checks */
+static void check_framexml(void)
+{
+    char line[1000];
+    WWhy why;
+    printf("the interface's XML (065-xml, 066-framexml, issue 702)\n");
+
+    /* {{{ the pull-parser's pieces */
+    {
+        const char *doc = "<?xml version=\"1.0\"?>\n<!-- a -- comment -->\n<!DOCTYPE Ui>\n"
+                          "<Ui a='1' b=\"x &lt; &#65;&#x42;&#x20AC;\" c=\"t\tu\r\nv\">\n"
+                          "  <F/>text&amp;<![CDATA[<raw>&amp;]]>\r\nend</Ui>\n<?tail?>\n";
+        XmlReader *x = xml_reader_new(doc, strlen(doc), &why);
+        XmlEvent ev;
+        int ok = x && !xml_next(x, &ev, &why) && ev.kind == XML_START && !strcmp(ev.name, "Ui") && ev.nattrs == 3 && ev.line == 4 && ev.column == 1 && ev.depth == 0
+            && !strcmp(xml_attr(&ev, "b"), "x < AB\xE2\x82\xAC") && !strcmp(xml_attr(&ev, "c"), "t u v") && !strcmp(ev.attrs[0].value, "1");
+        check(ok, "the reader: <?xml?>, a comment holding --, and a DOCTYPE skipped; <Ui> on line 4 with its attributes' entities read (&#x20AC; as UTF-8) and their tabs and line ends as spaces");
+        ok = x && !xml_next(x, &ev, &why) && ev.kind == XML_TEXT && ev.text_len == 3 && !xml_next(x, &ev, &why) && ev.kind == XML_START && !strcmp(ev.name, "F") && ev.empty && ev.depth == 1
+            && !xml_next(x, &ev, &why) && ev.kind == XML_END && !strcmp(ev.name, "F");
+        check(ok, "then the spaces before <F/>, and <F/> as an opening with its closing next");
+        ok = x && !xml_next(x, &ev, &why) && ev.kind == XML_TEXT && !ev.cdata && !strcmp(ev.text, "text&")
+            && !xml_next(x, &ev, &why) && ev.kind == XML_TEXT && ev.cdata && !strcmp(ev.text, "<raw>&amp;")
+            && !xml_next(x, &ev, &why) && ev.kind == XML_TEXT && !strcmp(ev.text, "\nend") && ev.line == 6
+            && !xml_next(x, &ev, &why) && ev.kind == XML_END && !strcmp(ev.name, "Ui")
+            && !xml_next(x, &ev, &why) && ev.kind == XML_DONE && !xml_next(x, &ev, &why) && ev.kind == XML_DONE;
+        check(ok, "text with &amp; read, CDATA exactly as written, \\r\\n as \\n, then </Ui>, the end, and the end again");
+        xml_reader_free(x);
+
+        static const struct { const char *text; size_t len; WErr code; const char *says; } BAD[] = {
+            { "<Ui><Frame></Ui>", 0, W_ERR_CORRUPT, "line 1, column 12: </Ui> closes <Frame>, which opened on line 1" },
+            { "<Ui>\n<Frame>\n", 0, W_ERR_CORRUPT, "the file ends inside <Frame>, which opened on line 2" },
+            { "<Ui a='1' a=\"2\"/>", 0, W_ERR_CORRUPT, "the attribute a is written twice in <Ui>" },
+            { "<Ui a=1/>", 0, W_ERR_CORRUPT, "the attribute a's value isn't in quotes" },
+            { "<Ui a='<'/>", 0, W_ERR_CORRUPT, "a < inside the attribute a's value" },
+            { "<Ui>&nbsp;</Ui>", 0, W_ERR_CORRUPT, "the entity &nbsp; isn't one of XML's five" },
+            { "<Ui>if a & b</Ui>", 0, W_ERR_CORRUPT, "an & that doesn't begin an entity" },
+            { "<Ui>&#0;</Ui>", 0, W_ERR_CORRUPT, "names no character" },
+            { "<Ui/>\n<Ui/>", 0, W_ERR_CORRUPT, "line 2, column 1: a second top element <Ui>" },
+            { "x<Ui/>", 0, W_ERR_CORRUPT, "text outside the top element" },
+            { "<Ui><!-- </Ui>", 0, W_ERR_CORRUPT, "a comment that never ends" },
+            { "<Ui><![CDATA[x</Ui>", 0, W_ERR_CORRUPT, "a CDATA section that never ends" },
+            { "<Ui><Frame name=\"x\"", 0, W_ERR_CORRUPT, "the tag <Frame> never ends" },
+            { "<Ui></Frame>", 0, W_ERR_CORRUPT, "</Frame> closes <Ui>" },
+            { "<!DOCTYPE Ui [<!ENTITY a 'b'>]><Ui/>", 0, W_ERR_UNSUPPORTED, "a DOCTYPE with declarations of its own" },
+            { "\xFF\xFE<\0U\0i\0/\0>\0", 12, W_ERR_UNSUPPORTED, "UTF-16" },
+            { "<Ui>\0</Ui>", 10, W_ERR_CORRUPT, "a zero byte" },
+            { "  <!-- only -->  ", 0, W_ERR_CORRUPT, "the file holds no element" },
+            { "<1Ui/>", 0, W_ERR_CORRUPT, "an element's name should begin here" },
+        };
+        int right = 0;
+        for (int i = 0; i < (int)(sizeof BAD / sizeof BAD[0]); ++i) {
+            WErr e = xml_all(BAD[i].text, BAD[i].len ? BAD[i].len : strlen(BAD[i].text), NULL, &why);
+            if (e == BAD[i].code && why.code == e && strstr(why.text, BAD[i].says)) ++right;
+            else printf("    refused %d: got %s \"%s\"\n", i, w_err_name(e), why.text);
+        }
+        snprintf(line, sizeof line, "%d of %d broken pieces of XML refused, each with its code and a sentence saying where and what", right, (int)(sizeof BAD / sizeof BAD[0]));
+        check(right == (int)(sizeof BAD / sizeof BAD[0]), line);
+        x = xml_reader_new("<Ui><A></B></Ui>", 16, &why);
+        WErr e1 = xml_next(x, &ev, &why), e2 = xml_next(x, &ev, &why), e3 = xml_next(x, &ev, &why), e4 = xml_next(x, &ev, &why);
+        check(!e1 && !e2 && e3 == W_ERR_CORRUPT && e4 == e3 && strstr(why.text, "</B> closes <A>"), "a refusal stays: the next call gives it again");
+        xml_reader_free(x);
+
+        /* nesting as deep as allowed, and one deeper */
+        size_t cap = (XML_MAX_DEPTH + 1) * 11 + 16;
+        char *deep = malloc(cap);
+        if (deep) {
+            for (int extra = 0; extra < 2; ++extra) {
+                int levels = XML_MAX_DEPTH + extra;
+                size_t n = 0;
+                for (int i = 0; i < levels; ++i) n += (size_t)sprintf(deep + n, "<F>");
+                for (int i = 0; i < levels; ++i) n += (size_t)sprintf(deep + n, "</F>");
+                int events = 0;
+                WErr e = xml_all(deep, n, &events, &why);
+                if (!extra) {
+                    snprintf(line, sizeof line, "%d elements nested inside each other read (%d pieces)", levels, events);
+                    check(!e && events == 2 * levels, line);
+                } else {
+                    snprintf(line, sizeof line, "%d nested are refused: \"%s\"", levels, why.text);
+                    check(e == W_ERR_CORRUPT && strstr(why.text, "nested deeper than 1024"), line);
+                }
+            }
+            free(deep);
+        }
+    }
+    /* }}} */
+
+    /* {{{ the default interface's templates, then an addon */
+    fx_warned = 0;
+    WErr addon = W_OK;
+    Fxml *fx = fx_load_all(0, &addon);
+    if (!fx) { check(0, "a handle for the interface's XML"); return; }
+    check(addon == W_OK, "the addon's file is read although one file it includes isn't well-formed");
+    const char *AFILE = "Interface\\AddOns\\MyAddon\\MyAddon.xml";
+    const char *text = NULL;
+    int at = 0;
+
+    check(fxml_template(fx, "BaseTemplate") && fxml_template(fx, "basetemplate") && !fxml_find(fx, "BaseTemplate"),
+          "a virtual frame is kept as a template (found in any case), not made");
+    check(fx_count(fx, FXML_W_VIRTUAL_UNNAMED, &text, &at) == 1 && at == fx_line_of(FX_TEMPLATES, "<Frame virtual=\"true\" alpha"),
+          "an unnamed virtual frame is a warning, on its own line");
+
+    const FxmlObject *mf = fxml_find(fx, "MyFrame");
+    check(mf && mf->kind == FXML_FRAME && !strcmp(mf->type, "Frame") && mf->npieces == 4
+          && !strcmp(fxml_attr(mf->pieces[0], "name"), "BaseTemplate") && !strcmp(fxml_attr(mf->pieces[1], "name"), "WideTemplate")
+          && !strcmp(fxml_attr(mf->pieces[2], "name"), "TallTemplate") && mf->pieces[3] == mf->node,
+          "inherits=\"A, B\": A's own template first, then A, then B, then the frame itself");
+    if (mf) {
+        const FxmlNode *last_size = NULL;
+        int sizes = 0;
+        for (int i = 0; i < mf->nparts; ++i) if (!strcmp(mf->parts[i]->tag, "Size")) { last_size = mf->parts[i]; ++sizes; }
+        check(sizes == 3 && last_size && last_size->nkids == 1 && !strcmp(fxml_attr(last_size->kids[0], "x"), "200"),
+              "A and B both give a width: their three <Size> load in order, so B's (200) is the last written and wins");
+        check(!strcmp(fxml_set(mf, "hidden"), "false") && !strcmp(fxml_set(mf, "alpha"), "0.5") && !fxml_set(mf, "name") && !fxml_set(mf, "inherits"),
+              "attributes: A's hidden=\"false\" over its template's \"true\", B's alpha; name and inherits aren't passed on");
+        check(mf->nkids == 3 && !strcmp(mf->kids[0]->name, "MyFrameBg") && !strcmp(mf->kids[0]->layer, "BACKGROUND") && mf->kids[0]->kind == FXML_REGION
+              && !strcmp(mf->kids[1]->name, "MyFrameA") && !strcmp(mf->kids[2]->name, "MyFrameB") && mf->kids[1]->parent == mf,
+              "children load in the same order: the template's texture (MyFrameBg, BACKGROUND), A's button, then B's");
+        const FxmlObject *b = fx_kid(mf, "MyFrameB");
+        check(b && b->nkids == 1 && b->kids[0]->kind == FXML_REGION && !strcmp(b->kids[0]->slot, "NormalTexture") && !b->kids[0]->name,
+              "a button's NormalTexture is a region in its slot");
+        const FxmlScript *onload = fx_script(mf, "OnLoad"), *onshow = fx_script(mf, "OnShow");
+        check(onload && !strcmp(onload->body, "MyFrame_OnLoad(self, \"a & b\")") && !strcmp(onload->from->file->taint, "MyAddon")
+              && onload->line == fx_line_of(FX_ADDON, "MyFrame_OnLoad"),
+              "its own OnLoad (plain text, &amp; read) replaces the templates', from its own line, marked as the addon's");
+        check(onshow && onshow->function && !strcmp(onshow->function, "Tall_OnShow") && onshow->body_len == 0 && !strcmp(onshow->from->file->taint, ""),
+              "OnShow, from B's template, names a function and keeps the trusted mark of the code that defined it");
+        const FxmlObject *bb = fx_kid(mf, "MyFrameB");
+        check(bb && !strcmp(bb->taint, "") && !strcmp(mf->taint, "MyAddon"),
+              "the button B's template made is marked trusted, the frame itself the addon's");
+        check(!mf->parent && mf->parent_name && !strcmp(mf->parent_name, "UIParent"),
+              "parent=\"UIParent\", a frame the scripts made, is found by name");
+        check(mf->nanchors == 2 && !strcmp(mf->anchors[0].point, "TOPLEFT") && !strcmp(mf->anchors[0].relative_point, "TOPLEFT")
+              && !mf->anchors[0].relative && !strcmp(mf->anchors[0].relative_name, "UIParent"),
+              "an anchor with no relativeTo or relativePoint: the parent, and the same point");
+        check(mf->nanchors == 2 && !strcmp(mf->anchors[1].point, "TOP") && mf->anchors[1].relative == fxml_find(fx, "Foo")
+              && !strcmp(mf->anchors[1].relative_point, "BOTTOM") && mf->anchors[1].x == 3 && mf->anchors[1].y == -4,
+              "an anchor to Foo's BOTTOM (point written \"top\") with its <Offset><AbsDimension>");
+    }
+    int unknown = fx_count(fx, FXML_W_ANCHOR_UNKNOWN, &text, &at);
+    check(unknown == 1 && strstr(text, "UIParentNope") && at == fx_line_of(FX_ADDON, "$parentNope"),
+          "relativeTo=\"$parentNope\": no frame UIParentNope, a warning, that anchor skipped");
+    check(fx_count(fx, FXML_W_ANCHOR_POINT, &text, NULL) == 1 && strstr(text, "MIDDLE"), "a point that isn't one of the nine: a warning, skipped");
+    check(fx_count(fx, FXML_W_ANCHOR_SELF, &text, NULL) == 1 && strstr(text, "Frame MyFrame"), "a frame anchored to itself: a warning, skipped");
+
+    const FxmlObject *looped = fxml_find(fx, "Looped");
+    check(fx_count(fx, FXML_W_SELF_INHERIT, &text, NULL) == 1 && looped && looped->nkids == 2
+          && !strcmp(looped->kids[0]->name, "LoopedFromB") && !strcmp(looped->kids[1]->name, "LoopedFromA"),
+          "a template inheriting itself through another warns once, and the rest of the frame still loads");
+    const FxmlObject *missing = fxml_find(fx, "Missing");
+    int nt = fx_count(fx, FXML_W_NO_TEMPLATE, &text, &at);
+    snprintf(line, sizeof line, "a missing template: \"%s\" (line %d), and the next one listed still applies", text ? text : "", at);
+    check(nt == 1 && !strcmp(text, "Couldn't find inherited node \"NoSuchTemplate\"") && missing && missing->npieces == 2 && !strcmp(fxml_set(missing, "hidden"), "true"), line);
+
+    /* first definition wins; trusted replaces an addon's */
+    int taken = fx_count(fx, FXML_W_TEMPLATE_TAKEN, &text, NULL);
+    check(taken == 2 && !strcmp(text, "Deferred XML Node object named Shared already exists")
+          && !strcmp(fxml_attr(fxml_template(fx, "Shared"), "alpha"), "0.1"),
+          "an addon's template named as the default interface's is ignored, with a warning");
+    check(!strcmp(fxml_attr(fxml_template(fx, "AddonOnly"), "alpha"), "0.2"), "a second addon template of the same name is ignored: the first stays");
+    const FxmlObject *good = fxml_find(fx, "GoodFrame");
+    check(good && !strcmp(fxml_set(good, "alpha"), "0.2") && !strcmp(good->taint, "MyAddon") && fxml_find(fx, "AfterIncludes")
+          && !strcmp(fxml_set(fxml_find(fx, "AfterIncludes"), "alpha"), "0.4"),
+          "Include file=\"Sub/Good.xml\" opens beside the addon's file and loads with its taint; what follows the includes uses its template");
+    int before_blizzard = fx_count(fx, FXML_W_TEMPLATE_TAKEN, NULL, NULL);
+    WErr eb = fxml_load(fx, "Interface\\AddOns\\Blizzard_Test\\Blizzard_Test.xml", FX_BLIZZARD, strlen(FX_BLIZZARD), "", &why);
+    check(!eb && !strcmp(fxml_attr(fxml_template(fx, "AddonOnly"), "alpha"), "0.7") && fx_count(fx, FXML_W_TEMPLATE_TAKEN, NULL, NULL) == before_blizzard + 1
+          && !strcmp(fxml_attr(fxml_template(fx, "Shared"), "alpha"), "0.1"),
+          "a trusted template (a Blizzard_ addon loaded later) replaces the addon's; one the default interface already holds stays");
+    check(good && !strcmp(fxml_set(good, "alpha"), "0.2"), "and a frame made from the addon's before keeps what it was made with");
+
+    /* $parent */
+    const FxmlObject *foo = fxml_find(fx, "Foo"), *fb = fxml_find(fx, "FooButton");
+    check(foo && fb && foo->nkids == 1 && !foo->kids[0]->name && foo->kids[0]->kids[0] == fb && fb->parent == foo->kids[0],
+          "$parentButton under an unnamed frame under Foo is FooButton");
+    check(fxml_find(fx, "TopTopLevel") != NULL, "$PARENT at the top, with no parent, is Top (any case)");
+
+    /* parents */
+    const FxmlObject *quirk = fxml_find(fx, "Quirk");
+    check(quirk && !quirk->parent && !quirk->parent_name,
+          "the parent quirk, uncorrected: only the last template listed (NoParentLate) can give one, so Quirk has none");
+    check(fx_count(fx, FXML_W_UNKNOWN_PARENT, &text, NULL) == 1 && strstr(text, "NoSuchParent") && fxml_find(fx, "Lost") && !fxml_find(fx, "Lost")->parent_name,
+          "an unknown parent is a warning and the frame has none");
+    const FxmlObject *all = fxml_find(fx, "AllPts"), *whole = fxml_find(fx, "Whole");
+    check(fx_count(fx, FXML_W_ALL_POINTS, NULL, NULL) == 1 && all && !all->set_all_points && all->nanchors == 1 && whole && whole->set_all_points,
+          "setAllPoints with anchors: a warning, setAllPoints ignored; without anchors it stands");
+
+    /* files: broken, missing, an Include with no file, top-level elements made of nothing */
+    check(!fxml_template(fx, "BrokenTemplate") && fx_count(fx, FXML_W_NOT_XML, &text, &at) == 1 && at == 0
+          && strstr(text, "Broken.xml isn't well-formed XML") && strstr(text, "line 4, column 1: </Ui> closes <Frame>, which opened on line 2"),
+          "an included file with a missing closing tag is skipped whole, saying where");
+    check(fx_count(fx, FXML_W_NOT_OPENED, &text, NULL) == 1 && strstr(text, "Interface\\AddOns\\MyAddon\\Absent.xml"), "an included file that can't be opened is a warning");
+    check(fx_count(fx, FXML_W_INCLUDE_NO_FILE, NULL, &at) == 1 && at == fx_line_of(FX_ADDON, "<Include/>"), "an Include with no file is skipped, with a warning on its line");
+    check(fx_count(fx, FXML_W_TOP_UNKNOWN, &text, NULL) == 1 && !strcmp(text, "Unrecognized XML: Size"), "a <Size> at the top makes nothing: a warning");
+    check(fx_warned == fxml_warning_count(fx), "every warning reached the log callback as it happened");
+    {
+        const FxmlWarning *w = NULL;
+        for (int i = 0; i < fxml_warning_count(fx); ++i) if (fxml_warning_at(fx, i)->kind == FXML_W_NO_TEMPLATE) w = fxml_warning_at(fx, i);
+        char want[200], got[300];
+        snprintf(want, sizeof want, "%s:%d Couldn't find inherited node \"NoSuchTemplate\"", AFILE, fx_line_of(FX_ADDON, "NoSuchTemplate"));
+        if (w) fxml_warning_line(w, got, sizeof got); else got[0] = 0;
+        snprintf(line, sizeof line, "a log line: %s", got);
+        check(!strcmp(got, want), line);
+    }
+
+    /* steps: what the Lua environment does, in order */
+    {
+        int n = fxml_step_count(fx);
+        const FxmlStep *s0 = fxml_step_at(fx, 0), *s1 = fxml_step_at(fx, 1), *s3 = fxml_step_at(fx, 3), *addon_script = NULL;
+        for (int i = 0; i < n; ++i) if (fxml_step_at(fx, i)->kind == FXML_STEP_SCRIPT_TEXT) addon_script = fxml_step_at(fx, i);
+        check(s0 && s0->kind == FXML_STEP_SCRIPT_FILE && !strcmp(s0->path, "Interface\\FrameXML\\Templates.lua") && !strcmp(s0->taint, "")
+              && s1 && s1->kind == FXML_STEP_OBJECT && s1->object == fxml_find(fx, "EarlyParent") && s3 && s3->object == fxml_find(fx, "TopTopLevel"),
+              "steps: the default interface's script file (beside its XML), then its frames in order");
+        check(addon_script && !strcmp(addon_script->text, "MyAddon_Loaded = 1 < 2") && !strcmp(addon_script->taint, "MyAddon") && addon_script->line == 2,
+              "the addon's inline <Script> is a step with its text, its line and the addon's taint, kept for the Lua environment to run");
+    }
+
+    /* CreateFrame with a template */
+    {
+        const FxmlObject *made = NULL;
+        WErr e = fxml_create(fx, "button", "$parentMade", "MyFrame", "TallTemplate", "MyAddon", &made, &why);
+        check(!e && made && !strcmp(made->type, "Button") && !strcmp(made->name, "MyFrameMade") && made->parent == mf && made->nkids == 1
+              && !strcmp(made->kids[0]->name, "MyFrameMadeB") && !strcmp(fxml_set(made, "alpha"), "0.5") && fxml_find(fx, "MyFrameMade") == made,
+              "CreateFrame(\"button\", \"$parentMade\", MyFrame, \"TallTemplate\"): a Button named MyFrameMade with the template's child");
+        e = fxml_create(fx, "Spaceship", NULL, NULL, NULL, NULL, &made, &why);
+        check(e == W_ERR_REFUSED && !made && strstr(why.text, "Spaceship"), "CreateFrame of a type that isn't one is refused");
+    }
+    fxml_free(fx);
+
+    /* the parent quirk corrected */
+    fx = fx_load_all(1, &addon);
+    if (fx) {
+        const FxmlObject *q = fxml_find(fx, "Quirk");
+        check(q && q->parent == fxml_find(fx, "EarlyParent") && q->parent && !strcmp(q->parent_name, "EarlyParent"),
+              "the parent quirk corrected: the last template listed that gives one (ParentFromEarly), so Quirk's parent is EarlyParent");
+        fxml_free(fx);
+    }
+    /* }}} */
+
+    /* {{{ a broken file beside a good one, loaded one after the other */
+    fx = fxml_new(NULL, &why);
+    if (fx) {
+        WErr e1 = fxml_load(fx, "Interface\\AddOns\\A\\Broken.xml", FX_BROKEN, strlen(FX_BROKEN), "A", &why);
+        WWhy first = why;
+        WErr e2 = fxml_load(fx, "Interface\\AddOns\\A\\Good.xml", FX_GOOD, strlen(FX_GOOD), "A", &why);
+        check(e1 == W_ERR_CORRUPT && strstr(first.text, "</Ui> closes <Frame>") && !e2 && fxml_find(fx, "GoodFrame")
+              && fxml_template(fx, "GoodTemplate") && !fxml_template(fx, "BrokenTemplate") && fxml_warning_count(fx) == 2,
+              "a file with a missing closing tag is refused and keeps nothing; the next file loads (its template missing is its only other warning)");
+        const char *not_ui = "<Frames><Frame name=\"X\"/></Frames>";
+        e1 = fxml_load(fx, "x.xml", not_ui, strlen(not_ui), "A", &why);
+        check(e1 == W_ERR_CORRUPT && !fxml_find(fx, "X") && strstr(why.text, "not <Ui>"), "a file whose top element isn't <Ui> is skipped whole");
+        fxml_free(fx);
+    }
+    /* }}} */
+
+    /* {{{ templates that would grow without end, and nesting past the limit */
+    {
+        char *big = malloc(40 * 120 + 64);
+        if (big) {
+            size_t n = (size_t)sprintf(big, "<Ui>");
+            for (int i = 0; i < 40; ++i)
+                n += i < 39 ? (size_t)sprintf(big + n, "<Frame name=\"T%d\" virtual=\"true\" inherits=\"T%d, T%d\"><Frames><Frame/></Frames></Frame>", i, i + 1, i + 1)
+                            : (size_t)sprintf(big + n, "<Frame name=\"T39\" virtual=\"true\"/>");
+            n += (size_t)sprintf(big + n, "<Frame name=\"Huge\" inherits=\"T0\"/><Frame name=\"Next\"/></Ui>");
+            fx = fxml_new(NULL, &why);
+            clock_t t0 = clock();
+            WErr e = fx ? fxml_load(fx, "big.xml", big, n, "A", &why) : W_ERR_FULL;
+            double ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+            snprintf(line, sizeof line, "templates doubling 40 times stop at the limit with one warning, and the next frame still loads (%.0f ms)", ms);
+            check(!e && fx_count(fx, FXML_W_TOO_BIG, NULL, NULL) == 1 && fxml_find(fx, "Huge") && fxml_find(fx, "Next"), line);
+            fxml_free(fx);
+            free(big);
+        }
+        size_t cap = (size_t)(FXML_MAX_NESTING + 2) * 40 + 32;
+        char *nest = malloc(cap);
+        if (nest) {
+            size_t n = (size_t)sprintf(nest, "<Ui><Frame name=\"Deep\">");
+            for (int i = 0; i < FXML_MAX_NESTING + 1; ++i) n += (size_t)sprintf(nest + n, "<Frames><Frame>");
+            for (int i = 0; i < FXML_MAX_NESTING + 1; ++i) n += (size_t)sprintf(nest + n, "</Frame></Frames>");
+            n += (size_t)sprintf(nest + n, "</Frame></Ui>");
+            fx = fxml_new(NULL, &why);
+            WErr e = fx ? fxml_load(fx, "deep.xml", nest, n, "A", &why) : W_ERR_FULL;
+            int depth = 0;
+            for (const FxmlObject *o = fx ? fxml_find(fx, "Deep") : NULL; o && o->nkids; o = o->kids[0]) ++depth;
+            snprintf(line, sizeof line, "frames nested %d deep are made %d deep, with one warning", FXML_MAX_NESTING + 2, depth + 1);
+            check(!e && depth + 1 == FXML_MAX_NESTING && fx_count(fx, FXML_W_TOO_BIG, NULL, NULL) == 1, line);
+            fxml_free(fx);
+            free(nest);
+        }
+    }
+    /* }}} */
+
+    /* {{{ every file above, damaged at random: never a crash, every outcome said */
+    {
+        const char *const src[] = { FX_TEMPLATES, FX_ADDON, FX_BROKEN, FX_GOOD };
+        uint32_t seed = 702;
+        int read = 0, refused = 0, unsaid = 0;
+        char *buf = malloc(8192);
+        for (int round = 0; buf && round < 3000; ++round) {
+            const char *s = src[round % 4];
+            size_t n = strlen(s);
+            memcpy(buf, s, n);
+            int edits = 1 + (int)(fx_rand(&seed) % 4);
+            for (int k = 0; k < edits && n > 1; ++k) {
+                size_t p = fx_rand(&seed) % n;
+                switch (fx_rand(&seed) % 4) {
+                case 0: buf[p] = (char)fx_rand(&seed); break;                                   /* a byte changed */
+                case 1: memmove(buf + p, buf + p + 1, n - p - 1); --n; break;                    /* a byte gone */
+                case 2: if (n < 8000) { memmove(buf + p + 1, buf + p, n - p); buf[p] = "<>&/\"'=!?[]-$ "[fx_rand(&seed) % 14]; ++n; } break;
+                default: n = p + 1; break;                                                       /* cut short */
+                }
+            }
+            fx = fxml_new(&(FxmlOptions){ .open = fx_open, .frame_exists = fx_exists }, &why);
+            if (!fx) break;
+            WErr e = fxml_load(fx, "Interface\\AddOns\\MyAddon\\MyAddon.xml", buf, n, round % 2 ? "MyAddon" : "", &why);
+            if (!e) ++read;
+            else { ++refused; if (!why.text[0] || why.code != e) ++unsaid; }
+            fxml_free(fx);
+        }
+        free(buf);
+        snprintf(line, sizeof line, "3000 damaged copies of these files: %d read, %d refused, %d refused without a sentence", read, refused, unsaid);
+        check(read + refused == 3000 && read > 0 && refused > 0 && unsaid == 0, line);
+    }
+    /* }}} */
+}
+/* }}} 702 checks */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -329,6 +810,10 @@ int main(int argc, char **argv)
     in = none; in.forward = 1;
     for (int i = 0; i < 100; ++i) mover_step(&m, &in, 0.01, &(MoverWorld){ g_world, NULL, NULL, w });
     check(m.grounded, "a second's run from the start point on Ashenvale's real ground stays on it");
+    /* }}} */
+
+    /* {{{ the interface's XML (702): files written here, so it runs with no game data */
+    check_framexml();
     /* }}} */
 
     /* {{{ the archives */

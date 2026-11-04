@@ -8,7 +8,8 @@ startup, write on logout)".*
 ## Blocked by
 
 - [704](./704-events-and-the-per-frame-update.md) (`PLAYER_LOGOUT` and
-  the other shutdown events).
+  the other shutdown events), [706](./706-the-addon-loader.md) (the
+  names each addon saves, from its `.toc`).
 
 ## Blocks
 
