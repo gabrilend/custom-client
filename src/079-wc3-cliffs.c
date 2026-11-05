@@ -48,6 +48,22 @@ int wc3_cliff_letters(int nw, int ne, int se, int sw, char out[5], int *steep)
 }
 /* }}} */
 
+/* {{{ wc3_ramp_letters */
+int wc3_ramp_letters(int nw, int ne, int se, int sw, int rnw, int rne, int rse, int rsw, char out[5], int *steep)
+{
+    int level[4] = { nw, ne, se, sw }, ramp[4] = { rnw, rne, rse, rsw }, lo = nw;
+    for (int q = 1; q < 4; ++q) if (level[q] < lo) lo = level[q];
+    if (steep) *steep = 0;
+    for (int q = 0; q < 4; ++q) {
+        int up = level[q] - lo;
+        if (up > 2) { up = 2; if (steep) *steep = 1; }
+        out[q] = (char)(ramp[q] ? 'L' - 4 * up : 'A' + up);
+    }
+    out[4] = '\0';
+    return lo;
+}
+/* }}} */
+
 /* {{{ static asked: whether some place has `path` (each path asked once) */
 static WErr asked(Wc3Cliffs *c, Resolver *r, MpqChain *chain, const char *path, int *found, WWhy *why)
 {
@@ -114,18 +130,19 @@ WErr wc3_cliffs_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Cliffs
         Wc3CliffType *t = &c->types[k];
         memcpy(t->id, g->cliff_ids + 4 * k, 4);
         t->id[4] = '\0';
-        const char *dir = slk_value_any_case(sheet, t->id, "cliffModelDir");
+        const char *dir = slk_value_any_case(sheet, t->id, "cliffModelDir"), *rdir = slk_value_any_case(sheet, t->id, "rampModelDir");
         const char *tdir = slk_value_any_case(sheet, t->id, "texDir"), *tfile = slk_value_any_case(sheet, t->id, "texFile");
         const char *ground = slk_value_any_case(sheet, t->id, "groundTile");
         t->known = slk_value_any_case(sheet, t->id, "cliffID") || dir || tdir || ground;
         snprintf(t->model_dir, sizeof t->model_dir, "%s", dir && dir[0] ? dir : "Cliffs");
+        snprintf(t->ramp_dir, sizeof t->ramp_dir, "%s", rdir && rdir[0] ? rdir : "CliffTrans");
         if (tdir && tfile && tfile[0]) snprintf(t->picture, sizeof t->picture, "%s\\%s.blp", tdir, tfile);
         else snprintf(t->picture, sizeof t->picture, "TerrainArt\\%s.blp", t->id);   /* nowhere: the checker */
         if (ground && strlen(ground) == 4) memcpy(t->ground, ground, 5);
     }
     slk_free(sheet);
 
-    /* every cell: a cliff where its corners' levels differ and none is a ramp */
+    /* every cell on different levels: a cliff, or a ramp where a corner is one */
     int cw = g->width - 1, ch = g->height - 1;
     c->at = malloc(sizeof *c->at * (size_t)(cw > 0 && ch > 0 ? cw * ch : 1));
     rc = W_OK;
@@ -141,37 +158,39 @@ WErr wc3_cliffs_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Cliffs
                 ramp |= p[q]->is_ramp;
             }
             if (hi == lo) continue;
-            if (ramp) { ++c->counts.ramps; continue; }
-            ++c->counts.cells;
+            if (ramp) ++c->counts.ramps; else ++c->counts.cells;
             int type = cell_type(c, p);
-            if (type < 0) { ++c->counts.no_tileset; continue; }
+            if (type < 0) { if (ramp) ++c->counts.ramps_no_tileset; else ++c->counts.no_tileset; continue; }
             char letters[5];
             int steep;
-            int base = wc3_cliff_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height, letters, &steep);
+            int base = ramp ? wc3_ramp_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height,
+                                               nw->is_ramp, ne->is_ramp, se->is_ramp, sw->is_ramp, letters, &steep)
+                            : wc3_cliff_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height, letters, &steep);
             c->counts.steep += steep;
             /* its variation, or the highest below it some place has, else 0 */
             const Wc3CliffType *t = &c->types[type];
+            const char *dir = ramp ? t->ramp_dir : t->model_dir;
             char path[200];
             int found = 0, v = sw->cliff_variation;
             for (; v >= 0 && !rc; --v) {
-                snprintf(path, sizeof path, "Doodads\\Terrain\\%s\\%s%s%d.mdx", t->model_dir, t->model_dir, letters, v);
+                snprintf(path, sizeof path, "Doodads\\Terrain\\%s\\%s%s%d.mdx", dir, dir, letters, v);
                 rc = asked(c, r, chain, path, &found, why);
                 if (found) break;
             }
             if (rc) break;
-            if (!found) snprintf(path, sizeof path, "Doodads\\Terrain\\%s\\%s%s0.mdx", t->model_dir, t->model_dir, letters);
+            if (!found) snprintf(path, sizeof path, "Doodads\\Terrain\\%s\\%s%s0.mdx", dir, dir, letters);
             else if (v < sw->cliff_variation) ++c->counts.fallback;
             char name[400];
             snprintf(name, sizeof name, "%s%s11=%s", path, PLACED_REPLACE_MARK, t->picture);
             int m = model_of(c, name, found);
             double mean = (sw->height + se->height + nw->height + ne->height) / 4.0;
-            Wc3Cliff cl = { i, j, type, base, m,
+            Wc3Cliff cl = { i, j, type, base, m, ramp,
                             g->offset_x + (i + 1) * 128.0, g->offset_y + j * 128.0,
                             (base - 2) * 128.0 + mean };
             if (c->ncliffs % 256 == 0) c->cliffs = realloc(c->cliffs, sizeof *c->cliffs * (size_t)(c->ncliffs + 256));
             c->at[j * cw + i] = c->ncliffs;
             c->cliffs[c->ncliffs++] = cl;
-            ++c->counts.placed;
+            if (ramp) ++c->counts.ramps_placed; else ++c->counts.placed;
         }
     if (rc) { wc3_cliffs_free(c); return rc; }
     *out = c;

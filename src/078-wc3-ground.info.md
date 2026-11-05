@@ -40,11 +40,15 @@ cliff cell with a WC3 cliff model (079: when the player has
 TerrainArt\CliffTypes.slk) is laid whole with its cliff tileset's
 ground (its groundTile, added to the tilesets when the map's list
 lacks it), and its model is added to the tile's doodads
-(wc3_ground_place_cliffs); another bare cell (blighted, or a cliff
-with no cliff tileset or model: 063 leaves them bare for the
-renderer) is laid whole with its south-west point's tileset until
-blight is drawn. A chunk with no cell inside the WC3 grid keeps the converter's
-own pictures; a cell outside it in a chunk with some inside shows the
+(wc3_ground_place_cliffs); a ramp's cell (079: a model too) keeps its
+own ground. A blighted cell, when the editor's data
+(UI\WorldEditData.txt's [TileSets], second field) names the main
+tileset's blight picture, is laid as WC3 lays tilesets with the
+blight a tileset of its own, highest, on each blighted corner; with
+none named, and for a cliff with no cliff tileset or model (063 leaves
+them bare for the renderer), a bare cell is laid whole with its
+south-west point's tileset. A chunk with no cell inside the WC3 grid
+keeps the converter's own pictures; a cell outside it in a chunk with some inside shows the
 chunk's layer 0.
 
 Where the files come from: war3map.w3e by its name at the converted
@@ -92,6 +96,10 @@ is safe on any thread (the reading-ahead thread paints tiles too).
 - `const Wc3Cliffs *wc3_ground_cliffs(const Wc3Ground *w);`
   The map's cliffs (079), or NULL when no place has TerrainArt\
   CliffTypes.slk: then cliff cells are laid as blighted ones are.
+- `int wc3_ground_blight(const Wc3Ground *w);`
+  The blight's tileset (into wc3_ground_tileset, id WC3_BLIGHT_ID), or
+  -1 when UI\WorldEditData.txt is in no place or names no blight for
+  the map's main tileset: then blighted cells are laid as before.
 - `int wc3_ground_cell_at(const Wc3Ground *w, double x, double y, int *i, int *j, double *fx, double *fy);`
   The WC3 cell (i, j) holding world place (x, y), by the map's rule:
   1 when inside the grid (cells (width - 1) x (height - 1), rows from
@@ -113,7 +121,7 @@ is safe on any thread (the reading-ahead thread paints tiles too).
   `*counts` (may be NULL). W_OK; W_ERR_FULL when the tile's list would
   pass 256 pictures.
 - `WErr wc3_ground_place_cliffs(const Wc3Ground *w, AdtTile *adt, int *placed, WWhy *why);`
-  Adds the cliff models standing on tile `adt` (those whose cell's
+  Adds the cliff and ramp models standing on tile `adt` (those whose cell's
   centre is on it, so each is placed by one tile) to its doodads: each
   model's name (079's wc3_cliffs_model) to its list once, each cliff a
   placement with id WC3_CLIFF_UID plus its cell, at its origin by the

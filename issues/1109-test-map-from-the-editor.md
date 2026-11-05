@@ -422,9 +422,49 @@ The tests' arguments: the build folder is the third and Warcraft III's
 `war3.mpq` (for the archives' WC3 checks) now the fourth; both were the
 third before (decision 50).
 
-Not built yet: WC3's ramps (decision 48), cliffs bent to the ground
-under each point (decision 46), and blight (blighted cells are laid
-whole with their south-west tileset); a tileset's variations (one whole tile each); more than four
+**Step 1f is built** (2026-11-05, the same background work): ramps
+stand as WC3's own ramp models, and blighted ground wears WC3's blight,
+when the player has WC3. Decisions 51 to 56.
+
+- **Ramps (079):** a cell on different levels with a ramp corner gets
+  a model from its cliff tileset's `rampModelDir` (`CliffTrans` when the
+  sheet has none), named as a cliff's but with a ramp corner's letter
+  `L` on the lowest level and `H` one up (`HLLH`: down to the east),
+  and placed, varied and pictured by the cliffs' rules. The ramp's
+  lower, flat half gets none (decision 51). A ramp's cell keeps its own
+  ground (decision 52). The counts keep ramps apart; 043 says both.
+- **Blight (078):** `UI\WorldEditData.txt`'s `[TileSets]` row for the
+  map's main tileset names its blight picture (second field, `.blp`
+  added: decision 53); it becomes a tileset of its own, the last, and a
+  blighted cell is laid as WC3 lays tilesets with the blight on each
+  blighted corner (decision 54). With no such file or row, blighted
+  cells are laid as before.
+
+Checked (the same section of `tests/044-test-client.c`): ramp letters;
+the made map's ramp (four cells, all placed, cell (6, 3)'s
+`CliffTransAHAA0`, found in the install) and its two blighted points
+(the editor's data with other sections and rows round the one asked,
+`A = ` spaced; the blight picture from the install; four blighted cells
+laid with it, all 4096 points as expected, its layer full at a
+blighted corner). With the real conversions, an install made with
+`rampModelDir`, the editor's data and a blight picture, and every model
+they need as loose files:
+
+- **War in the Plaguelands**: no ramps; 1246 blighted points laid with
+  the blight; 925696 of 925696 points as expected in chunks of four
+  tilesets or fewer (89.5% of all, the blight a fifth tileset in some).
+- **Master Crafters**: 980 ramp cells, 905 placed (75 with no cliff
+  tileset on any corner), among 2907 cliff and ramp models placed once
+  each, on their tile and cell, named by the rule (186 models); 184
+  blighted points; 3932160 of 3932160 points as expected (99.7%).
+
+No memory errors under the address and undefined-behaviour checkers.
+Not checked here: real ramp models (their names, that one reaches over
+the ramp's flat half), a real `WorldEditData.txt` (that the blight is
+its second field), and a window (open question 10).
+
+Not built yet: cliffs and ramps bent to the ground under each point
+(decision 46); a tileset's variations (one whole tile each); more than four
 tilesets in a chunk (folded: a shader taking a chunk's own tileset
 list, or a fifth layer, would lift it: decision 37); WC3's water; a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
@@ -568,9 +608,11 @@ return {
    077, 078, PR #3's 063 merged (decisions 32 to 41).
 1e. ~~The map's cliffs as WC3's own cliff models, on their ground.~~
    Done (2026-11-05): 079, 078's cliff ground and placements, 076's
-   replaceable-picture mark (decisions 42 to 50). Ramps, cliffs bent to
-   the ground, blight, variations and more than four tilesets a chunk
-   are next (302).
+   replaceable-picture mark (decisions 42 to 50).
+1f. ~~Ramps as WC3's own ramp models, and blight.~~ Done (2026-11-05):
+   079's ramps, 078's blight from the editor's data (decisions 51 to
+   56). Cliffs bent to the ground, variations and more than four
+   tilesets a chunk are next (302).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -855,7 +897,8 @@ return {
     no model (980 in Master Crafters, none in War in the Plaguelands);
     the converted ground's slope shows there, laid with 063's pictures.
     WC3's ramp models (`rampModelDir`, their own letters) are the next
-    step, with the bending of decision 46.
+    step, with the bending of decision 46. (Done in step 1f: decision
+    51.)
 49. **A placed name may name its replaceable picture**:
     `<model>|<n>=<picture>` (076's `PLACED_REPLACE_MARK`), so one cliff
     model in two cliff tilesets is two models to 042, each with its own
@@ -865,6 +908,45 @@ return {
     becomes the fourth, as the usage line in `tests/044-test-client.c`
     says (both were the third, so a build folder given broke the
     archives' WC3 checks).
+
+## Decisions (2026-11-05, step 1f, answered here; the owner may overturn any)
+
+51. **A ramp's model on each ramp cell that changes level.** A cell on
+    different levels with a ramp corner takes
+    `Doodads\Terrain\<rampModelDir>\<rampModelDir><letters><v>.mdx`
+    (`CliffTrans` when the sheet has no such column or cell); its
+    letters as a cliff's (north-west, north-east, south-east,
+    south-west) but a ramp corner's `'L' - 4` a level (`L` lowest, `H`
+    one up, `D` two), as the published map viewers name WC3's ramp
+    pieces; its tileset, variation, picture and placing are the cliffs'
+    (decisions 43, 45, 46). Master Crafters' ramps are three points
+    wide (a level, then two ramp points on the lower one): the lower,
+    flat cell gets no model, its neighbour's reaching over it, the way
+    the viewers draw a two-cell ramp piece. From memory of the
+    viewers, unchecked here (open question 10).
+52. **A ramp's cell keeps its own ground**, laid as 063 lays a textured
+    cell, not its cliff tileset's ground: a ramp is walked ground, and
+    the model gives its sides.
+53. **The blight's picture from the editor's data**:
+    `UI\WorldEditData.txt`'s `[TileSets]` row for the map's main
+    tileset (its letter, `A=` or `A = `), its second comma-separated
+    field, `.blp` added when it has no ending (as the viewers read it).
+    No such file or row: blighted cells laid as before (decision 39).
+    The few lines that read it are 078's own; a general reader for
+    WC3's INI-like text files waits for a second user.
+54. **Blight is a tileset of its own, the last**, laid on each blighted
+    corner by the tilesets' own corner rule (a corner's tileset is the
+    blight when it is blighted), so it blends into the ground round it
+    as WC3's does; a cliff cell's cliff ground (decision 47) wins over
+    it. Its picture is laid out as a tileset's (4 x 4 subtiles; 8 x 4
+    when twice as wide).
+55. **The counts keep cliffs and ramps apart** (`ramps`,
+    `ramps_placed`, `ramps_no_tileset`); `steep` and the models' counts
+    take both.
+56. **The tests' colours repeat past 16 tilesets**: War in the
+    Plaguelands' blight is its 17th tileset and shares the first's
+    colour in the made pictures, so its blight's laying is checked
+    less sharply than Master Crafters' (its 11th).
 
 ## Open questions
 
@@ -952,6 +1034,11 @@ return {
    sheets made in the test. On the owner's machine with WC3: a Test Map
    run of War in the Plaguelands showing its cliffs a cell off, or
    boxes where cliffs should be, says which rule to change.
+10. **WC3's ramp models and blight, unseen here.** The ramp pieces'
+    letters (`L`, `H`), that one covers the ramp's flat half, and that
+    the blight is `WorldEditData.txt`'s second field are the viewers'
+    reading from memory. On the owner's machine: Master Crafters' ramps
+    as boxes, or doubled, or its blight the checker, says which.
 
 ## Related
 
@@ -970,7 +1057,7 @@ return {
   `src/078-wc3-ground.info.md` (the ground in WC3's tilesets),
   `src/063-w3e.info.md` ([302a](./302a-wc3-ground-read-and-prepared.md)).
   For step 1e: `src/079-wc3-cliffs.info.md` (the cliffs), with 078,
-  076 and 077.
+  076 and 077. For step 1f: 079 (ramps) and 078 (blight).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

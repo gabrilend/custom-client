@@ -2293,7 +2293,7 @@ static int t_cliff_set(const Wc3Ground *w, int i, int j)
 {
     const Wc3Cliffs *cl = wc3_ground_cliffs(w);
     int at = cl ? wc3_cliffs_at(cl, i, j) : -1;
-    if (at < 0) return -1;
+    if (at < 0 || wc3_cliffs_get(cl, at)->ramp) return -1;   /* a ramp's cell keeps its ground */
     const char *ground = wc3_cliffs_type(cl, wc3_cliffs_get(cl, at)->type)->ground;
     for (int k = 0; ground[0] && k < wc3_ground_tilesets(w); ++k) if (!strcmp(wc3_ground_tileset(w, k)->id, ground)) return k;
     return -1;
@@ -2323,8 +2323,9 @@ static void t_paint_check(const Wc3Ground *w, const W3ePrep *prep, const AdtTile
                 int cs = t_cliff_set(w, ci[r][cc], cj[r][cc]);
                 if (cs >= 0) { if (!used[cs]) { used[cs] = 1; ++nused; } continue; }
                 for (int q = 0; q < 4; ++q) {
-                    int t = w3e_point(g, ci[r][cc] + (q & 1), cj[r][cc] + (q >> 1))->ground_texture;
-                    if (t < 16 && !used[t]) { used[t] = 1; ++nused; }
+                    const W3ePoint *pt = w3e_point(g, ci[r][cc] + (q & 1), cj[r][cc] + (q >> 1));
+                    int t = pt->is_blight && wc3_ground_blight(w) >= 0 ? wc3_ground_blight(w) : pt->ground_texture;
+                    if (t < 32 && !used[t]) { used[t] = 1; ++nused; }
                 }
             }
         for (int py = 0; py < 64; ++py)
@@ -2336,7 +2337,11 @@ static void t_paint_check(const Wc3Ground *w, const W3ePrep *prep, const AdtTile
                 int bare = prep->cell_kind[(size_t)j * (g->width - 1) + i] != W3E_CELL_TEXTURED;
                 int east = cf - cc >= 0.5, north = rf - r < 0.5;
                 int cs = t_cliff_set(w, i, j);
-                int t = cs >= 0 ? cs : bare ? w3e_point(g, i, j)->ground_texture : w3e_point(g, i + east, j + north)->ground_texture;
+                const W3ePoint *qp = w3e_point(g, i + east, j + north);
+                int blighted = wc3_ground_blight(w) >= 0 && prep->cell_kind[(size_t)j * (g->width - 1) + i] == W3E_CELL_BLIGHT;
+                int t = cs >= 0 ? cs
+                      : blighted ? (qp->is_blight ? wc3_ground_blight(w) : qp->ground_texture)   /* the blight a tileset on its corners */
+                      : bare ? w3e_point(g, i, j)->ground_texture : qp->ground_texture;
                 unsigned char got[3];
                 const unsigned char *b = blend + ((size_t)(crow * 64 + py) * 1024 + (size_t)(ccol * 64 + px)) * stride;
                 t_mix(cols, b, got);
@@ -2782,21 +2787,22 @@ static void t_cliff_mdx(Bytes *o)
         if (!memcmp(o->b + i, "TEXS", 4)) { o->b[i + 8] = 11; break; }
 }
 
-/* the model a cliff cell should get, worked out here from the header's
- * rule: its tileset (south-west first), letters, and the variation asked */
+/* the model a cliff or ramp cell should get, worked out here from the
+ * header's rule: its tileset (south-west first), letters, and the
+ * variation asked; 0 on one level, 1 a cliff, 2 a ramp */
 static int t_cliff_expect(const W3eGround *g, int ntypes, int i, int j, int *type, char letters[5], int *base, int *var)
 {
     const W3ePoint *sw = w3e_point(g, i, j), *se = w3e_point(g, i + 1, j), *nw = w3e_point(g, i, j + 1), *ne = w3e_point(g, i + 1, j + 1);
     const W3ePoint *p[4] = { sw, se, nw, ne };
     int lo = 99, hi = -1, ramp = 0;
     for (int q = 0; q < 4; ++q) { if (p[q]->layer_height < lo) lo = p[q]->layer_height; if (p[q]->layer_height > hi) hi = p[q]->layer_height; ramp |= p[q]->is_ramp; }
-    if (hi == lo) return 0;                              /* not a cliff */
-    if (ramp) return 1;                                  /* a ramp */
+    if (hi == lo) return 0;                              /* neither */
     *type = -1;
     for (int q = 0; q < 4 && *type < 0; ++q) if (p[q]->cliff_texture < ntypes) *type = p[q]->cliff_texture;
-    *base = wc3_cliff_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height, letters, NULL);
+    *base = ramp ? wc3_ramp_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height, nw->is_ramp, ne->is_ramp, se->is_ramp, sw->is_ramp, letters, NULL)
+                 : wc3_cliff_letters(nw->layer_height, ne->layer_height, se->layer_height, sw->layer_height, letters, NULL);
     *var = sw->cliff_variation;
-    return 2;
+    return ramp ? 2 : 1;
 }
 
 static void wc3_cliff_tests(const char *dir, const char *build)
@@ -2839,27 +2845,37 @@ static void wc3_cliff_tests(const char *dir, const char *build)
         static const char CLIFFS[] =
             "ID;PWXL;N;E\nC;X1;Y1;K\"cliffid\"\nC;X2;K\"CLIFFMODELDIR\"\nC;X3;K\"texdir\"\nC;X4;K\"texfile\"\nC;X5;K\"groundtile\"\n"
             "C;X1;Y2;K\"CAdi\"\nC;X2;K\"Cliffs\"\nC;X3;K\"ReplaceableTextures\\Cliff\"\nC;X4;K\"Cliff0\"\nC;X5;K\"Ablk\"\nE\n";
+        /* (step 1f) the editor's data naming the blight of main tileset A,
+         * among other sections and rows, and its picture; one ramp model */
+        static const char EDIT[] =
+            "[WorldEditStrings]\r\nA=nothing,here\r\n[TileSets]\r\nL=WESTRING_L,TerrainArt\\Blight\\Lords_Blight,x\r\n"
+            "  A = WESTRING_A,TerrainArt\\Blight\\Ashen_Blight,Ashenvale\r\n[Other]\r\nA=wrong,wrong\r\n";
         Bytes mdx;
         t_cliff_mdx(&mdx);
-        const char *names[8] = { "TerrainArt\\Terrain.slk", "TerrainArt\\CliffTypes.slk", "TerrainArt\\Made\\Adrt.blp", "TerrainArt\\Made\\Agrs.blp", "TerrainArt\\Made\\Ablk.blp",
-                                 "Doodads\\Terrain\\Cliffs\\CliffsABAA0.mdx", "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx", "Doodads\\Terrain\\Cliffs\\CliffsAAAB0.mdx" };
-        const char *bytes[8];
-        size_t lens[8];
+        const char *names[11] = { "TerrainArt\\Terrain.slk", "TerrainArt\\CliffTypes.slk", "TerrainArt\\Made\\Adrt.blp", "TerrainArt\\Made\\Agrs.blp", "TerrainArt\\Made\\Ablk.blp",
+                                  "Doodads\\Terrain\\Cliffs\\CliffsABAA0.mdx", "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx", "Doodads\\Terrain\\Cliffs\\CliffsAAAB0.mdx",
+                                  "UI\\WorldEditData.txt", "TerrainArt\\Blight\\Ashen_Blight.blp", "Doodads\\Terrain\\CliffTrans\\CliffTransAHAA0.mdx" };
+        const char *bytes[11];
+        size_t lens[11];
         bytes[0] = TERRAIN; lens[0] = strlen(TERRAIN);
         bytes[1] = CLIFFS; lens[1] = strlen(CLIFFS);
         for (int k = 0; k < 3; ++k) bytes[2 + k] = (const char *)t_tileset(k, 0, &lens[2 + k]);
         for (int k = 5; k < 8; ++k) { bytes[k] = (const char *)mdx.b; lens[k] = mdx.n; }
+        bytes[8] = EDIT; lens[8] = strlen(EDIT);
+        bytes[9] = (const char *)t_tileset(3, 0, &lens[9]);
+        bytes[10] = (const char *)mdx.b; lens[10] = mdx.n;
         snprintf(folder, sizeof folder, "%s/install", root);
         t_mkdirs(folder);
         snprintf(path, sizeof path, "%s/war3.mpq", folder);
-        t_write_mpq_n(path, names, bytes, lens, 8);
+        t_write_mpq_n(path, names, bytes, lens, 11);
         for (int k = 2; k < 5; ++k) free((void *)bytes[k]);
+        free((void *)bytes[9]);
         /* the map: 9 x 9 points (one chunk's 8 x 8 cells), heights 10
          * units a column east; a plateau one level up on points 3-5 x 3-5,
          * point (6, 1) two up, point (1, 6) three up (steep), point (7, 4)
          * a ramp a level up; cliff tileset CAdi, but none (15) west of
          * column 2 and CZzz (no row) on row 0; variations 1 at point
-         * (2, 2), 2 at (5, 5) */
+         * (2, 2), 2 at (5, 5); points (0, 0) and (1, 1) blighted */
         W3eOut o = { 0 };
         w3e_head(&o, 11, 'A', "AdrtAgrs", "CAdiCZzz", 9, 9, 0.0f, 0.0f);
         for (int y = 0; y < 9; ++y)
@@ -2870,7 +2886,8 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                 if (x == 7 && y == 4) layer = 3;
                 int ctex = x < 2 ? 15 : y == 0 ? 1 : 0;
                 int cvar = x == 2 && y == 2 ? 1 : x == 5 && y == 5 ? 2 : 0;
-                w3e_pt(&o, 8192 + 4 * 10 * x, 8192, (x + y) % 2, x == 7 && y == 4 ? 0x10 : 0, 0, cvar, layer, ctex);
+                int marks = (x == 7 && y == 4 ? 0x10 : 0) | ((x == 0 && y == 0) || (x == 1 && y == 1) ? 0x20 : 0);
+                w3e_pt(&o, 8192 + 4 * 10 * x, 8192, (x + y) % 2, marks, 0, cvar, layer, ctex);
             }
         char map[520];
         snprintf(map, sizeof map, "%s/map", root);
@@ -2888,8 +2905,11 @@ static void wc3_cliff_tests(const char *dir, const char *build)
         Wc3Ground *w = NULL;
         if (!e) e = wc3_ground_open(r, NULL, s, x0, Y0, &w, &why);
         const Wc3Cliffs *cl = e ? NULL : wc3_ground_cliffs(w);
-        check(!e && cl && wc3_ground_tilesets(w) == 3 && !strcmp(wc3_ground_tileset(w, 2)->id, "Ablk") && wc3_ground_tileset(w, 2)->source == ASSET_FROM_BLIZZARD,
+        check(!e && cl && wc3_ground_tilesets(w) == 4 && !strcmp(wc3_ground_tileset(w, 2)->id, "Ablk") && wc3_ground_tileset(w, 2)->source == ASSET_FROM_BLIZZARD,
               e ? why.text : "the map opens with its cliffs; the ground under CAdi's cliffs (Ablk, not in the map's list) added as a tileset of its own");
+        const Wc3Tileset *bt = !e ? wc3_ground_tileset(w, wc3_ground_blight(w)) : NULL;
+        check(bt && wc3_ground_blight(w) == 3 && !strcmp(bt->id, WC3_BLIGHT_ID) && !strcmp(bt->path, "TerrainArt\\Blight\\Ashen_Blight.blp") && bt->source == ASSET_FROM_BLIZZARD,
+              "the blight: main tileset A's row in the editor's data's [TileSets] (its second field, .blp added), its picture from the install, the last tileset");
         if (cl) {
             const Wc3CliffType *t0 = wc3_cliffs_type(cl, 0), *t1 = wc3_cliffs_type(cl, 1);
             check(wc3_cliffs_types(cl) == 2 && t0->known && !strcmp(t0->model_dir, "Cliffs") && !strcmp(t0->picture, "ReplaceableTextures\\Cliff\\Cliff0.blp") && !strcmp(t0->ground, "Ablk")
@@ -2897,25 +2917,37 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                   "each cliff tileset from the sheet, columns by any capitals; one with no row: Cliffs, the checker's picture, no ground");
             W3eGround *g = NULL;
             w3e_read(o.b, o.n, &g, &why);
-            int cells = 0, ramps = 0, none = 0, falls = 0, flat_cliffs = 0;
+            int cells = 0, ramps = 0, none = 0, falls = 0, flat_cliffs = 0, ramp_flags = 1;
             for (int j = 0; g && j < 8; ++j)
                 for (int i = 0; i < 8; ++i) {
                     int type, base, var;
                     char l[5];
                     int k = t_cliff_expect(g, 2, i, j, &type, l, &base, &var);
-                    ramps += k == 1;
-                    if (k != 2) { flat_cliffs += wc3_cliffs_at(cl, i, j) >= 0; continue; }
+                    ramps += k == 2;
+                    if (k == 0) { flat_cliffs += wc3_cliffs_at(cl, i, j) >= 0; continue; }
+                    if (k == 2) { ramp_flags &= wc3_cliffs_at(cl, i, j) >= 0 && wc3_cliffs_get(cl, wc3_cliffs_at(cl, i, j))->ramp; continue; }
+                    ramp_flags &= wc3_cliffs_at(cl, i, j) < 0 || !wc3_cliffs_get(cl, wc3_cliffs_at(cl, i, j))->ramp;
                     ++cells;
                     if (type < 0) { none += wc3_cliffs_at(cl, i, j) < 0; continue; }
                     falls += !strcmp(l, "ABAA") ? var > 1 : !strcmp(l, "AAAB") ? var > 0 : 0;
                 }
-            check(flat_cliffs == 0, "no cliff on a cell on one level, or on a ramp");
+            check(flat_cliffs == 0 && ramp_flags, "no model on a cell on one level; a ramp cell's marked a ramp's, a cliff's not");
             Wc3CliffCounts cc;
             wc3_cliffs_counts(cl, &cc);
-            snprintf(line, sizeof line, "its cliff cells counted (%d, %d of them placed, %d naming no cliff tileset, %d steep), and the cells on the ramp left (%d)", cc.cells, cc.placed, cc.no_tileset, cc.steep, cc.ramps);
-            check(cc.cells == cells && cc.ramps == ramps && ramps > 0 && cc.no_tileset == none && none > 0 && cc.placed == cells - none && cc.steep > 0 && wc3_cliffs_count(cl) == cc.placed, line);
+            snprintf(line, sizeof line, "its cliff cells counted (%d, %d of them placed, %d naming no cliff tileset, %d steep), and its ramp cells (%d, %d placed)", cc.cells, cc.placed, cc.no_tileset, cc.steep, cc.ramps, cc.ramps_placed);
+            check(cc.cells == cells && cc.ramps == ramps && ramps == 4 && cc.ramps_placed == 4 && cc.ramps_no_tileset == 0 && cc.no_tileset == none && none > 0 && cc.placed == cells - none && cc.steep > 0
+                  && wc3_cliffs_count(cl) == cc.placed + cc.ramps_placed, line);
             snprintf(line, sizeof line, "%d models named, %d of them in the install (the box for the rest); %d cliffs at a lower variation than asked", cc.models, cc.found, cc.fallback);
-            check(cc.found == 2 && cc.models > cc.found && cc.fallback == 1 && falls == 1, line);
+            check(cc.found == 3 && cc.models > cc.found && cc.fallback == 1 && falls == 1, line);
+            /* the ramp: point (7, 4) a level up and on it; cell (6, 3) has it north-east */
+            char rl[5];
+            int rb = wc3_ramp_letters(2, 3, 2, 2, 0, 1, 0, 0, rl, NULL);
+            int rb2 = wc3_ramp_letters(3, 2, 2, 3, 1, 1, 1, 1, rl + 0, NULL);
+            check(rb == 2 && rb2 == 2 && !strcmp(rl, "HLLH"), "a ramp's letters: a ramp corner L on the lowest level and H one up (HLLH: down to the east), one off the ramp A, B, C");
+            const Wc3Cliff *r63 = wc3_cliffs_get(cl, wc3_cliffs_at(cl, 6, 3));
+            check(r63 && r63->ramp && !strcmp(wc3_cliffs_model(cl, r63->model), "Doodads\\Terrain\\CliffTrans\\CliffTransAHAA0.mdx" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff0.blp")
+                  && !strcmp(wc3_cliffs_type(cl, 0)->ramp_dir, "CliffTrans") && near(r63->x, 7 * 128.0, 1e-9) && near(r63->y, 3 * 128.0, 1e-9),
+                  "cell (6, 3) on the ramp: CliffTransAHAA0 (no rampModelDir column: CliffTrans), placed as a cliff is");
             /* cell (2, 2): corners SW (2, 2) 2, SE (3, 2) 2, NW (2, 3) 2, NE (3, 3) 3 */
             int at = wc3_cliffs_at(cl, 2, 2);
             const Wc3Cliff *c22 = wc3_cliffs_get(cl, at);
@@ -2949,8 +2981,12 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             if (g) w3e_prep(g, ext, 2, &prep, &why);
             TPaintCheck chk = { 0 };
             if (prep && !e) t_paint_check(w, prep, adt, tex, rgb, 3, painted, tex_set, NULL, &chk);
-            snprintf(line, sizeof line, "the chunk laid as WC3 lays it, its %d cliff cells with a model on their cliff's ground (%ld of %ld points)", pc.cliff_ground, chk.exact_same, chk.exact_points);
-            check(!e && painted[0] && pc.cliff_ground > 0 && pc.cliff_ground < cc.placed && chk.exact_points == 4096 && chk.exact_same == 4096, line);
+            snprintf(line, sizeof line, "the chunk laid as WC3 lays it: its %d cliff cells with a model on their cliff's ground, its ramps' on their own, its %d blighted cells with the blight on their blighted corners (%ld of %ld points)",
+                     pc.cliff_ground, pc.blight, chk.exact_same, chk.exact_points);
+            check(!e && painted[0] && pc.cliff_ground > 0 && pc.cliff_ground < cc.placed && pc.blight == 4 && chk.exact_points == 4096 && chk.exact_same == 4096, line);
+            int blight_shown = 0;
+            for (int px = 0; px < 8; ++px) blight_shown += rgb[(size_t)(63 - px) * 1024 * 3 + (size_t)px * 3 + 2] == 255;   /* layer 3 (the blight) at the south-west corner */
+            check(blight_shown == 8, "the blight's layer full at a blighted corner");
             /* the cliffs into the tile's doodads */
             int placed = 0;
             e = wc3_ground_place_cliffs(w, adt, &placed, &why);
@@ -2964,8 +3000,8 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             }
             int names_once = 1;
             for (int m = 0; m < adt->nmodels; ++m) for (int m2 = m + 1; m2 < adt->nmodels; ++m2) names_once &= strcmp(adt->models[m], adt->models[m2]) != 0;
-            snprintf(line, sizeof line, "every cliff placed in the tile its cell is on (%d), each its own id past the converter's, turned as WC3 lays models, each model named once (%d)", placed, adt->nmodels);
-            check(!e && placed == cc.placed && adt->ndoodads == placed && all_cliff && uids && names_once && adt->nmodels == cc.models, e ? why.text : line);
+            snprintf(line, sizeof line, "every cliff and ramp placed in the tile its cell is on (%d), each its own id past the converter's, turned as WC3 lays models, each model named once (%d)", placed, adt->nmodels);
+            check(!e && placed == cc.placed + cc.ramps_placed && adt->ndoodads == placed && all_cliff && uids && names_once && adt->nmodels == cc.models, e ? why.text : line);
             check(p22 && near(p22->x, x0 + s * 256, 1e-3) && near(p22->y, Y0 - s * 384, 1e-3) && near(p22->z, s * 25, 1e-5) && !strcmp(adt->models[p22->name], n22),
                   "cell (2, 2)'s placement: its origin by the map's rule, in yards, its model's name");
             AdtTile *far = calloc(1, sizeof *far);
@@ -3027,7 +3063,7 @@ static void wc3_cliff_tests(const char *dir, const char *build)
          * and, as loose files, every cliff model it needs in variation 0 */
         int nset = g->nground < 16 ? g->nground : 16, ntypes = g->ncliff < 15 ? g->ncliff : 15;
         char sheet[4000] = "ID;PWXL;N;E\nC;X1;Y1;K\"tileID\"\nC;X2;K\"dir\"\nC;X3;K\"file\"\n";
-        char csheet[4000] = "ID;PWXL;N;E\nC;X1;Y1;K\"cliffID\"\nC;X2;K\"cliffModelDir\"\nC;X3;K\"texDir\"\nC;X4;K\"texFile\"\nC;X5;K\"groundTile\"\n";
+        char csheet[4000] = "ID;PWXL;N;E\nC;X1;Y1;K\"cliffID\"\nC;X2;K\"cliffModelDir\"\nC;X3;K\"texDir\"\nC;X4;K\"texFile\"\nC;X5;K\"groundTile\"\nC;X6;K\"rampModelDir\"\n";
         const char *n1[16], *b1[16], *n2[16], *b2[16];
         size_t l1[16], l2[16];
         int c1 = 0, c2 = 0;
@@ -3040,28 +3076,36 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             if (k < 8) { n1[c1] = pn[k]; b1[c1] = (const char *)t_tileset(k, 0, &l1[c1]); ++c1; }
             else { n2[c2] = pn[k]; b2[c2] = (const char *)t_tileset(k, 0, &l2[c2]); ++c2; }
         }
-        static const char *DIRS[2] = { "Cliffs", "CityCliffs" };
+        static const char *DIRS[2] = { "Cliffs", "CityCliffs" }, *RDIRS[2] = { "CliffTrans", "CityCliffTrans" };
         for (int k = 0; k < ntypes; ++k) {
             char row[300];
-            snprintf(row, sizeof row, "C;X1;Y%d;K\"%.4s\"\nC;X2;K\"%s\"\nC;X3;K\"ReplaceableTextures\\Cliff\"\nC;X4;K\"Cliff%d\"\nC;X5;K\"%.4s\"\n",
-                     k + 2, g->cliff_ids + 4 * k, DIRS[k % 2], k, g->ground_ids + 4 * (k % nset));
+            snprintf(row, sizeof row, "C;X1;Y%d;K\"%.4s\"\nC;X2;K\"%s\"\nC;X3;K\"ReplaceableTextures\\Cliff\"\nC;X4;K\"Cliff%d\"\nC;X5;K\"%.4s\"\nC;X6;K\"%s\"\n",
+                     k + 2, g->cliff_ids + 4 * k, DIRS[k % 2], k, g->ground_ids + 4 * (k % nset), RDIRS[k % 2]);
             strncat(csheet, row, sizeof csheet - strlen(csheet) - 1);
         }
         strncat(sheet, "E\n", sizeof sheet - strlen(sheet) - 1);
         strncat(csheet, "E\n", sizeof csheet - strlen(csheet) - 1);
         n1[c1] = "TerrainArt\\Terrain.slk"; b1[c1] = sheet; l1[c1] = strlen(sheet); ++c1;
         n1[c1] = "TerrainArt\\CliffTypes.slk"; b1[c1] = csheet; l1[c1] = strlen(csheet); ++c1;
+        /* the editor's data naming its main tileset's blight, and the blight's picture */
+        char edit[200];
+        snprintf(edit, sizeof edit, "[TileSets]\r\n%c=WESTRING_MADE,TerrainArt\\Blight\\Made_Blight,Made\r\n", g->tileset_code);
+        n1[c1] = "UI\\WorldEditData.txt"; b1[c1] = edit; l1[c1] = strlen(edit); ++c1;
+        size_t blen;
+        unsigned char *bpic = t_tileset(nset % 16, 0, &blen);
+        n1[c1] = "TerrainArt\\Blight\\Made_Blight.blp"; b1[c1] = (const char *)bpic; l1[c1] = blen; ++c1;
         snprintf(folder, sizeof folder, "%s/install-real", root);
         t_mkdirs(folder);
         snprintf(path, sizeof path, "%s/war3.mpq", folder);
         t_write_mpq_n(path, n1, b1, l1, c1);
         snprintf(path, sizeof path, "%s/War3x.mpq", folder);
         if (c2) t_write_mpq_n(path, n2, b2, l2, c2);
-        for (int k = 0; k < c1 - 2; ++k) free((void *)b1[k]);
+        for (int k = 0; k < c1 - 4; ++k) free((void *)b1[k]);
+        free(bpic);
         for (int k = 0; k < c2; ++k) free((void *)b2[k]);
         /* the cells, worked out here: cliffs, ramps, models wanted, variations asked past 0 */
-        int cw = g->width - 1, ch = g->height - 1, cells = 0, ramps = 0, none = 0, asked = 0;
-        char models[200][64];
+        int cw = g->width - 1, ch = g->height - 1, cells = 0, ramps = 0, none = 0, ramps_none = 0, asked = 0;
+        char models[400][64];
         int nmodels = 0;
         char overlay[520];
         snprintf(overlay, sizeof overlay, "%s/models", root);
@@ -3072,16 +3116,16 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                 int type, base, var;
                 char l[5];
                 int k = t_cliff_expect(g, ntypes, i, j, &type, l, &base, &var);
-                ramps += k == 1;
-                if (k != 2) continue;
-                ++cells;
-                if (type < 0) { ++none; continue; }
+                if (!k) continue;
+                if (k == 2) ++ramps; else ++cells;
+                if (type < 0) { if (k == 2) ++ramps_none; else ++none; continue; }
                 asked += var > 0;
                 char name[64];
-                snprintf(name, sizeof name, "%s/%s%s0.mdx", DIRS[type % 2], DIRS[type % 2], l);
+                const char *dirn = k == 2 ? RDIRS[type % 2] : DIRS[type % 2];
+                snprintf(name, sizeof name, "%s/%s%s0.mdx", dirn, dirn, l);
                 int seen = 0;
                 for (int n = 0; n < nmodels && !seen; ++n) seen = !strcmp(models[n], name);
-                if (!seen && nmodels < 200) {
+                if (!seen && nmodels < 400) {
                     snprintf(models[nmodels++], sizeof models[0], "%s", name);
                     snprintf(path, sizeof path, "Doodads/Terrain/%s", name);
                     t_write(overlay, path, mdx.b, mdx.n);
@@ -3104,9 +3148,15 @@ static void wc3_cliff_tests(const char *dir, const char *build)
         if (cl) {
             Wc3CliffCounts cc;
             wc3_cliffs_counts(cl, &cc);
-            snprintf(line, sizeof line, "its %d cliff cells (%d placed, %d naming no cliff tileset, %d on ramps left for later), as counted here", cc.cells, cc.placed, cc.no_tileset, cc.ramps);
-            check(cc.cells == cells && cc.ramps == ramps && cc.no_tileset == none && cc.placed == cells - none && cells > 0, line);
-            snprintf(line, sizeof line, "its %d cliff models, every one found in variation 0 (%d); %d cliffs asked for a later variation take 0", cc.models, cc.found, cc.fallback);
+            snprintf(line, sizeof line, "its %d cliff cells (%d placed, %d naming no cliff tileset) and %d ramp cells (%d placed, %d naming none), as counted here",
+                     cc.cells, cc.placed, cc.no_tileset, cc.ramps, cc.ramps_placed, cc.ramps_no_tileset);
+            check(cc.cells == cells && cc.ramps == ramps && cc.no_tileset == none && cc.placed == cells - none && cc.ramps_no_tileset == ramps_none && cc.ramps_placed == ramps - ramps_none && cells > 0, line);
+            W3eStats st;
+            w3e_stats(g, &st);
+            snprintf(line, sizeof line, "its blight named by the editor's data for main tileset %c: tileset %d (%s), for its %d blighted points", g->tileset_code, wc3_ground_blight(w),
+                     wc3_ground_blight(w) >= 0 ? wc3_ground_tileset(w, wc3_ground_blight(w))->path : "none", st.blight);
+            check(wc3_ground_blight(w) == nset && !strcmp(wc3_ground_tileset(w, nset)->path, "TerrainArt\\Blight\\Made_Blight.blp"), line);
+            snprintf(line, sizeof line, "its %d cliff and ramp models, every one found in variation 0 (%d); %d asked for a later variation take 0", cc.models, cc.found, cc.fallback);
             check(cc.models == nmodels && cc.found == nmodels && cc.fallback == asked, line);
             /* every tile, prepared as 033 does: its cliffs among its doodads */
             GroundPlace gp;
@@ -3119,7 +3169,7 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             W3ePrep *prep = NULL;
             w3e_prep(g, ext, nset, &prep, &why);
             TPaintCheck chk = { 0 };
-            int tiles = 0, placed = 0, twice = 0, wrong_name = 0, wrong_cell = 0, own_kept = 1;
+            int tiles = 0, placed = 0, n_ramps = 0, twice = 0, wrong_name = 0, wrong_cell = 0, own_kept = 1;
             double below = 0, above = 0;
             char sample[260] = "";
             for (int a1 = 0; !e && a1 < 64; ++a1)
@@ -3152,8 +3202,10 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                         if (fabs(wc3_x - (g->offset_x + (i + 1) * 128.0)) > 0.05 || fabs(wc3_y - (g->offset_y + j * 128.0)) > 0.05) ++wrong_cell;
                         int type, base, var;
                         char l[5], want[200];
-                        t_cliff_expect(g, ntypes, i, j, &type, l, &base, &var);
-                        snprintf(want, sizeof want, "Doodads\\Terrain\\%s\\%s%s0.mdx" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff%d.blp", DIRS[type % 2], DIRS[type % 2], l, type);
+                        int kind = t_cliff_expect(g, ntypes, i, j, &type, l, &base, &var);
+                        const char *dirn = kind == 2 ? RDIRS[type % 2] : DIRS[type % 2];
+                        n_ramps += kind == 2;
+                        snprintf(want, sizeof want, "Doodads\\Terrain\\%s\\%s%s0.mdx" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff%d.blp", dirn, dirn, l, type);
                         if (strcmp(t->models[p->name], want)) ++wrong_name;
                         else if (!sample[0]) snprintf(sample, sizeof sample, "%s", want);
                         /* its height against the converted ground's corners of that cell */
@@ -3184,15 +3236,15 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                     t_paint_check(w, prep, gpr->adt, gpr->chunk_tex, gpr->blend, 4, painted, tex_set, NULL, &chk);
                     ground_prep_free(gpr, 0);
                 }
-            snprintf(line, sizeof line, "over its %d tiles every cliff placed once (%d of %d; %d twice), on the tile its cell is on, its origin one cell east of its cell's south-west corner (%d off)",
-                     tiles, placed, cc.placed, twice, wrong_cell);
-            check(!e && placed == cc.placed && twice == 0 && wrong_cell == 0 && own_kept, e ? why.text : line);
+            snprintf(line, sizeof line, "over its %d tiles every cliff and ramp placed once (%d of %d, %d of them ramps; %d twice), on the tile its cell is on, its origin one cell east of its cell's south-west corner (%d off)",
+                     tiles, placed, cc.placed + cc.ramps_placed, n_ramps, twice, wrong_cell);
+            check(!e && placed == cc.placed + cc.ramps_placed && n_ramps == cc.ramps_placed && twice == 0 && wrong_cell == 0 && own_kept, e ? why.text : line);
             snprintf(line, sizeof line, "each cliff's model by its corners' letters, its tileset's folder and its cliff picture (%d wrong; e.g. %s)", wrong_name, sample);
             check(wrong_name == 0 && sample[0], line);
             snprintf(line, sizeof line, "each cliff's foot on its own level: less than a level (%.2f yards) below its cell's lowest converted corner (at most %.2f: unbent, at its corners' mean height), never above its highest (%.2f)",
                      128 * m.wc3_scale, below, above);
             check(below < 128 * m.wc3_scale && above < 0.01, line);
-            snprintf(line, sizeof line, "the ground with its cliff cells on their cliffs' ground: %ld of %ld points as laid in chunks of four tilesets or fewer, %.1f%% of all",
+            snprintf(line, sizeof line, "the ground with its cliff cells on their cliffs' ground, its ramps on their own and its blight on its blighted corners: %ld of %ld points as laid in chunks of four tilesets or fewer, %.1f%% of all",
                      chk.exact_same, chk.exact_points, chk.points ? 100.0 * chk.same / chk.points : 0.0);
             check(chk.exact_points > 0 && chk.exact_same == chk.exact_points, line);
             /* one placed name through the drawer's reader: the loose model, its cliff picture */

@@ -686,11 +686,13 @@ int main(int argc, char **argv)
             if (cliffs) {
                 Wc3CliffCounts cc;
                 wc3_cliffs_counts(cliffs, &cc);
-                printf("test map: %d cliffs stand as WC3's own cliff models (%d models, %d of them found, the box for the rest)", cc.placed, cc.models, cc.found);
-                if (cc.no_tileset) printf("; %d cliff cells name no cliff tileset and keep their ground", cc.no_tileset);
-                if (cc.ramps) printf("; %d cells on ramps have no model yet", cc.ramps);
+                printf("test map: %d cliffs and %d ramps stand as WC3's own models (%d models, %d of them found, the box for the rest)", cc.placed, cc.ramps_placed, cc.models, cc.found);
+                if (cc.no_tileset + cc.ramps_no_tileset) printf("; %d cells name no cliff tileset and keep their ground", cc.no_tileset + cc.ramps_no_tileset);
                 printf("\n");
             } else printf("test map: no TerrainArt\\CliffTypes.slk in any place, so its cliffs keep their ground (no cliff models)\n");
+            if (wc3_ground_blight(app->wc3_ground) >= 0)
+                printf("test map: its blight laid with %s\n", wc3_ground_tileset(app->wc3_ground, wc3_ground_blight(app->wc3_ground))->path);
+            else printf("test map: no blight picture named (UI\\WorldEditData.txt), so blighted cells keep their ground\n");
         } else if (w == W_ERR_NOT_FOUND) printf("test map: its ground keeps the converter's pictures: %s\n", why.text);
         else return start_failed(app, 1, "%s", why.text);
     }
