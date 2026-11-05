@@ -29,8 +29,10 @@
  * archives alone; a test map's folder comes first through it, 1109), the
  * map's folder in them and its blend-map form (from its WDT), the
  * server's heights (for the light), and the drawing origin points are
- * placed relative to. The map's ground files (WDT, ADTs) are read
- * through the resolver; the ground's pictures from the archives. */
+ * placed relative to. The map's ground files (WDT, ADTs) and its
+ * pictures are read through the resolver (pictures since 1109's step 1c:
+ * a picture no place has stands in as the magenta checker, said); with
+ * no resolver, the archives alone. */
 typedef struct {
     MpqChain *chain;
     Resolver *assets;
@@ -94,8 +96,11 @@ WErr  ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void
 void ground_prep_free(GroundPrep *g, int keep_adt);
 
 /* Unpacks one ground picture by archive name into `px`, with its smaller
- * copies. W_OK, or a code with `why`. */
-WErr  ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, WWhy *why);
+ * copies, from the place's resolver (asset_get: the checker for one no
+ * place has) or, with none, its archives. W_OK, or a code with `why`
+ * (W_ERR_NOT_FOUND: the archives lack it, or strict mode refused the
+ * checker). */
+WErr  ground_prep_pixels(const GroundPlace *p, const char *name, GroundPixels *px, WWhy *why);
 
 /* Makes a square picture's smaller copies (into px->smaller): each pixel
  * the average of the four beneath it, as the card itself would make them.

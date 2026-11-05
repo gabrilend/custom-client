@@ -19,6 +19,8 @@
 #include "040-water.h"
 #include "037-sky.h"
 #include "021-wmo.h"
+#include "060-resolver.h"
+#include "076-placed-models.h"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -122,6 +124,8 @@ typedef struct {
      * its own way, so each copy drawn is posed alone, into its own row of
      * the bone picture (173u) */
     int     billboard;
+    int     wire;                     /* the placeholder box stood in (076-placed-models.h): drawn as a wire-frame */
+    int     wc3;                      /* a WC3 model a converted map brought (061-mdx.h), in its rest pose */
     float (*poses)[16];
     Texture2D bones;  int bone_rows;  float *bone_data;   /* the bone picture (rows of nbones * 4 float texels) and its copy here */
     /* particles (173o): the model's emitters, each one's picture, and one
@@ -143,7 +147,7 @@ typedef struct {
 /* buildings: the model entry holding its pieces, and its root (for the
  * furnishings, placed when the building is) */
 typedef struct { WmoPool pool; int kind; } BuildingPool;   /* a part's pool and its LiquidType id (173r) */
-typedef struct { int model; WmoRoot root; BuildingPool *pools; int npools; } Building;
+typedef struct { int model; WmoRoot root; BuildingPool *pools; int npools; int stand_in; } Building;   /* stand_in: the box, for a building no place has */
 /* placements by tile (173s): see "placements by tile" below */
 typedef struct { uint32_t uid; int building, which, set; Matrix at; } Placement;
 typedef struct { int tile; Placement *p; int n; } TileRecord;
@@ -153,6 +157,10 @@ typedef struct { uint32_t uid; int building, tile; } Seen;
  * read, their copies, the placements by tile, and the shader */
 struct Doodads {
     MpqChain     *chain;
+    Resolver     *assets;             /* models, buildings and pictures through it (NULL: the archives alone; a test map's folder first, 1109) */
+    double        wc3_yards;          /* yards per WC3 unit, for a converted map's own WC3 models (doodads_wc3_scale) */
+    int           wire_picture;       /* the wire-frame's colour among pictures[], -1 until made */
+    int           stand_ins, wc3_models;   /* models the box stood in for; WC3 models read (doodads_sources) */
     Textures     *textures;           /* how pictures go to the card (036-texture.h) */
     CollideWorld *solids;             /* where placed copies' solid shapes go */
     LiquidWorld  *liquids;            /* where placed buildings' pools go (for the mover) */
@@ -211,9 +219,12 @@ void doodads_free(Doodads *dd)
 }
 /* }}} */
 
-Doodads *doodads_new(MpqChain *c, Textures *textures, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
+Doodads *doodads_new(MpqChain *c, Resolver *assets, Textures *textures, CollideWorld *collide, LiquidWorld *liquid_world, Water *water, WWhy *why)
 {
     Doodads *dd = calloc(1, sizeof *dd);
+    dd->assets = assets;
+    dd->wc3_yards = 1.0 / 30.72;
+    dd->wire_picture = -1;
     dd->textures = textures;
     dd->skybox = -1;
     dd->view_right = (Vector3){ 1, 0, 0 };
@@ -246,18 +257,18 @@ Doodads *doodads_new(MpqChain *c, Textures *textures, CollideWorld *collide, Liq
 }
 /* }}} */
 
-/* {{{ static picture: a picture by archive name, loaded once; -1 if unreadable */
+/* {{{ static picture: a picture by archive name, loaded once; -1 if unreadable
+ * Through the resolver when there is one (the checker stands in for a
+ * picture no place has, said there: 105a, 204), else the archives. */
 static int picture(Doodads *dd, const char *name)
 {
     for (int i = 0; i < dd->npictures; ++i) if (!strcasecmp(dd->pictures[i].name, name)) return i;
-    size_t len;
-    const char *from;
-    unsigned char *s = mpq_chain_read(dd->chain, name, &len, &from);
-    if (!s) { fprintf(stderr, "doodads: the picture %s is in none of the client's archives; pieces using it are left out\n", name); return -1; }
+    AssetAnswer a;
     WWhy why;
+    if (asset_get(dd->assets, dd->chain, name, ASSET_TEXTURE, &a, &why)) { fprintf(stderr, "doodads: %s; pieces using it are left out\n", why.text); return -1; }
     Texture2D t;
-    int bad = texture_from_blp(dd->textures, s, len, &t, &why);   /* sent compressed when stored so (173u) */
-    free(s);
+    int bad = texture_from_blp(dd->textures, a.data, a.len, &t, &why);   /* sent compressed when stored so (173u) */
+    asset_answer_free(&a);
     if (bad) { fprintf(stderr, "doodads: the picture %s: %s; pieces using it are left out\n", name, why.text); return -1; }
     if (dd->npictures == dd->pictures_cap) {
         dd->pictures_cap = dd->pictures_cap ? dd->pictures_cap * 2 : 256;
@@ -269,56 +280,59 @@ static int picture(Doodads *dd, const char *name)
 }
 /* }}} */
 
-/* {{{ static load_model: a model by its MMDX name, loaded once
- * The ground files name models with .mdx or .m2; the file in the archives
- * is always .m2, with its first view in <name>00.skin. A model that can't
- * be read is kept with no pieces (so it is reported once, not per copy). */
-static int load_model(Doodads *dd, const char *name)
+/* {{{ static wire_picture: the wire-frame's one colour (magenta, as the
+ * resolver's checker), made once: what a stand-in box is drawn with */
+static int wire_picture(Doodads *dd)
 {
-    for (int i = 0; i < dd->nmodels; ++i) if (!strcasecmp(dd->models[i].name, name)) return i;
-    if (dd->nmodels == dd->models_cap) {
-        dd->models_cap = dd->models_cap ? dd->models_cap * 2 : 256;
-        dd->models = realloc(dd->models, sizeof *dd->models * dd->models_cap);
+    if (dd->wire_picture >= 0) return dd->wire_picture;
+    Image im = GenImageColor(1, 1, (Color){ 255, 0, 255, 255 });
+    Texture2D t = LoadTextureFromImage(im);
+    UnloadImage(im);
+    if (dd->npictures == dd->pictures_cap) {
+        dd->pictures_cap = dd->pictures_cap ? dd->pictures_cap * 2 : 256;
+        dd->pictures = realloc(dd->pictures, sizeof *dd->pictures * dd->pictures_cap);
     }
-    DoodadModel *md = &dd->models[dd->nmodels];
-    memset(md, 0, sizeof *md);
-    snprintf(md->name, sizeof md->name, "%s", name);
+    snprintf(dd->pictures[dd->npictures].name, sizeof dd->pictures[dd->npictures].name, "%s", "(the wire-frame's colour)");
+    dd->pictures[dd->npictures].tex = t;
+    return dd->wire_picture = dd->npictures++;
+}
+/* }}} */
 
-    char base[260], path[280];
-    snprintf(base, sizeof base, "%s", name);
-    char *dot = strrchr(base, '.');
-    if (dot) *dot = '\0';
-    size_t mlen, slen;
-    const char *from;
-    snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(dd->chain, path, &mlen, &from);
-    snprintf(path, sizeof path, "%s00.skin", base);
-    unsigned char *skin = mpq_chain_read(dd->chain, path, &slen, &from);
-    M2Model mod;
+/* {{{ static model_from: a model's entry filled from its read files
+ * (076-placed-models.h): its skeleton, particles and solid shape when it
+ * is the game's (an M2 with its bytes), its pieces with their pictures.
+ * A WC3 model stands still, in its rest pose (402 step 4), has no
+ * particles (403) and is walked through (its own collision shapes,
+ * CLID, aren't seated yet); a unit hidden at rest (alpha 0: a death or
+ * alternate part) isn't drawn, nor one whose picture WC3 chooses at run
+ * time (team colour, 404: counted as skipped). The placeholder box is
+ * drawn as a wire-frame in the wire-frame's colour (105a). */
+static void model_from(Doodads *dd, DoodadModel *md, const PlacedModel *pm)
+{
+    const char *name = md->name;
+    const M2Model *mod = placed_model_drawn(pm);
+    const char *base = pm->base;
+    char path[300];
     WWhy why;
-    if (!m2 || !skin) {
-        fprintf(stderr, "doodads: %s: %s is in none of the client's archives; left out\n", name, !m2 ? "the .m2" : "its 00.skin");
-        free(m2); free(skin);
-        return dd->nmodels++;
-    }
-    int bad = m2_read(m2, mlen, skin, slen, &mod, &why);
-    free(skin);
-    if (bad) { free(m2); fprintf(stderr, "doodads: %s: %s; left out\n", name, why.text); return dd->nmodels++; }
+    md->wire = pm->source == ASSET_FROM_PLACEHOLDER;
+    md->wc3 = pm->wc3;
+    if (md->wire) ++dd->stand_ins;
+    if (md->wc3) ++dd->wc3_models;
 
     /* does it move while standing? (its stand animation, id 0, moving
      * any bone) If so it keeps its skeleton and is bent every frame. */
     Anim *an = calloc(1, sizeof *an);
     int moving = 0;
-    if (!anim_read(m2, mlen, an, &why)) {
+    if (pm->m2_bytes && !anim_read(pm->m2_bytes, pm->m2_len, an, &why)) {
         md->stand = anim_find(an, 0, 0);
         if (md->stand >= 0 && anim_needs_file(an, md->stand)) {
             snprintf(path, sizeof path, "%s%04d-%02d.anim", base, an->seqs[md->stand].id, an->seqs[md->stand].variation);
-            size_t alen;
-            unsigned char *af = mpq_chain_read(dd->chain, path, &alen, &from);
-            if (af) anim_attach_file(an, md->stand, af, alen);
-            else fprintf(stderr, "doodads: %s is in none of the archives; %s stands still\n", path, name);
+            AssetAnswer af;
+            WWhy inner;
+            if (!asset_read(dd->assets, dd->chain, path, ASSET_ANIMATION, &af, &inner)) anim_attach_file(an, md->stand, af.data, af.len);   /* taken by the skeleton */
+            else fprintf(stderr, "doodads: %s; %s stands still\n", inner.text, name);
         }
-        moving = md->stand >= 0 && an->npoints == mod.nvertices && anim_moves(an, md->stand);
+        moving = md->stand >= 0 && an->npoints == mod->nvertices && anim_moves(an, md->stand);
         /* its particle emitters, each with its picture (the model's own
          * picture slot, named in the file) */
         if (particles_read(an, &md->emitters, &md->nemitters, &why))
@@ -327,29 +341,28 @@ static int load_model(Doodads *dd, const char *name)
             md->emit_pic = malloc(sizeof(int) * md->nemitters);
             for (int i = 0; i < md->nemitters; ++i) {
                 int slot = md->emitters[i].slot;
-                md->emit_pic[i] = (slot < (int)mod.ntextures && mod.textures[slot].kind == 0 && mod.textures[slot].file[0])
-                                  ? picture(dd, mod.textures[slot].file) : -1;
+                md->emit_pic[i] = (slot < (int)mod->ntextures && mod->textures[slot].kind == 0 && mod->textures[slot].file[0])
+                                  ? picture(dd, mod->textures[slot].file) : -1;
                 if (md->emit_pic[i] < 0) fprintf(stderr, "doodads: %s's emitter %d has no picture it can use; it shows none\n", name, i);
             }
             ++dd->emitting_models;
         }
-    } else {
+    } else if (pm->m2_bytes) {
         fprintf(stderr, "doodads: %s's skeleton: %s; it stands still\n", name, why.text);
     }
-    if (m2_collision(m2, mlen, &md->solid, &md->nsolid, &why))
+    if (pm->m2_bytes && m2_collision(pm->m2_bytes, pm->m2_len, &md->solid, &md->nsolid, &why))
         fprintf(stderr, "doodads: %s's solid shape: %s; it is walked through\n", name, why.text);
-    free(m2);
     md->moving = moving;
-    for (uint32_t i = 0; i < mod.nvertices; ++i) {
-        float r = sqrtf(mod.vertices[i].x * mod.vertices[i].x + mod.vertices[i].y * mod.vertices[i].y + mod.vertices[i].z * mod.vertices[i].z);
+    for (uint32_t i = 0; i < mod->nvertices; ++i) {
+        float r = sqrtf(mod->vertices[i].x * mod->vertices[i].x + mod->vertices[i].y * mod->vertices[i].y + mod->vertices[i].z * mod->vertices[i].z);
         if (r > md->radius) md->radius = r;
     }
-    md->billboard = an->npoints == mod.nvertices && anim_has_billboards(an);   /* an is all zero when its skeleton failed to read */
+    md->billboard = an->npoints == mod->nvertices && anim_has_billboards(an);   /* an is all zero when its skeleton failed to read, or for a WC3 model */
     /* pieces whose pictures move, or whose tint is animated, read their
      * tracks from the skeleton's file too */
-    for (uint32_t u = 0; u < mod.nunits; ++u)
-        if (mod.units[u].uvanim[0] >= 0 || mod.units[u].uvanim[1] >= 0 || mod.units[u].colour >= 0 || mod.units[u].fade >= 0) md->needs_anim = 1;
-    if (an->m2 == NULL) md->needs_anim = 0;               /* its skeleton failed to read: nothing moves */
+    for (uint32_t u = 0; u < mod->nunits; ++u)
+        if (mod->units[u].uvanim[0] >= 0 || mod->units[u].uvanim[1] >= 0 || mod->units[u].colour >= 0 || mod->units[u].fade >= 0) md->needs_anim = 1;
+    if (an->m2 == NULL) md->needs_anim = 0;               /* its skeleton failed to read, or it has none here: nothing moves */
     if (moving || md->nemitters || md->billboard || md->needs_anim) {
         md->anim = an;
         md->poses = malloc(sizeof *md->poses * (an->nbones ? an->nbones : 1));
@@ -360,18 +373,26 @@ static int load_model(Doodads *dd, const char *name)
         free(an);
     }
 
-    md->pieces = calloc(mod.nunits ? mod.nunits : 1, sizeof *md->pieces);
-    for (uint32_t u = 0; u < mod.nunits; ++u) {
-        M2Unit un = mod.units[u];
-        if (un.piece >= mod.npieces || un.texture >= mod.ntextures) continue;
-        if (mod.textures[un.texture].kind != 0) { ++dd->skipped_pieces; continue; }   /* picture chosen at run time */
-        int pic = picture(dd, mod.textures[un.texture].file);
-        int layers = un.layers > 1 && un.tex[1] >= 0 && mod.textures[un.tex[1]].kind == 0 && mod.textures[un.tex[1]].file[0] ? 2 : 1;
-        int pic2 = layers > 1 ? picture(dd, mod.textures[un.tex[1]].file) : -1;
-        if (layers > 1 && pic2 < 0) layers = 1;
+    md->pieces = calloc(mod->nunits ? mod->nunits : 1, sizeof *md->pieces);
+    for (uint32_t u = 0; u < mod->nunits; ++u) {
+        M2Unit un = mod->units[u];
+        if (un.piece >= mod->npieces) continue;
+        int pic, pic2 = -1, layers = 1;
+        if (md->wire) {
+            pic = wire_picture(dd);                      /* the box has no pictures: its lines in one colour */
+            un.blend = 0; un.flags = 0x1;                /* opaque, unlit */
+        } else {
+            if (un.texture >= mod->ntextures) continue;
+            if (un.alpha <= 0) continue;                 /* hidden at rest (a WC3 death or alternate part) */
+            if (mod->textures[un.texture].kind != 0) { ++dd->skipped_pieces; continue; }   /* picture chosen at run time */
+            pic = picture(dd, mod->textures[un.texture].file);
+            layers = un.layers > 1 && un.tex[1] >= 0 && (uint32_t)un.tex[1] < mod->ntextures && mod->textures[un.tex[1]].kind == 0 && mod->textures[un.tex[1]].file[0] ? 2 : 1;
+            pic2 = layers > 1 ? picture(dd, mod->textures[un.tex[1]].file) : -1;
+            if (layers > 1 && pic2 < 0) layers = 1;
+        }
         if (pic < 0) continue;
-        M2Piece p = mod.pieces[un.piece];
-        if (p.first + p.count > mod.nindices || p.count == 0) continue;
+        M2Piece p = mod->pieces[un.piece];
+        if (p.first + p.count > mod->nindices || p.count == 0) continue;
         Mesh m = { 0 };
         m.vertexCount = (int)p.count;
         m.triangleCount = (int)p.count / 3;
@@ -381,9 +402,9 @@ static int load_model(Doodads *dd, const char *name)
         m.texcoords2 = MemAlloc(sizeof(float) * 2 * p.count);
         int ok = 1;
         for (uint32_t i = 0; i < p.count; ++i) {
-            uint32_t k = mod.indices[p.first + i];
-            if (k >= mod.nvertices) { ok = 0; break; }
-            M2Vertex v = mod.vertices[k];
+            uint32_t k = mod->indices[p.first + i];
+            if (k >= mod->nvertices) { ok = 0; break; }
+            M2Vertex v = mod->vertices[k];
             m.vertices[i * 3] = v.x; m.vertices[i * 3 + 1] = v.y; m.vertices[i * 3 + 2] = v.z;
             m.normals[i * 3] = v.nx; m.normals[i * 3 + 1] = v.ny; m.normals[i * 3 + 2] = v.nz;
             m.texcoords[i * 2] = v.u; m.texcoords[i * 2 + 1] = v.v;
@@ -395,7 +416,7 @@ static int load_model(Doodads *dd, const char *name)
             m.colors = MemAlloc(4 * p.count);
             m.tangents = MemAlloc(sizeof(float) * 4 * p.count);
             for (uint32_t i = 0; i < p.count; ++i) {
-                uint32_t k = mod.indices[p.first + i];
+                uint32_t k = mod->indices[p.first + i];
                 for (int j = 0; j < 4; ++j) {
                     m.colors[i * 4 + j] = md->anim->bone_of[k][j];
                     m.tangents[i * 4 + j] = md->anim->weights[k][j] / 255.0f;
@@ -407,16 +428,55 @@ static int load_model(Doodads *dd, const char *name)
                                                    { un.uvset[0] == 1, un.uvset[1] == 1 }, { un.uvanim[0], layers > 1 ? un.uvanim[1] : -1 },
                                                    un.colour, un.fade };
     }
-    m2_free(&mod);
+}
+/* }}} */
+
+/* {{{ static new_model: a fresh model entry named `name` (the drawer's
+ * list grown when full); its index */
+static int new_model(Doodads *dd, const char *name)
+{
+    if (dd->nmodels == dd->models_cap) {
+        dd->models_cap = dd->models_cap ? dd->models_cap * 2 : 256;
+        dd->models = realloc(dd->models, sizeof *dd->models * dd->models_cap);
+    }
+    DoodadModel *md = &dd->models[dd->nmodels];
+    memset(md, 0, sizeof *md);
+    snprintf(md->name, sizeof md->name, "%s", name);
     return dd->nmodels++;
+}
+/* }}} */
+
+/* {{{ static load_model: a model by its MMDX name, loaded once
+ * Its files come through 076-placed-models.h: a WC3 model a converted
+ * map brought, or the game's .m2 with its first view in <name>00.skin,
+ * from the first place that has them (the resolver; the archives alone
+ * without one), the box standing in for one no place has. A model that
+ * can't be read is kept with no pieces (so it is reported once, not per
+ * copy). */
+static int load_model(Doodads *dd, const char *name)
+{
+    for (int i = 0; i < dd->nmodels; ++i) if (!strcasecmp(dd->models[i].name, name)) return i;
+    int at = new_model(dd, name);
+    PlacedModel pm;
+    WWhy why;
+    if (placed_model_read(dd->assets, dd->chain, name, dd->wc3_yards, &pm, &why)) {
+        fprintf(stderr, "doodads: %s; left out\n", why.text);
+        return at;
+    }
+    model_from(dd, &dd->models[at], &pm);
+    placed_model_free(&pm);
+    return at;
 }
 /* }}} */
 
 /* {{{ static load_building: a building by name, loaded once
  * Its pieces are every group's batches, kept as one model entry so its
- * copies draw like any doodad's. A group or picture that can't be read is
- * reported and left out; a root that can't be read leaves the building
- * out (reported once). */
+ * copies draw like any doodad's. Its files come through
+ * 076-placed-models.h (the resolver, else the archives). A group or
+ * picture that can't be read is reported and left out; a root that can't
+ * be read leaves the building out (reported once), except a root no place
+ * has when there is a resolver: the placeholder box stands in, drawn as a
+ * wire-frame and sized to the building's box (doodads_add_tile). */
 static int load_building(Doodads *dd, const char *name)
 {
     for (int i = 0; i < dd->nbuildings; ++i) if (!strcasecmp(dd->models[dd->buildings[i].model].name, name)) return i;
@@ -435,15 +495,19 @@ static int load_building(Doodads *dd, const char *name)
     memset(md, 0, sizeof *md);
     snprintf(md->name, sizeof md->name, "%s", name);
 
-    size_t len;
-    const char *from;
     char path[300];
     WWhy why;
-    unsigned char *s = mpq_chain_read(dd->chain, name, &len, &from);
-    if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; left out\n", name); return dd->nbuildings++; }
-    int bad = wmo_read_root(s, len, &b->root, &why);
-    free(s);
-    if (bad) { fprintf(stderr, "buildings: %s: %s; left out\n", name, why.text); return dd->nbuildings++; }
+    WErr bad = placed_building_root(dd->assets, dd->chain, name, &b->root, NULL, &why);
+    if (bad == W_ERR_NOT_FOUND && dd->assets) {
+        PlacedModel pm;
+        WWhy inner;
+        if (placed_model_stand_in(dd->assets, name, &pm, &inner)) { fprintf(stderr, "buildings: %s; left out\n", inner.text); return dd->nbuildings++; }
+        model_from(dd, md, &pm);
+        placed_model_free(&pm);
+        b->stand_in = 1;
+        return dd->nbuildings++;
+    }
+    if (bad) { fprintf(stderr, "buildings: %s; left out\n", why.text); return dd->nbuildings++; }
 
     char base[260];
     snprintf(base, sizeof base, "%s", name);
@@ -451,12 +515,8 @@ static int load_building(Doodads *dd, const char *name)
     if (dot) *dot = '\0';
     for (int gi = 0; gi < b->root.ngroups; ++gi) {
         snprintf(path, sizeof path, "%s_%03d.wmo", base, gi);
-        s = mpq_chain_read(dd->chain, path, &len, &from);
-        if (!s) { fprintf(stderr, "buildings: %s is in none of the client's archives; that part is left out\n", path); continue; }
         WmoGroup g;
-        bad = wmo_read_group(s, len, &g, &why);
-        free(s);
-        if (bad) { fprintf(stderr, "buildings: %s: %s; that part is left out\n", path, why.text); continue; }
+        if (placed_building_group(dd->assets, dd->chain, name, gi, &g, &why)) { fprintf(stderr, "buildings: %s; that part is left out\n", why.text); continue; }
         /* how far it reaches from its middle (for the sight test, 173u) */
         for (uint32_t v = 0; v < g.nvertices; ++v) {
             float r = sqrtf(g.vertices[v].x * g.vertices[v].x + g.vertices[v].y * g.vertices[v].y + g.vertices[v].z * g.vertices[v].z);
@@ -632,6 +692,13 @@ WErr doodads_add_tile(Doodads *dd, const AdtTile *t, int tile, double ox, double
         float m[16];
         adt_place_matrix(p, ox, oy, m);
         int bi = load_building(dd, t->buildings[p->name]);
+        if (dd->buildings[bi].stand_in) {
+            /* the box stood in: as wide and as tall as the building's box
+             * (MODF's extents, in the placement's axes: 0 and 2 across, 1 up),
+             * a yard at least, so its place shows */
+            float across = fmaxf(fmaxf(p->hi[0] - p->lo[0], p->hi[2] - p->lo[2]), 1.0f), up = fmaxf(p->hi[1] - p->lo[1], 1.0f);
+            for (int k = 0; k < 3; ++k) { m[k] *= across; m[4 + k] *= across; m[8 + k] *= up; }
+        }
         r->p[r->n++] = (Placement){ p->uid, 1, bi, p->doodad_set, { m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15] } };
     }
     realise(dd, r);
@@ -725,6 +792,7 @@ static void draw_pass(Doodads *dd, int see_through)
         DoodadModel *md = &dd->models[i];
         if (!md->nvis) continue;                          /* none in sight (or none placed) */
         use_bones(dd, md);
+        if (md->wire) rlEnableWireMode();                 /* a stand-in box: its edges only (105a) */
         for (int k = 0; k < md->npieces; ++k) {
             DoodadPiece *p = &md->pieces[k];
             if ((p->blend >= 2) != see_through) continue;
@@ -754,6 +822,7 @@ static void draw_pass(Doodads *dd, int see_through)
             ++dd->doodad_orders;
             if (see_through) EndBlendMode();
         }
+        if (md->wire) rlDisableWireMode();
     }
 }
 /* the particles: squares facing the camera (its right and up), each from
@@ -995,6 +1064,11 @@ void doodads_draw_skybox(Doodads *dd, Vector3 eye)
     rlEnableDepthMask();
     rlEnableDepthTest();
 }
+/* }}} */
+
+/* {{{ doodads_wc3_scale, doodads_sources */
+void doodads_wc3_scale(Doodads *dd, double yards_per_unit) { if (yards_per_unit > 0) dd->wc3_yards = yards_per_unit; }
+void doodads_sources(Doodads *dd, int *wc3_models, int *stand_ins) { *wc3_models = dd->wc3_models; *stand_ins = dd->stand_ins; }
 /* }}} */
 
 /* {{{ doodads_counts */

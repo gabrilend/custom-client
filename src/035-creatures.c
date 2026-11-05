@@ -55,7 +55,7 @@ WErr creatures_read(const char *path, SpawnList *out, WWhy *why)
         out->spawns[out->n++] = s;
     }
     fclose(f);
-    qsort(out->spawns, (size_t)out->n, sizeof *out->spawns, by_tile);
+    if (out->n) qsort(out->spawns, (size_t)out->n, sizeof *out->spawns, by_tile);   /* none: a converted map with no units */
     return 0;
 }
 /* }}} */

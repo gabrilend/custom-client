@@ -197,7 +197,7 @@ static int picture(Ground *g, const char *name, GroundPixels *px, WWhy *why)
     if (free_slot < 0) { w_fail(why, W_ERR_FULL, "the ground's %d picture layers are all in use by loaded tiles", LAYERS); return -1; }
     GroundPixels own = { 0 };
     if (!px->rgba) {                                     /* gone from the card since it was prepared */
-        if (ground_prep_pixels(g->place.chain, name, &own, why)) return -1;   /* a layer number function: below 0 a failure, `why` says it */
+        if (ground_prep_pixels(&g->place, name, &own, why)) return -1;   /* a layer number function: below 0 a failure, `why` says it */
         px = &own;
     }
     GroundPixels sized = *px;                            /* the picture as sent: 256 x 256, with its smaller copies */

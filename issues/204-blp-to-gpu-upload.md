@@ -9,7 +9,14 @@ as stored, with their own smaller copies; others are unpacked and sent;
 every picture filtered as Texture Filtering says (bilinear, trilinear,
 anisotropic 2x to 16x, held to the card's most). Model pictures round
 Astranaar: about 11 MB on the card instead of 72 MB unpacked (the
-picture report prints it). Through the resolver once it exists.
+picture report prints it). Through the resolver (105a) since 1109's
+step 1c (2026-11-05) for the ground's pictures (033, 038) and the
+doodads' and buildings' (042), and since step 1b for a creature's own
+WC3 model's (041): in a test-map run each is the first place's copy
+(the map's build folder before the archives), the magenta checker when
+no place has it; with no resolver (every other run) the archives
+alone, as before. 041's pictures for the game's own creatures still
+read the archives.
 
 ## Intended behavior
 

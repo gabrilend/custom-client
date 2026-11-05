@@ -9,6 +9,16 @@
  * A doodad standing on two tiles is listed in both with one unique id,
  * and drawn once.
  *
+ * Models, buildings and their pictures come through the asset resolver
+ * when one is given (issue 1109's step 1c; 076-placed-models.h): a map
+ * converted from Warcraft III places its own WC3 models (061-mdx.h),
+ * found in its folder, drawn standing still in their rest pose and sized
+ * by the map's yards per WC3 unit; a model or building no place has is
+ * the placeholder box, drawn as a magenta wire-frame (a building's as
+ * big as its box); a picture no place has, the magenta checker. With
+ * no resolver (every run but a test map's) the archives alone, as
+ * before: what they lack is reported and left out.
+ *
  * How a placement becomes a position and a turn is adt_place_matrix
  * (020-adt.h), shared with the buildings.
  */
@@ -23,14 +33,26 @@
 #include "026-light.h"
 #include "027-liquid.h"
 #include "015-mpq.h"
+#include "036-texture.h"
+#include "060-resolver.h"
 #include "raylib.h"
 
-/* Readies the drawer; the chain must outlive it. Every copy placed also
+/* Readies the drawer; the chain and the resolver (`assets`, NULL: the
+ * archives alone) must outlive it. Every copy placed also
  * adds its model's solid shape to `collide` (173q; NULL: none), and every
  * building placed its pools to `liquids` and to the water drawer (173r;
  * NULL: none). W_OK, or a code with `why`. */
 typedef struct Doodads Doodads;
-Doodads *doodads_new(MpqChain *chain, Textures *textures, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);
+Doodads *doodads_new(MpqChain *chain, Resolver *assets, Textures *textures, CollideWorld *collide, LiquidWorld *liquids, Water *water, WWhy *why);
+
+/* A converted map's yards per WC3 unit (map.lua's wc3_to_wow.scale,
+ * 073-converted-map.h), for its own WC3 models' points; 1/30.72 until
+ * set. Set it before the first tile is added. */
+void doodads_wc3_scale(Doodads *dd, double yards_per_unit);
+
+/* How many of the models loaded are WC3 models a map brought, and how
+ * many the placeholder box stood in for (for the start-up report). */
+void doodads_sources(Doodads *dd, int *wc3_models, int *stand_ins);
 void      doodads_free(Doodads *dd);
 
 /* Adds a tile's doodads, placed relative to the drawing origin (ox, oy),

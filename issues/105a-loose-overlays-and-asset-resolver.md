@@ -103,10 +103,18 @@ Not built yet:
   wrong), and two calls: `asset_resolve_all` (every place's copy, for a
   table read per row) and `asset_read` (the first copy, never a
   placeholder, through the resolver when one is open, else the
-  archives). Still reading the archives directly (`mpq_chain_read`):
-  pictures (036, 038, 042, and 041's for the game's own models),
-  models (042, and 041's `.m2`), buildings. Each moves when its issue
-  does: [204](./204-blp-to-gpu-upload.md) for pictures first. The main
+  archives). Since 1109's step 1c (2026-11-05) the ground's pictures
+  (033, 038) and the doodads' and buildings' models, pictures and
+  `.anim` files (042, through `src/076-placed-models.c`) ask it too,
+  with two more calls: `asset_get` (the placeholder when there is a
+  resolver, the archives alone when there isn't) and `asset_stand_in`
+  (the placeholder for all of a model's files at once, when one of
+  them is found and another isn't). A box stands in as a magenta
+  wire-frame (step 4's wire-frames, for doodads; a missing building is
+  the box at the size its placement gives). Still reading the archives
+  directly (`mpq_chain_read`): 034's prefetch, 040's water, and 041's
+  pictures and models for the game's own creatures; each is the next
+  slice. The main
   program (043) opens a resolver only in a test-map run (1109's
   decision 4), so an ordinary run's exit status doesn't reflect strict
   mode yet; when it does, it exits with `resolver_exit_status`

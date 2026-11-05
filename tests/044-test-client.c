@@ -47,6 +47,7 @@
 #include "../src/073-converted-map.h"
 #include "../src/074-tables.h"
 #include "../src/075-adt-heights.h"
+#include "../src/076-placed-models.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -1427,10 +1428,13 @@ static void converted_tests(const char *dir, const char *build)
     if (e) return;
     ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
     snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+    char *conv_log = NULL;
+    size_t conv_log_len = 0;
+    place.log = open_memstream(&conv_log, &conv_log_len);   /* the placeholders' warnings (thousands of lines for a big map): counted below */
     Resolver *r = NULL;
     e = resolver_open(&place, &r, &why);
     check(!e, e ? why.text : "the resolver opens the build folder as the test map's overlay (no archives)");
-    if (e) return;
+    if (e) { fclose(place.log); free(conv_log); return; }
     Tables *ts = tables_new(r, NULL);
     TableRow row;
     e = tables_row(ts, "Map", (uint32_t)m.id, &row, &why);
@@ -1485,10 +1489,34 @@ static void converted_tests(const char *dir, const char *build)
             if (fabsf(g - (float)sl.spawns[i].z) > off) off = fabsf(g - (float)sl.spawns[i].z);
         }
         snprintf(line, sizeof line, "its %d creatures (%s) read, %d of them on its ground, the farthest %.2f yards off it", sl.n, m.creatures, on, off);
-        check(!e && sl.n > 0 && on == sl.n && off < 2, e ? why.text : line);
+        if (!e && sl.n == 0) printf("  (its creature list %s is empty: a map with no units; their checks are skipped)\n", m.creatures);
+        else check(!e && sl.n > 0 && on == sl.n && off < 2, e ? why.text : line);
         creatures_free(&sl);
         snprintf(line, sizeof line, "%d of its ground tiles made from its ADTs", adt_heights_made(h));
         check(adt_heights_made(h) >= 1, line);
+        /* its ground's pictures through the resolver (1109 step 1c): the
+         * converter names the game's own ground pictures, which a build
+         * folder doesn't hold, so with no archives each is the checker */
+        int ga = -1, gb = -1;
+        for (int a1 = 0; a1 < 64 && ga < 0; ++a1)
+            for (int b1 = 0; b1 < 64 && ga < 0; ++b1) {
+                AssetAnswer a;
+                snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, a1, b1);
+                if (!asset_read(r, NULL, path, ASSET_GROUND, &a, &why)) { ga = a1; gb = b1; asset_answer_free(&a); }
+            }
+        GroundPlace gp;
+        GroundPrep *gpr = NULL;
+        e = ground_place_init(&gp, NULL, r, m.directory, w, 0, 0, &why);
+        if (!e) e = ground_prep_tile(&gp, gb, ga, NULL, NULL, &gpr, &why);       /* its file is <dir>_<a>_<b>: the tile (b, a) (033) */
+        int need = 0, checkers = 0;
+        for (int k = 0; !e && k < gpr->adt->ntextures; ++k) {
+            if (!gpr->needed[k]) continue;
+            ++need;
+            if (gpr->pixels[k].rgba && gpr->pixels[k].width == 8 && gpr->pixels[k].rgba[0] == 255 && gpr->pixels[k].rgba[1] == 0) ++checkers;
+        }
+        snprintf(line, sizeof line, "its ground tile %d_%d prepared with no archives: the %d ground pictures it names each stand in as the checker (%d)", ga, gb, need, checkers);
+        check(!e && need > 0 && checkers == need, e ? why.text : line);
+        if (gpr) ground_prep_free(gpr, 0);
         maps_world_free(w);
         free(w);
         adt_heights_free(h);
@@ -1496,12 +1524,12 @@ static void converted_tests(const char *dir, const char *build)
 
     /* its own WC3 model: the creature looks that name an .mdx it brought */
     AssetAnswer info;
-    int named = 0, read = 0, kept = 0;
+    int named = 0, read = 0, kept = 0, looks = 0;
     char first[300] = "";
     if (!asset_read(r, NULL, "DBFilesClient\\CreatureDisplayInfo.dbc", ASSET_TABLE, &info, &why)) {
         Dbc di;
         if (!dbc_open(&di, info.data, info.len, &why))
-            for (uint32_t i = 0; i < di.rows; ++i) {
+            for (uint32_t i = 0; i < di.rows; ++i, ++looks) {
                 uint32_t model = dbc_u32(&di, i, 2);
                 if (tables_row(ts, "CreatureModelData", model, &row, &why)) continue;
                 const char *file = dbc_text(row.dbc, row.row, 3);
@@ -1516,10 +1544,390 @@ static void converted_tests(const char *dir, const char *build)
         asset_answer_free(&info);
     }
     snprintf(line, sizeof line, "%d creature looks name a WC3 model the map brought (first %s); %d read as MDX by 061, %d with something to draw", named, first[0] ? first : "none", read, kept);
-    check(named > 0 && read == named && kept == named, line);
-    tables_free(ts);
-    resolver_free(r);
+    if (looks == 0) printf("  (its CreatureDisplayInfo has no rows: a map with no units; this check is skipped)\n");
+    else check(named > 0 && read == named && kept == named, line);
+    /* {{{ its doodads and buildings (1109 step 1c): every placement the
+     * converter wrote, read back from its ADTs where placements.lua says
+     * it stands, and every model placed found: its own WC3 models (and
+     * their pictures) from its folder, the game's (no archives here) the
+     * box standing in */
+    {
+        LuaData *pd = NULL;
+        snprintf(path, sizeof path, "%s/placements.lua", build);
+        e = lua_data_read(path, (size_t)1 << 28, &pd, &why);
+        check(!e, e ? why.text : "its placements.lua reads with the data reader");
+        const LuaValue *list = e ? NULL : lua_value_field(lua_data_top(pd), "doodads");
+        int nlist = lua_value_listed(list), placed = 0, by_map = 0;
+        double (*where)[3] = calloc((size_t)nlist + 1, sizeof *where);
+        unsigned char *wanted = calloc((size_t)nlist + 1, 1);
+        for (int i = 1; i <= nlist; ++i) {
+            const LuaValue *dv = lua_value_item(list, i), *at = lua_value_field(dv, "world");
+            int uid = (int)lua_value_number(lua_value_field(dv, "uid"));
+            if (lua_value_listed(at) < 3 || uid < 1 || uid > nlist) continue;
+            ++placed;
+            const char *src = lua_value_text(lua_value_field(dv, "source"));
+            if (src && !strcmp(src, "map")) ++by_map;
+            wanted[uid] = 1;
+            for (int k = 0; k < 3; ++k) where[uid][k] = lua_value_number(lua_value_item(at, k + 1));
+        }
+        AssetAnswer wdt;
+        snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m.directory, m.directory);
+        int big = asset_read(r, NULL, path, ASSET_GROUND, &wdt, &why) ? -1 : adt_wdt_big_alpha(wdt.data, wdt.len, &why);
+        if (big >= 0) asset_answer_free(&wdt);
+        unsigned char *seen = calloc((size_t)nlist + 1, 1);
+        int tiles = 0, found = 0, far_off = 0, unknown = 0, nbuild = 0;
+        float worst = 0;
+        char (*names)[260] = NULL;
+        int nnames = 0, cap = 0;
+        AdtTile *t = malloc(sizeof *t);
+        for (int tx = 0; big >= 0 && tx < 64; ++tx)
+            for (int ty = 0; ty < 64; ++ty) {
+                AssetAnswer a;
+                snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, tx, ty);
+                if (asset_read(r, NULL, path, ASSET_GROUND, &a, &why)) continue;
+                WErr bad = adt_read(a.data, a.len, big, t, &why);
+                asset_answer_free(&a);
+                if (bad) { check(0, why.text); continue; }
+                ++tiles;
+                nbuild += t->nplaces;
+                for (int k = 0; k < t->ndoodads; ++k) {
+                    const AdtPlace *p = &t->doodads[k];
+                    if (p->uid < 1 || p->uid > (uint32_t)nlist || !wanted[p->uid]) { ++unknown; continue; }
+                    if (seen[p->uid]) continue;            /* listed by two tiles: one doodad */
+                    seen[p->uid] = 1;
+                    ++found;
+                    float mm[16];
+                    adt_place_matrix(p, 0, 0, mm);
+                    float off = fmaxf(fmaxf(fabsf(mm[12] - (float)where[p->uid][0]), fabsf(mm[13] - (float)where[p->uid][1])), fabsf(mm[14] - (float)where[p->uid][2]));
+                    if (off > worst) worst = off;
+                    if (off > 0.02f) ++far_off;
+                    const char *name = t->models[p->name];
+                    int known = 0;
+                    for (int q = 0; q < nnames && !known; ++q) known = !strcasecmp(names[q], name);
+                    if (known) continue;
+                    if (nnames == cap) { cap = cap ? cap * 2 : 64; names = realloc(names, sizeof *names * (size_t)cap); }
+                    snprintf(names[nnames++], sizeof names[0], "%s", name);
+                }
+                adt_free(t);
+            }
+        free(t);
+        snprintf(line, sizeof line, "its %d ADT tiles place %d different doodads, the %d placements.lua says were placed (%d by the map's own models); %d unknown to it",
+                 tiles, found, placed, by_map, unknown);
+        check(tiles > 0 && found == placed && unknown == 0, line);
+        snprintf(line, sizeof line, "each where placements.lua says (the farthest %.4f yards off; %d past 0.02)", worst, far_off);
+        check(found > 0 && far_off == 0, line);
+        if (nbuild) printf("  (%d building placements: no stock row is a building yet, W02b's decision 2)\n", nbuild);
+
+        /* every model placed, through the resolver as the drawer reads it */
+        int own = 0, own_pieces = 0, boxes = 0, failed = 0, refused = 0, pics = 0, pics_own = 0, pics_box = 0, pics_bad = 0, replaceable = 0, hidden = 0;
+        float lo_h = 1e30f, hi_h = 0;
+        char tall[260] = "";
+        for (int q = 0; q < nnames; ++q) {
+            PlacedModel pm;
+            if (placed_model_read(r, NULL, names[q], m.wc3_scale, &pm, &why)) {
+                /* a WC3 model of its own that 061 refuses (the drawer leaves it out, said) */
+                AssetAnswer a;
+                int wc3 = !asset_read(r, NULL, names[q], ASSET_MODEL, &a, &why) && a.len >= 4 && !memcmp(a.data, "MDLX", 4);
+                if (wc3) asset_answer_free(&a);
+                if (wc3) ++refused;
+                printf("  (%s %s)\n", wc3 ? "its own WC3 model, refused by 061:" : "unreadable:", why.text);
+                ++failed;
+                continue;
+            }
+            const M2Model *d = placed_model_drawn(&pm);
+            if (pm.source == ASSET_FROM_PLACEHOLDER) ++boxes;
+            if (pm.wc3) {
+                ++own;
+                float zlo = 1e30f, zhi = -1e30f;
+                for (uint32_t i = 0; i < d->nvertices; ++i) { if (d->vertices[i].z < zlo) zlo = d->vertices[i].z; if (d->vertices[i].z > zhi) zhi = d->vertices[i].z; }
+                if (d->nvertices && zhi - zlo < lo_h) lo_h = zhi - zlo;
+                if (d->nvertices && zhi - zlo > hi_h) { hi_h = zhi - zlo; snprintf(tall, sizeof tall, "%s", names[q]); }
+                int drawn = 0, left = 0;
+                for (uint32_t u = 0; u < d->nunits; ++u) {
+                    const M2Unit *un = &d->units[u];
+                    if (un->texture >= d->ntextures) { ++left; continue; }
+                    if (un->alpha <= 0) { ++hidden; ++left; continue; }
+                    if (d->textures[un->texture].kind != 0) { ++replaceable; ++left; continue; }
+                    ++drawn;
+                }
+                if (drawn) ++own_pieces;
+                else if (!d->nunits) {
+                    int fx = 0;
+                    for (uint32_t k = 0; k < pm.mdx.nnodes; ++k) fx += pm.mdx.nodes[k].kind == MDX_EMITTER || pm.mdx.nodes[k].kind == MDX_EMITTER2 || pm.mdx.nodes[k].kind == MDX_RIBBON;
+                    printf("  (%s has no geosets to draw: %d particle emitters and ribbons alone, not drawn yet: 403)\n", names[q], fx);
+                }
+                else printf("  (%s: none of its %u pieces drawn at rest: team colour or hidden)\n", names[q], d->nunits);
+                for (uint32_t k = 0; k < d->ntextures; ++k) {
+                    if (d->textures[k].kind != 0 || !d->textures[k].file[0]) continue;
+                    AssetAnswer a;
+                    ++pics;
+                    if (asset_get(r, NULL, d->textures[k].file, ASSET_TEXTURE, &a, &why)) { ++pics_bad; continue; }
+                    if (a.source == ASSET_FROM_PLACEHOLDER) ++pics_box; else if (a.source == ASSET_FROM_OVERLAY) ++pics_own;
+                    BlpImage img;
+                    if (blp_decode(a.data, a.len, &img, &why)) { ++pics_bad; printf("  (%s: %s)\n", d->textures[k].file, why.text); }
+                    else blp_free(&img);
+                    asset_answer_free(&a);
+                }
+            }
+            placed_model_free(&pm);
+        }
+        snprintf(line, sizeof line, "its %d different models placed: %d its own WC3 models read from its folder (%d with a piece to draw at rest), %d the game's, each the box here (no archives); %d of its own refused by 061, nothing else unreadable",
+                 nnames, own, own_pieces, boxes, refused);
+        check(nnames > 0 && failed == refused && own + boxes + refused == nnames && (own ? own_pieces > 0 : own_pieces == 0) && own_pieces * 10 >= own * 9 && (by_map == 0) == (own + refused == 0), line);
+        if (own) {
+            snprintf(line, sizeof line, "its own models stand %.2f to %.2f yards tall by its rule (%.5f yards a WC3 unit; the tallest %s)", lo_h, hi_h, m.wc3_scale, tall);
+            check(lo_h >= 0 && hi_h > 0.5f && hi_h < 200, line);
+            snprintf(line, sizeof line, "the %d pictures they name: %d from its folder, %d the checker (WC3's own, not in a build folder), all %s; %d pieces left out for team colour (404), %d hidden at rest",
+                     pics, pics_own, pics_box, pics_bad ? "but some decoded" : "decoded", replaceable, hidden);
+            check(pics_own > 0 && pics_bad == 0 && pics_own + pics_box == pics, line);
+        }
+        free(names); free(seen); free(where); free(wanted);
+        lua_data_free(pd);
+    }
     /* }}} */
+
+    tables_free(ts);
+    AssetCounts cc;
+    asset_counts(r, &cc);
+    printf("  (the placeholders stood in %u times, each said in the resolver's log; %u different models and %u pictures from its folder)\n",
+           cc.placeholder_answers, cc.by[ASSET_MODEL][ASSET_FROM_OVERLAY], cc.by[ASSET_TEXTURE][ASSET_FROM_OVERLAY]);
+    resolver_free(r);
+    fclose(place.log);
+    free(conv_log);
+    /* }}} */
+}
+/* }}} */
+
+/* {{{ placed models (076; issue 1109 step 1c): a doodad's and a building's
+ * files through the resolver, a WC3 model the map brought, the box
+ * standing in, ground pictures from the map's folder; folders and an
+ * archive made here, no game data */
+/* a building made here: a root naming one part and one material, its
+ * picture Textures\Hut.blp; a part of one triangle (tags reversed, as the
+ * files hold them: 021-wmo.h) */
+static void t_made_wmo_root(Bytes *o)
+{
+    o->n = 0;
+    size_t c = open_chunk(o, "REVM"); put32(o, 17); close_chunk(o, c);
+    c = open_chunk(o, "DHOM");
+    put32(o, 1); put32(o, 1);                             /* materials, groups */
+    for (int i = 2; i < 16; ++i) put32(o, 0);
+    close_chunk(o, c);
+    c = open_chunk(o, "XTOM"); putname(o, "Textures\\Hut.blp", 20); close_chunk(o, c);
+    c = open_chunk(o, "TMOM");
+    put32(o, 0); put32(o, 0); put32(o, 0); put32(o, 0);   /* flags, shader, blend 0, picture at MOTX 0 */
+    for (int i = 4; i < 16; ++i) put32(o, 0);
+    close_chunk(o, c);
+}
+static void t_made_wmo_group(Bytes *o)
+{
+    o->n = 0;
+    size_t g = open_chunk(o, "REVM"); put32(o, 17); close_chunk(o, g);   /* (the reader wants MOGP after a first block, as the files have) */
+    g = open_chunk(o, "PGOM");
+    for (int i = 0; i < 17; ++i) put32(o, 0);             /* the 68-byte header */
+    size_t c = open_chunk(o, "YPOM"); for (int i = 0; i < 1; ++i) put16(o, 0x20); close_chunk(o, c);
+    c = open_chunk(o, "IVOM"); put16(o, 0); put16(o, 1); put16(o, 2); close_chunk(o, c);
+    c = open_chunk(o, "TVOM");
+    static const float v[9] = { 0, 0, 0, 4, 0, 0, 0, 4, 3 };
+    for (int i = 0; i < 9; ++i) putf(o, v[i]);
+    close_chunk(o, c);
+    c = open_chunk(o, "RNOM"); for (int i = 0; i < 3; ++i) { putf(o, 0); putf(o, 0); putf(o, 1); } close_chunk(o, c);
+    c = open_chunk(o, "VTOM"); for (int i = 0; i < 6; ++i) putf(o, 0); close_chunk(o, c);
+    c = open_chunk(o, "ABOM"); for (int i = 0; i < 3; ++i) put32(o, 0); put32(o, 0); put16(o, 3); put16(o, 0); put16(o, 0); o->b[o->n++] = 0; o->b[o->n++] = 0; close_chunk(o, c);
+    close_chunk(o, g);
+}
+static void placed_tests(const char *dir)
+{
+    char root[400], folder[520], data[520], path[900], line[1000];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-placed", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the placed models' fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the fixtures: the placeholders' own bytes (a box, a checker),
+     * a map's folder with a WC3 model, a game model, half a model, a
+     * building, a green picture; an archive with the game model alone */
+    Resolver *bare = NULL;
+    ResolverPlace none = { .distinctness = 0.5 };
+    char *quiet = NULL;
+    size_t quiet_len = 0;
+    none.log = open_memstream(&quiet, &quiet_len);
+    e = resolver_open(&none, &bare, &why);
+    check(!e, e ? why.text : "a resolver with no places opens");
+    if (e) { fclose(none.log); free(quiet); return; }
+    AssetAnswer box, box_skin, checker;
+    WErr e1 = asset_stand_in(bare, "World\\Made\\Rock.m2", ASSET_MODEL, &box, &why);
+    WErr e2 = asset_stand_in(bare, "World\\Made\\Rock00.skin", ASSET_MODEL, &box_skin, &why);
+    WErr e3 = asset_stand_in(bare, "Textures\\Green.blp", ASSET_TEXTURE, &checker, &why);
+    fflush(none.log);
+    AssetCounts counts;
+    asset_counts(bare, &counts);
+    check(!e1 && !e2 && !e3 && box.source == ASSET_FROM_PLACEHOLDER && box_skin.len != box.len && checker.len > 1172 && counts.placeholder_answers == 3
+          && quiet && strstr(quiet, "the model World\\Made\\Rock.m2: a box stands in for it, with the rest of its files"),
+          "asset_stand_in: the placeholder alone, said as standing in whole and counted (a box, the box's skin, the checker)");
+    AssetAnswer nothing;
+    check(asset_get(NULL, NULL, "Textures\\Green.blp", ASSET_TEXTURE, &nothing, &why) == W_ERR_NOT_FOUND,
+          "asset_get with no resolver and no archives: not found, no placeholder");
+    unsigned char *green = malloc(checker.len);
+    memcpy(green, checker.data, checker.len);
+    for (size_t i = 1172; i + 4 <= checker.len; i += 4) { green[i] = 0; green[i + 1] = 255; green[i + 2] = 0; green[i + 3] = 255; }   /* blue, green, red, alpha */
+    snprintf(folder, sizeof folder, "%s/map-build", root);
+    static Bytes mdx, wmo_root, wmo_group;
+    made_mdx(&mdx);
+    t_made_wmo_root(&wmo_root);
+    t_made_wmo_group(&wmo_group);
+    t_write(folder, "war3mapImported/Made.mdx", mdx.b, mdx.n);
+    t_write(folder, "Textures/Made.blp", green, checker.len);
+    t_write(folder, "Textures/Hut.blp", green, checker.len);
+    t_write(folder, "Tileset/Made/Grass.blp", green, checker.len);
+    t_write(folder, "World/Made/Rock.m2", box.data, box.len);
+    t_write(folder, "World/Made/Rock00.skin", box_skin.data, box_skin.len);
+    t_write(folder, "World/Made/Half.m2", box.data, box.len);      /* its view isn't anywhere */
+    t_write(folder, "World/Made/Hut.wmo", wmo_root.b, wmo_root.n);
+    t_write(folder, "World/Made/Hut_000.wmo", wmo_group.b, wmo_group.n);
+    snprintf(data, sizeof data, "%s/Data", root);
+    t_mkdirs(data);
+    snprintf(path, sizeof path, "%s/patch.MPQ", data);
+    const char *const anames[] = { "World\\Made\\Rock.m2", "World\\Made\\Rock00.skin" };
+    const char *const abytes[] = { (const char *)box.data, (const char *)box_skin.data };
+    const size_t alens[] = { box.len, box_skin.len };
+    t_write_mpq_n(path, anames, abytes, alens, 2);
+    MpqChain chain;
+    e = mpq_chain_open(&chain, data, "enUS", &why);
+    int have_chain = !e;
+    check(have_chain, e ? why.text : "an archive made here, with the game model alone, opens");
+    /* }}} */
+
+    ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+    snprintf(place.overlays[0], sizeof place.overlays[0], "%s", folder);
+    char *log = NULL;
+    size_t log_len = 0;
+    place.log = open_memstream(&log, &log_len);
+    Resolver *r = NULL;
+    e = resolver_open(&place, &r, &why);
+    check(!e, e ? why.text : "the resolver opens the map's folder as its overlay, with no archives");
+    PlacedModel pm;
+    if (!e) {
+        /* {{{ a WC3 model the map brought */
+        e = placed_model_read(r, NULL, "war3mapImported\\Made.mdx", 0.5, &pm, &why);
+        const M2Model *d = e ? NULL : placed_model_drawn(&pm);
+        snprintf(line, sizeof line, "a placed .mdx the map's folder has is a WC3 model (MDX) from the folder, its points in yards by the map's rule (WC3's (5, 0, 5) at 0.5: (%.2f, %.2f, %.2f))",
+                 d ? d->vertices[5].x : 0, d ? d->vertices[5].y : 0, d ? d->vertices[5].z : 0);
+        check(!e && pm.wc3 && pm.source == ASSET_FROM_OVERLAY && !pm.m2_bytes && d == &pm.mdx.model && d->nvertices == 10
+              && near(d->vertices[5].x, 2.5, 1e-6) && near(d->vertices[5].z, 2.5, 1e-6) && !strcmp(pm.base, "war3mapImported\\Made"), e ? why.text : line);
+        if (!e) {
+            AssetAnswer a;
+            WErr ep = asset_get(r, NULL, d->textures[1].file, ASSET_TEXTURE, &a, &why);
+            BlpImage img;
+            int ok = !ep && a.source == ASSET_FROM_OVERLAY && !blp_decode(a.data, a.len, &img, &why);
+            check(ok && img.rgba[1] == 255 && img.rgba[0] == 0, "its picture (Textures\\Made.blp) from the folder too, decoded (green)");
+            if (ok) blp_free(&img);
+            if (!ep) asset_answer_free(&a);
+            check(d->textures[0].kind == M2_TEXTURE_WC3 + 1 && d->units[2].alpha == 0,
+                  "its team colour is WC3's replaceable picture 1 (left off: 404) and its hidden layer has alpha 0 at rest (not drawn)");
+            placed_model_free(&pm);
+        }
+        e = placed_model_read(r, NULL, "war3mapImported\\Made.mdx", 0, &pm, &why);
+        check(!e && near(placed_model_drawn(&pm)->vertices[5].x, 5 / 30.72, 1e-6), "with no rule given, WC3's 30.72 units a yard");
+        if (!e) placed_model_free(&pm);
+        /* }}} */
+        /* {{{ the game's models */
+        e = placed_model_read(r, NULL, "World\\Made\\Rock.mdx", 0.5, &pm, &why);
+        check(!e && !pm.wc3 && pm.source == ASSET_FROM_OVERLAY && pm.m2_bytes && pm.m2.nvertices == 8 && pm.m2.nunits == 1,
+              e ? why.text : "a game model's .mdx name: its .m2 and 00.skin beside it, from the first place that has them (the folder)");
+        if (!e) placed_model_free(&pm);
+        fflush(place.log);
+        size_t before = log_len;
+        e = placed_model_read(r, NULL, "World\\Made\\Gone.m2", 0.5, &pm, &why);
+        fflush(place.log);
+        check(!e && pm.source == ASSET_FROM_PLACEHOLDER && pm.m2.nvertices == 8 && pm.m2_bytes
+              && strstr(log + before, "the model World\\Made\\Gone.m2 is in none of 0 packs, 0 server folders, 1 overlay, no archives open; a box stands in")
+              && strstr(log + before, "World\\Made\\Gone00.skin: the box's skin stands in for it"),
+              e ? why.text : "a model no place has: the box stands in, its .m2 and its skin, said");
+        if (!e) placed_model_free(&pm);
+        before = log_len;
+        e = placed_model_read(r, NULL, "World\\Made\\Half.m2", 0.5, &pm, &why);
+        fflush(place.log);
+        check(!e && pm.source == ASSET_FROM_PLACEHOLDER && strstr(log + before, "World\\Made\\Half00.skin is in none of")
+              && strstr(log + before, "the model World\\Made\\Half.m2: a box stands in for it, with the rest of its files"),
+              e ? why.text : "a model whose .m2 is there but not its view: the box stands in whole, not the .m2 with the box's view");
+        if (!e) placed_model_free(&pm);
+        check(placed_model_read(r, NULL, "", 0.5, &pm, &why) == W_ERR_REFUSED, "an empty name: refused");
+        /* }}} */
+        /* {{{ buildings */
+        WmoRoot wr;
+        AssetSource src = ASSET_SOURCE_COUNT;
+        e = placed_building_root(r, NULL, "World\\Made\\Hut.wmo", &wr, &src, &why);
+        check(!e && src == ASSET_FROM_OVERLAY && wr.ngroups == 1 && wr.nmaterials == 1 && !strcmp(wr.materials[0].picture, "Textures\\Hut.blp"),
+              e ? why.text : "a building's root from the folder: one part, one material naming its picture");
+        if (!e) wmo_free_root(&wr);
+        WmoGroup wg;
+        e = placed_building_group(r, NULL, "World\\Made\\Hut.wmo", 0, &wg, &why);
+        check(!e && wg.nvertices == 3 && wg.nbatches == 1 && wg.batches[0].count == 3, e ? why.text : "its part _000 from the folder: one triangle, one batch");
+        if (!e) wmo_free_group(&wg);
+        check(placed_building_group(r, NULL, "World\\Made\\Hut.wmo", 1, &wg, &why) == W_ERR_NOT_FOUND, "a part it hasn't: not found");
+        before = log_len;
+        asset_counts(r, &counts);
+        uint32_t stood = counts.placeholder_answers;
+        e = placed_building_root(r, NULL, "World\\Made\\Shed.wmo", &wr, NULL, &why);
+        fflush(place.log);
+        asset_counts(r, &counts);
+        check(e == W_ERR_NOT_FOUND && log_len == before && counts.placeholder_answers == stood, "a building no place has: not found, quietly (the box is no building's root)");
+        e = placed_model_stand_in(r, "World\\Made\\Shed.wmo", &pm, &why);
+        check(!e && pm.source == ASSET_FROM_PLACEHOLDER && pm.m2.nvertices == 8, e ? why.text : "the drawer stands the box in for it (placed_model_stand_in)");
+        if (!e) placed_model_free(&pm);
+        check(placed_model_stand_in(NULL, "World\\Made\\Shed.wmo", &pm, &why) == W_ERR_NOT_FOUND, "with no resolver no box stands in");
+        /* }}} */
+        /* {{{ ground pictures (033): the folder's, else the checker */
+        GroundPlace gp = { .assets = r };
+        GroundPixels px = { 0 };
+        e = ground_prep_pixels(&gp, "Tileset\\Made\\Grass.blp", &px, &why);
+        check(!e && px.width == 8 && px.rgba[1] == 255 && px.rgba[0] == 0 && px.smaller, e ? why.text : "a ground picture the map's folder has: its own (green), with its smaller copies");
+        free(px.rgba); free(px.smaller);
+        memset(&px, 0, sizeof px);
+        e = ground_prep_pixels(&gp, "Tileset\\Made\\Sand.blp", &px, &why);
+        check(!e && px.width == 8 && px.rgba[0] == 255 && px.rgba[1] == 0 && px.rgba[2] == 255, e ? why.text : "one no place has: the magenta checker stands in");
+        free(px.rgba); free(px.smaller);
+        /* }}} */
+        resolver_free(r);
+    }
+    fclose(place.log);
+    free(log);
+
+    /* {{{ strict mode: no box */
+    place.strict = 1;
+    log = NULL;
+    place.log = open_memstream(&log, &log_len);
+    if (!resolver_open(&place, &r, &why)) {
+        check(placed_model_read(r, NULL, "World\\Made\\Gone.m2", 0.5, &pm, &why) == W_ERR_NOT_FOUND && resolver_exit_status(r) == 1,
+              "strict mode: a model no place has is refused, not a box, and the exit status says so");
+        resolver_free(r);
+    }
+    fclose(place.log);
+    free(log);
+    /* }}} */
+
+    /* {{{ no resolver (every run but a test map's): the archives alone, as before */
+    if (have_chain) {
+        e = placed_model_read(NULL, &chain, "World\\Made\\Rock.mdx", 0.5, &pm, &why);
+        check(!e && !pm.wc3 && pm.source == ASSET_FROM_BLIZZARD && pm.m2.nvertices == 8, e ? why.text : "no resolver: a game model from the archives");
+        if (!e) placed_model_free(&pm);
+        e = placed_model_read(NULL, &chain, "World\\Made\\Gone.m2", 0.5, &pm, &why);
+        check(e == W_ERR_NOT_FOUND && strstr(why.text, "World\\Made\\Gone.m2"), "no resolver: a model the archives lack is not found, named (left out, no box)");
+        check(placed_model_read(NULL, &chain, "war3mapImported\\Made.mdx", 0.5, &pm, &why) == W_ERR_NOT_FOUND, "nor is a map's own model, with no map folder to find it in");
+        GroundPlace gp = { .chain = &chain };
+        GroundPixels px = { 0 };
+        check(ground_prep_pixels(&gp, "Tileset\\Made\\Grass.blp", &px, &why) == W_ERR_NOT_FOUND, "no resolver: a ground picture the archives lack is not found (no checker)");
+        mpq_chain_close(&chain);
+    }
+    /* }}} */
+    asset_answer_free(&box); asset_answer_free(&box_skin); asset_answer_free(&checker);
+    free(green);
+    resolver_free(bare);
+    fclose(none.log);
+    free(quiet);
+    t_remove_tree(root);
 }
 /* }}} */
 
@@ -1649,6 +2057,12 @@ int main(int argc, char **argv)
         else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
         converted_tests(dir, build);
     }
+    /* }}} */
+
+    /* {{{ placed models through the resolver (1109 step 1c): folders and an
+     * archive made here, no game data, so before the archives */
+    printf("placed models and buildings, and the ground's pictures, through the resolver\n");
+    placed_tests(dir);
     /* }}} */
 
     /* {{{ WC3's models (MDX, issue 401 step 2): one written here. It needs

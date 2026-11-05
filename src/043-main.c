@@ -676,8 +676,9 @@ int main(int argc, char **argv)
     app->waters = liquid_new();
     app->water = water_new(&app->chain, &app->textures, &why);
     if (!app->water) return start_failed(app, 1, "%s", why.text);
-    app->doodads = doodads_new(&app->chain, &app->textures, app->solids, app->waters, app->water, &why);
+    app->doodads = doodads_new(&app->chain, app->assets, &app->textures, app->solids, app->waters, app->water, &why);
     if (!app->doodads) return start_failed(app, 1, "%s", why.text);
+    if (app->test_map) doodads_wc3_scale(app->doodads, app->conv.wc3_scale);   /* a map's own WC3 models, in yards by its rule (1109 step 1c) */
     app->horizon = horizon_new(&app->chain, app->assets, app->map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
@@ -709,6 +710,9 @@ int main(int argc, char **argv)
     doodads_counts(app->doodads, &dm, &dc, &ds, &dmov, &demit);
     printf("doodads: %d models (%d of them moving, %d with particles), %d placed; %d solid triangles\n", dm, dmov, demit, dc, collide_count(app->solids));
     if (ds) printf("doodads: %d pieces left out: their picture is chosen by the game at run time (not built yet)\n", ds);
+    int dwc3, dbox;
+    doodads_sources(app->doodads, &dwc3, &dbox);
+    if (dwc3 || dbox) printf("doodads: %d of the models are WC3 models the map brought; the placeholder box stands in for %d (drawn as wire-frames)\n", dwc3, dbox);
 
     MovesState moves;
     moves_init(&moves, &app->her.anim);

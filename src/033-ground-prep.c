@@ -35,16 +35,15 @@ WErr ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const 
 /* }}} */
 
 /* {{{ ground_prep_pixels */
-WErr ground_prep_pixels(MpqChain *chain, const char *name, GroundPixels *px, WWhy *why)
+WErr ground_prep_pixels(const GroundPlace *p, const char *name, GroundPixels *px, WWhy *why)
 {
-    size_t len;
-    const char *from;
-    unsigned char *s = mpq_chain_read(chain, name, &len, &from);
-    if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the ground picture %s is in none of the client's archives", name); return why->code; }
-    BlpImage img;
+    AssetAnswer a;
     WWhy inner;
-    int bad = blp_decode(s, len, &img, &inner);
-    free(s);
+    WErr rc = asset_get(p->assets, p->chain, name, ASSET_TEXTURE, &a, &inner);
+    if (rc) return w_fail(why, rc, "%s (a ground picture)", inner.text);
+    BlpImage img;
+    int bad = blp_decode(a.data, a.len, &img, &inner);
+    asset_answer_free(&a);
     if (bad) { w_fail(why, inner.code, "the ground picture %s: %s", name, inner.text); return why->code; }
     px->rgba = img.rgba;                                 /* kept: blp_free would only free this */
     px->width = img.width;
@@ -180,7 +179,7 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
     /* the pictures not already on the card */
     for (int t = 0; t < adt->ntextures; ++t) {
         if (!g->needed[t] || (on_card && on_card(ctx, adt->textures[t]))) continue;
-        if (ground_prep_pixels(p->chain, adt->textures[t], &g->pixels[t], why)) { ground_prep_free(g, 0); return why->code; }
+        if (ground_prep_pixels(p, adt->textures[t], &g->pixels[t], why)) { ground_prep_free(g, 0); return why->code; }
     }
     /* each quarter: 64 chunks of 145 points (9,280, within the 16-bit
      * point numbers), 768 triangle corners a chunk at most */
