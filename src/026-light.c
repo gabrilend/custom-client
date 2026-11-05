@@ -64,8 +64,6 @@ WErr light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why)
     }
     t->record1 = -1;
     for (int k = 0; k < t->nlights && t->record1 < 0; ++k) if (t->lights[k].id == 1) t->record1 = k;
-    if (t->record1 < 0 && log)   /* decision 147's fallback isn't there: said once, not at each frame */
-        fprintf(log, "light: Light.dbc has no row 1: a map with no default light of its own has the fixed grey sky and fog\n");
     t->skyboxes = tables_copies(tables, "LightSkybox", NULL, NULL) > 0;
     if (!t->skyboxes && log) fprintf(log, "light: LightSkybox.dbc in no place: no skybox drawn\n");
     return W_OK;
@@ -186,6 +184,17 @@ static void fog_rules(int map, LightNow *o)
     if (o->fog_mode == 2 && share < 0) share = 0;
     if (o->fog_end < LIGHT_FOG_END_LEAST) o->fog_end = LIGHT_FOG_END_LEAST;
     o->fog_start = o->fog_end * share;
+}
+/* }}} */
+
+/* {{{ light_map_default */
+int light_map_default(const LightTables *t, int map, FILE *log)
+{
+    if (t->none) return -1;
+    for (int k = 0; k < t->nlights; ++k) if (t->lights[k].map == map && t->lights[k].fallback) return t->lights[k].id;
+    if (t->record1 >= 0) return t->lights[t->record1].id;
+    if (log) fprintf(log, "light: map %d has no default light of its own and Light.dbc has no row 1: the fixed grey sky and fog where no light reaches\n", map);
+    return -1;
 }
 /* }}} */
 

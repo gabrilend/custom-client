@@ -37,7 +37,8 @@
  * larger inner radius first), so the nearest is laid on top (306's
  * notes on the original; 1109 step 1t, decision 146). A map with no
  * default of its own takes Light's row 1 (306's notes: the original's),
- * and with no row 1 either, the plain grey day, said once at light_open (decision 147).
+ * and with no row 1 either, the plain grey day (decision 147), said by
+ * light_map_default for the map being lit (decision 164).
  *
  * Read through the client's tables (074, 1109 step 1t): a converted
  * map's own Light rows are met before the archives', and a band, set or
@@ -123,6 +124,13 @@ typedef struct {
  * read here, copies of different widths) is its error, naming it. */
 WErr  light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why);
 void light_close(LightTables *t);
+
+/* The light under every sphere on map `map`: its own default's id, else
+ * Light's row 1's, else -1 (the grey day where no sphere reaches), which
+ * is said on `log` (may be NULL), once per call: 043 and 089 call it once
+ * for the map they light (1109 decision 164, so a converted map with a
+ * default light of its own isn't told about row 1). */
+int  light_map_default(const LightTables *t, int map, FILE *log);
 
 /* The plain grey day: a map with no lights, or no light tables at all
  * (the fixed sky and fog this client draws without them); also each

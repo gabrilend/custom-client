@@ -284,5 +284,7 @@ a server, `--weather` and a moves file give it, and the run with no
 window counts it in the receipt. A building's fogs and each part's fog
 numbers are read, and the outdoor fog can blend into a part's own over
 its first 25 yards; which fog applies and whether the eye is inside are
-not in the notes, so nothing uses that blend yet. Decisions 157 to 163
-in 1109.
+not in the notes, so nothing uses that blend yet. A map converted with
+the editor's own light (its draft PR #260) is lit by that light, from
+its own rows, and the checks take it; "no row 1" is now said only for a
+map with no default light of its own. Decisions 157 to 165 in 1109.

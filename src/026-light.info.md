@@ -40,7 +40,8 @@ centres from here; two within a third of a yard of each other, the
 larger inner radius first), so the nearest is laid on top (306's
 notes on the original; 1109 step 1t, decision 146). A map with no
 default of its own takes Light's row 1 (306's notes: the original's),
-and with no row 1 either, the plain grey day, said once at light_open (decision 147).
+and with no row 1 either, the plain grey day (decision 147), said by
+light_map_default for the map being lit (decision 164).
 
 Read through the client's tables (074, 1109 step 1t): a converted
 map's own Light rows are met before the archives', and a band, set or
@@ -87,6 +88,12 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1; a light's own 
   there but can't be read (074: not a table, narrower than the columns
   read here, copies of different widths) is its error, naming it.
 - `void light_close(LightTables *t);`
+- `int light_map_default(const LightTables *t, int map, FILE *log);`
+  The light under every sphere on map `map`: its own default's id, else
+  Light's row 1's, else -1 (the grey day where no sphere reaches), which
+  is said on `log` (may be NULL), once per call: 043 and 089 call it once
+  for the map they light (1109 decision 164, so a converted map with a
+  default light of its own isn't told about row 1).
 - `int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out);`
   The light at world (x, y, z) on map `map` at `hours` since midnight
   (0-24), of kind `kind` (LIGHT_CLEAR, or LIGHT_UNDERWATER while the

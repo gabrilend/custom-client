@@ -1400,7 +1400,7 @@ map; the storm sets' field numbers (026's layout, recalled).
 
 **Step 1v is built** (2026-11-05, the same background work): the
 weather for the storm sets, and a building's fogs. Decisions 157 to
-163; the new file `src/099-weather.c`.
+165; the new file `src/099-weather.c`.
 
 - **The weather message (099):** `weather_msg_read` reads SMSG_WEATHER's
   body as 9 bytes (state, grade, abrupt), refusing another length, a
@@ -1430,6 +1430,14 @@ weather for the storm sets, and a building's fogs. Decisions 157 to
   under water, as 306's notes describe (decision 162). Which of a
   group's fogs applies, and whether the eye is in a group, are not in
   the notes: nothing calls it yet but the tests (decision 163).
+- **A converted map's own light (world-edit-to-execute's draft PR
+  #260):** a build converted with it carries Light and its tables in
+  the map's folder, the map's own default light first. The checks on a
+  build take either: the grey day where the build has no light rows,
+  its own default's id where it has (decision 165). Saying "no row 1"
+  moved from opening the tables to `light_map_default`, called once for
+  the map being lit, so a map with its own default isn't told about
+  row 1 (decision 164).
 
 Checked (`tests/044-test-client.c`): a made weather body read (state,
 grade, eased); refused, named: 8 bytes, 13 (an older client's, with a
@@ -1444,7 +1452,15 @@ two changes in the receipt; with no weather, fine and none taken. A
 made building: two fogs read field by field, a group's fog numbers and
 box, how far in a point is (the middle, by a wall, outside, past a
 corner), the blend outside (none), 12.5 yards in (half), 30 in (the
-group's), under water (its underwater fog).
+group's), under water (its underwater fog). The light under every
+sphere (map 900 its own default, 902 row 1, 571 its own), nothing said;
+the set's empty tables, with no row 1, said for the map. On the two maps
+converted by #260's commit 306b40f40 (exported to the scratch folder;
+ai-stuff left as it was): the map's own light 20000 from its own rows,
+the map's folder's copy first, no placeholder row made and no word of
+row 1; the run with no window lit by it, twice the same; with no
+baseline set, still lit by it, saying only that no skybox is drawn
+(#260 writes no LightSkybox).
 
 Not checked: the weather message's layout, opcode and state numbers,
 and that 3.3.5a sends no sound id (recalled); how the original turns a
@@ -1669,8 +1685,9 @@ return {
 1v. ~~The weather and a building's fogs.~~ Done (2026-11-05): 099 reads
    the weather message and eases the storm's strength, from `--weather`
    or a moves file for now, counted in the receipt; 021 reads a
-   building's fogs and 026 blends them in indoors, not yet called
-   (decisions 157 to 163).
+   building's fogs and 026 blends them in indoors, not yet called;
+   a converted map's own light (#260) taken by the checks, and "no row
+   1" said only for a map with no default (decisions 157 to 165).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2886,6 +2903,22 @@ return {
     blend in the window or the run with no window yet. The converter
     writes no buildings (WC3 buildings become WC3 models), so there is
     no converter build to check this on.
+164. **"No row 1" is said for the map being lit.** Light's row 1 is only
+    a fallback for a map with no default light of its own, so opening
+    the tables no longer says it has none: `light_map_default` gives the
+    light under every sphere on a map (its own default, else row 1, else
+    none) and says so only in the last case. 043 and the run with no
+    window call it once for their map. A map converted with #260 has its
+    own default, so its log says nothing of row 1.
+165. **The checks on a build take its own light or the grey day.** A
+    build converted before world-edit-to-execute's #260 has no light
+    rows: the grey day, as before. One converted with it has the map's
+    own default light: the checks then want that light's id, read from
+    the map's folder's rows (its copy first), no placeholder row made,
+    the run with no window lit by it, and with no baseline set still lit
+    by it. Which a build is, is read from whether its folder has
+    DBFilesClient/Light.dbc. The id (20000 on these maps) isn't fixed in
+    the checks: it is whatever the map's own default is.
 
 ## Open questions
 

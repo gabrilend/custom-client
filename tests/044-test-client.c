@@ -2001,6 +2001,11 @@ static void converted_tests(const char *dir, const char *build)
             id = light_at(&lt, 901, 100, 205, 0, 12, LIGHT_CLEAR, &other);
             check(id == 13 && other.fog[1] == 1 && other.fog_end == 200,
                   "inside that map's sphere: the sphere, laid over row 1");
+            int d900 = light_map_default(&lt, 900, place.log), d902 = light_map_default(&lt, 902, place.log), d571 = light_map_default(&lt, 571, place.log);
+            fflush(place.log);
+            snprintf(line, sizeof line, "the light under every sphere, said only when it is the grey day (1109 decision 164): map 900 its own default %d, map 902 row 1 (%d), map 571 its own %d; nothing said",
+                     d900, d902, d571);
+            check(d900 == 10 && d902 == 1 && d571 == 16 && !(llog && strstr(llog, "no default light")), line);
             /* {{{ the original's fog rules and storms (1109 step 1u) */
             LightNow f1, f2, f571, st0, sth, st1, sti, sthalf, plain;
             int i1 = light_at(&lt, 1, 0, 0, 0, 12, LIGHT_CLEAR, &f1);
@@ -6109,6 +6114,11 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     snprintf(rm, sizeof rm, "%s/models.lua", tables);
     snprintf(conv_file, sizeof conv_file, "%s/map.lua", build);
     struct stat sb;
+    /* a build converted with its own light (world-edit-to-execute's draft
+     * PR #260): Light and its tables in the map's folder; before it, none */
+    char own_light_file[760];
+    snprintf(own_light_file, sizeof own_light_file, "%s/DBFilesClient/Light.dbc", build);
+    int own_tables = !stat(own_light_file, &sb), own_light = -1;
     if (stat(rg, &sb) || stat(rm, &sb) || stat(conv_file, &sb)) {
         printf("  (no converter tables at %s or no converted build at %s: the start with no install is skipped)\n", tables, build);
         t_remove_tree(root);
@@ -6139,15 +6149,28 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     check(!e && !ws.install && ws.assets && resolver_baseline(ws.assets) && !strcasecmp(ws.map_name, m.directory) && ws.adt_heights
           && (!m.has_z || near(ws.z, m.start_z, 0.5)) && ws.max_slope == WORLD_START_SLOPE && strstr(log, "no WoW install"), e ? why.text : line);
     if (!e) {
-        /* the light: the set's empty tables, so the plain grey day */
+        /* the light: the set's empty tables, so the plain grey day; or, on
+         * a build with its own light (#260), the map's own default, read
+         * from its own rows, no placeholder row made (1109 step 1v) */
         LightTables lights;
         e = light_open(&lights, ws.tables, lf, &why);
         LightNow now;
+        int placeholders0 = tables_placeholders(ws.tables);
+        int base = e ? -1 : light_map_default(&lights, m.id, lf);
         int lid = e ? 0 : light_at(&lights, m.id, (float)m.start_x, (float)m.start_y, ws.z, 12, LIGHT_CLEAR, &now);
+        int made_rows = tables_placeholders(ws.tables) - placeholders0;
         fflush(lf);
-        check(!e && !lights.none && lights.from == ASSET_FROM_BASELINE && lights.ncopies == 1 && lights.nlights == 0 && lights.skyboxes && lid < 0
-              && now.fog_end == LIGHT_GREY_FOG_END && now.fog[0] == LIGHT_GREY_FOG && strstr(log, "light: Light.dbc has no row 1"),
-              e ? why.text : "the light tables (026, through the tables: 074) from the set, empty: no light and no row 1 to fall back on (said), so 043's plain grey day");
+        if (!own_tables)
+            check(!e && !lights.none && lights.from == ASSET_FROM_BASELINE && lights.ncopies == 1 && lights.nlights == 0 && lights.skyboxes && lid < 0 && base < 0
+                  && now.fog_end == LIGHT_GREY_FOG_END && now.fog[0] == LIGHT_GREY_FOG && strstr(log, "has no default light of its own and Light.dbc has no row 1"),
+                  e ? why.text : "the light tables (026, through the tables: 074) from the set, empty: no light and no row 1 to fall back on (said), so 043's plain grey day");
+        else {
+            own_light = lid;
+            snprintf(line, sizeof line, "the build's own light (world-edit-to-execute's #260): light %d, its map's own default, from the map's folder first (%d copies of Light, %d lights), fog from %.1f to %.1f yards, sky (%.3f, %.3f, %.3f), %d placeholder rows made, no word of row 1",
+                     lid, lights.ncopies, lights.nlights, now.fog_start, now.fog_end, now.sky[0][0], now.sky[0][1], now.sky[0][2], made_rows);
+            check(!e && !lights.none && lights.from == ASSET_FROM_OVERLAY && lid >= 0 && lid == base && made_rows == 0
+                  && (now.sky[0][0] != LIGHT_GREY_SKY || now.sky[0][1] != LIGHT_GREY_SKY || now.sky[0][2] != LIGHT_GREY_SKY) && !strstr(log, "row 1"), e ? why.text : line);
+        }
         if (!e) light_close(&lights);
         /* the water: LiquidType's water row from the set, naming frames the set has */
         TableRow lr;
@@ -6291,8 +6314,12 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         snprintf(line, sizeof line, "the light where she ends, at noon (026 through 074, 1109 step 1t): %s%d, the tables %s, fog from %.1f to %.1f yards%s (fog mode %d: none of the original's), colour (%.3f, %.3f, %.3f), sky (%.3f, %.3f, %.3f), twice the same",
                  h->light < 0 ? "none (the set's tables are empty) " : "light ", h->light, h->light_tables ? "there" : "in no place", h->fog_start, h->fog_end,
                  h->fog_from_map ? " (the map's own)" : "", h->fog_mode, h->fog_red, h->fog_green, h->fog_blue, h->sky_red, h->sky_green, h->sky_blue);
-        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->light < 0 && h->fog_mode == 0 && h->fog_end > 0 && h->fog_start <= h->fog_end
-              && (h->fog_from_map || (h->fog_red == LIGHT_GREY_FOG && h->fog_green == LIGHT_GREY_FOG && h->fog_end <= LIGHT_GREY_FOG_END)) && h->sky_blue == LIGHT_GREY_SKY
+        /* the grey day on a build with no light rows; its own light (its
+         * default's id) on one converted with #260 (1109 step 1v) */
+        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->fog_end > 0 && h->fog_start <= h->fog_end
+              && (own_tables ? h->light >= 0 && h->light == own_light && (h->fog_from_map ? h->fog_mode == 0 : h->fog_mode >= 1)
+                             : h->light < 0 && h->fog_mode == 0 && h->sky_blue == LIGHT_GREY_SKY
+                               && (h->fog_from_map || (h->fog_red == LIGHT_GREY_FOG && h->fog_green == LIGHT_GREY_FOG && h->fog_end <= LIGHT_GREY_FOG_END)))
               && res[1].fog_end == h->fog_end && res[1].fog_red == h->fog_red && res[1].light == h->light, line);
         snprintf(line, sizeof line, "the placed models in the headless world (091, 1109 step 1o): %d models and %d buildings read, %d placed copies (%d WC3 models and %d stand-ins walked through, %d left out), %d solid copies, %d solid triangles; %d steps on models' floors, %d against their walls",
                  h->models, h->buildings, h->model_copies, h->models_wc3, h->model_stand_ins, h->models_left_out, h->solid_copies, h->solid_triangles, h->steps_on_models, h->steps_walled);
@@ -6526,9 +6553,19 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         int lid = le ? 0 : light_at(&lights, m.id, (float)m.start_x, (float)m.start_y, ws.z, 12, LIGHT_CLEAR, &now);
         fflush(lf);
         const char *said = log ? strstr(log, "light: Light.dbc, LightParams.dbc, LightIntBand.dbc, LightFloatBand.dbc in no place: the fixed grey sky and fog") : NULL;
-        check(!e && strstr(log, "no install and no baseline set") && !le && lights.none && lid < 0 && now.fog_end == LIGHT_GREY_FOG_END && now.sky[0][1] == LIGHT_GREY_SKY
-              && said && !strstr(said + 1, "light:"),
-              le ? why.text : "with no install and no baseline set, the start opens on the map's own files, and with no light tables anywhere the fixed grey sky and fog stand, said in one line (1109 step 1t)");
+        if (!own_tables)
+            check(!e && strstr(log, "no install and no baseline set") && !le && lights.none && lid < 0 && now.fog_end == LIGHT_GREY_FOG_END && now.sky[0][1] == LIGHT_GREY_SKY
+                  && said && !strstr(said + 1, "light:"),
+                  le ? why.text : "with no install and no baseline set, the start opens on the map's own files, and with no light tables anywhere the fixed grey sky and fog stand, said in one line (1109 step 1t)");
+        else
+        {
+            /* what it says of the light: at most that no skybox is drawn (#260 writes no LightSkybox) */
+            const char *l1 = log ? strstr(log, "light:") : NULL;
+            int only_skybox = !l1 || (!strncmp(l1, "light: LightSkybox.dbc in no place", 34) && !strstr(l1 + 1, "light:"));
+            snprintf(line, sizeof line, "with no install and no baseline set, a build with its own light (#260) still lights by it (light %d), from its own rows; of the light it says %s",
+                     lid, !l1 ? "nothing" : only_skybox ? "only that no skybox is drawn (it writes no LightSkybox)" : l1);
+            check(!e && strstr(log, "no install and no baseline set") && !le && !lights.none && lid == own_light && !said && only_skybox, le ? why.text : line);
+        }
         if (!le) light_close(&lights);
         if (!e) world_start_close(&ws);
     }

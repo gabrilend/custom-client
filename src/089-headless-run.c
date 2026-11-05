@@ -592,6 +592,7 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
         if ((light_rc = light_open(&lt, ws.tables, log, &lw)) == W_OK) {
             LightNow now;
             r.light_tables = !lt.none;
+            light_map_default(&lt, in->start.map_id, log);      /* said when it has none and there's no row 1 (decision 164) */
             r.light = light_at_weather(&lt, in->start.map_id, (float)m.x, (float)m.y, (float)m.z, in->hours, LIGHT_CLEAR, (float)r.storm, &now);
             MapFog mf = { 0 };
             if (in->start.test_map && in->start.conv) {

@@ -719,6 +719,7 @@ int main(int argc, char **argv)
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
     if (light_open(&lights, app->ws.tables, stdout, &why)) return start_failed(app, 1, "%s", why.text);   /* through the tables (074, 1109 step 1t) */
+    light_map_default(&lights, app->map_id, stdout);         /* says so when the map has no default and there's no row 1 (decision 164) */
     app->sky = sky_new();
     LightNow light;
     /* the weather (099, 1109 step 1v): --weather's from the start, at
