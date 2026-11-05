@@ -74,6 +74,7 @@
 #include "../src/094-wc3-pathing.h"
 #include "../src/097-table-layouts.h"
 #include "../src/098-wdt.h"
+#include "../src/099-weather.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -2058,6 +2059,51 @@ static void converted_tests(const char *dir, const char *build)
         resolver_free(orr);
         fclose(only.log); free(olog);
         fclose(place.log); free(llog);
+    }
+    /* }}} */
+
+    /* {{{ the server's weather (099, 1109 step 1v): its message read, the storm eased */
+    {
+        unsigned char wb[16];
+        float g6 = 0.6f, g15 = 1.5f, gnan = NAN;
+        WeatherMsg wm;
+        memset(wb, 0, sizeof wb);
+        wb[0] = 4; memcpy(wb + 4, &g6, 4); wb[8] = 0;
+        WErr e = weather_msg_read(wb, 9, &wm, &why);
+        check(!e && wm.state == WEATHER_MEDIUM_RAIN && wm.grade == 0.6f && !wm.abrupt && weather_msg_storm(&wm) == 0.6f,
+              e ? why.text : "a weather message's 9 bytes: state 4 (medium rain), grade 0.6, eased: the storm sets at 0.6");
+        WErr short_e = weather_msg_read(wb, 8, &wm, &why);
+        int short_named = short_e == W_ERR_CORRUPT && strstr(why.text, "8 bytes") && strstr(why.text, "reads 9");
+        WErr long_e = weather_msg_read(wb, 13, &wm, &why);   /* an older client's, a sound id after the state */
+        int long_named = long_e == W_ERR_CORRUPT && strstr(why.text, "13 bytes");
+        memcpy(wb + 4, &gnan, 4);
+        WErr nan_e = weather_msg_read(wb, 9, &wm, &why);
+        memcpy(wb + 4, &g15, 4); wb[8] = 2;
+        WErr ab_e = weather_msg_read(wb, 9, &wm, &why);
+        wb[8] = 1;
+        WErr big_e = weather_msg_read(wb, 9, &wm, &why);
+        check(short_named && long_named && nan_e == W_ERR_CORRUPT && ab_e == W_ERR_CORRUPT && !big_e && wm.grade == 1 && wm.abrupt,
+              "refused, named: a body of 8 bytes, one of 13 (an older client's, with a sound id), a grade that isn't a number, an abrupt byte of 2; a grade of 1.5 held to 1");
+        float g5 = 0.5f;
+        wb[0] = 0; memcpy(wb + 4, &g5, 4);                   /* fine, grade 0.5 */
+        e = weather_msg_read(wb, 9, &wm, &why);
+        check(!e && wm.state == WEATHER_FINE && weather_msg_storm(&wm) == 0, e ? why.text : "fine weather whatever its grade: no storm");
+        Weather w;
+        weather_init(&w);
+        WeatherMsg rain = { .state = WEATHER_HEAVY_RAIN, .grade = 0.6f }, clear = { .state = WEATHER_FINE, .abrupt = 1 },
+                   pour = { .state = WEATHER_HEAVY_RAIN, .grade = 1 }, ease_off = { .state = WEATHER_FINE };
+        float s0 = weather_strength(&w, 0);
+        weather_take(&w, &rain, 0);
+        float a0 = weather_strength(&w, 0), a5 = weather_strength(&w, 5), a10 = weather_strength(&w, 10), a20 = weather_strength(&w, 20);
+        weather_take(&w, &clear, 20);
+        float b20 = weather_strength(&w, 20);
+        weather_take(&w, &pour, 25);
+        weather_take(&w, &ease_off, 30);                       /* half way in: eases out from 0.5 */
+        float c30 = weather_strength(&w, 30), c35 = weather_strength(&w, 35), c40 = weather_strength(&w, 40);
+        snprintf(line, sizeof line, "the storm eased over %.0f seconds: none at first (%.2f); heavy rain 0.6: %.2f, %.2f, %.2f, %.2f at 0, 5, 10, 20 seconds; fine at once: %.2f; a pour broken off half way: %.2f, %.2f, %.2f; %d messages",
+                 WEATHER_FADE_SECONDS, s0, a0, a5, a10, a20, b20, c30, c35, c40, w.changes);
+        check(s0 == 0 && a0 == 0 && fabsf(a5 - 0.3f) < 1e-6f && a10 == 0.6f && a20 == 0.6f && b20 == 0 && fabsf(c30 - 0.5f) < 1e-6f && fabsf(c35 - 0.25f) < 1e-6f
+              && c40 == 0 && w.changes == 4, line);
     }
     /* }}} */
 
@@ -5880,8 +5926,13 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             { "return { format = 1, map = 3, moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
             { "return { format = 1, moves = { { turn_to = 7, hold = \"\", seconds = 1 } } }", "turn_to must be" },
             { "return { format = 1, moves = { { turn_to = \"north\" } } }", "turn_to must be" },
-            { "return { format = 1, moves = { { turn_to = 0, hold = \"forward\" } } }", "or turn_to alone" },
-            { "return { format = 1, moves = { { turn_to = 0, seconds = 1 } } }", "or turn_to alone" },
+            { "return { format = 1, moves = { { turn_to = 0, hold = \"forward\" } } }", "or turn_to or weather alone" },
+            { "return { format = 1, moves = { { turn_to = 0, seconds = 1 } } }", "or turn_to or weather alone" },
+            { "return { format = 1, moves = { { weather = { state = 4, grade = 2 } } } }", "grade must be" },
+            { "return { format = 1, moves = { { weather = { grade = 0.5 } } } }", "needs state and grade" },
+            { "return { format = 1, moves = { { weather = { state = 4.5, grade = 0.5 } } } }", "state must be" },
+            { "return { format = 1, moves = { { weather = { state = 4, grade = 0.5, sound = 3 } } } }", "sound" },
+            { "return { format = 1, moves = { { weather = \"rain\" } } }", "must be a table" },
         };
         int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
         for (int i = 0; i < nbad; ++i) {
@@ -5890,7 +5941,7 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             else printf("    (moves %d: %s)\n", i, e ? why.text : "taken");
             if (!e) headless_moves_free(hm);
         }
-        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name, a turn_to past a whole turn or not a number, a turn_to with hold and no seconds or seconds and no hold", refused, nbad);
+        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name, a turn_to past a whole turn or not a number, a turn_to with hold and no seconds or seconds and no hold, a weather's grade past 1, no state, a state not whole, a field it doesn't have, not a table", refused, nbad);
         check(refused == nbad, line);
         const char *named = "return { format = 1, map = \"Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }";
         e = headless_moves_parse(named, strlen(named), "made", &hm, &why);
@@ -5915,6 +5966,10 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         const char *turns = "return { format = 1, moves = { { turn_to = 1.5708 }, { turn_to = -6.2832, hold = \"forward\", seconds = 1 }, { hold = \"\", seconds = 0.5 } } }";
         e = headless_moves_parse(turns, strlen(turns), "made", &hm, &why);
         check(!e && headless_moves_count(hm) == 3 && headless_moves_steps(hm) == 30, e ? why.text : "turn_to (1109 step 1p): a facing alone takes no steps; with hold and seconds she faces it, then holds them (3 moves, 30 steps)");
+        if (!e) headless_moves_free(hm);
+        const char *wet = "return { format = 1, moves = { { weather = { state = 4, grade = 0.6 } }, { hold = \"\", seconds = 1, weather = { state = 0, grade = 0, abrupt = true } } } }";
+        e = headless_moves_parse(wet, strlen(wet), "made", &hm, &why);
+        check(!e && headless_moves_count(hm) == 2 && headless_moves_steps(hm) == 20, e ? why.text : "weather (1109 step 1v): alone a move takes no steps; with hold and seconds it is taken as the move begins (2 moves, 20 steps)");
         if (!e) headless_moves_free(hm);
         snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
         const char *tiny = "return { format = 1, moves = { { hold = \"\", seconds = 0.001 }, { hold = \"left right\", seconds = 0.08 } } }";
@@ -6330,6 +6385,36 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             goodbye_free(g);
             headless_moves_free(om);
             check(!oe && !t_receipts_same(r1, r3, diff, sizeof diff) && strstr(diff, "moves"), oe ? why.text : "other moves: another receipt (the comparison finds the difference)");
+        }
+        /* the weather (099, 1109 step 1v): --weather's from the start, then
+         * a move's, eased; the receipt counts the last, how many and the
+         * storm where she ends */
+        {
+            char r5[700];
+            snprintf(r5, sizeof r5, "%s/headless-weather", root);
+            const char *wet = "return { format = 1, moves = { { hold = \"\", seconds = 2 }, { weather = { state = 5, grade = 0.8 } }, { hold = \"\", seconds = 5 } } }";
+            HeadlessMoves *wm = NULL;
+            Goodbye *g = NULL;
+            HeadlessResult wr;
+            memset(&wr, 0, sizeof wr);
+            WErr we = headless_moves_parse(wet, strlen(wet), "made", &wm, &why);
+            if (!we) we = goodbye_begin(r5, build, &g, &why);
+            HeadlessIn hin = { .start = in, .moves = wm, .world_dir = world, .hours = HEADLESS_HOURS,
+                               .weather = { .state = WEATHER_LIGHT_RAIN, .grade = 0.2f, .abrupt = 1 }, .has_weather = 1 };
+            hin.start.log = lf;
+            if (!we) we = headless_run(&hin, g, &wr, &why);
+            goodbye_free(g);
+            headless_moves_free(wm);
+            LuaData *wd = NULL;
+            WErr wre = we ? we : lua_data_read(r5, 65536, &wd, &why);
+            const LuaValue *wt = wre ? NULL : lua_data_top(wd);
+            snprintf(line, sizeof line, "the weather in the run with no window: light rain 0.2 from the start, heavy rain 0.8 eased in 2 seconds on, so %.3f where she ends 5 seconds later (half way); state %d, grade %.2f, %d changes, in the receipt",
+                     wr.storm, wr.weather_state, wr.weather_grade, wr.weather_changes);
+            check(!wre && wr.weather_state == WEATHER_HEAVY_RAIN && fabs(wr.weather_grade - 0.8) < 1e-6 && wr.weather_changes == 2 && fabs(wr.storm - 0.5) < 1e-4
+                  && lua_value_number(lua_value_field(wt, "weather_state")) == WEATHER_HEAVY_RAIN && lua_value_number(lua_value_field(wt, "weather_changes")) == 2
+                  && fabs(lua_value_number(lua_value_field(wt, "storm")) - wr.storm) < 1e-6, wre ? why.text : line);
+            if (wd) lua_data_free(wd);
+            check(h->weather_changes == 0 && h->storm == 0 && h->weather_state == WEATHER_FINE, "with no weather given: fine, no storm, none taken");
         }
         LuaData *rd = NULL;
         WErr re = ran ? lua_data_read(r1, 65536, &rd, &why) : W_ERR_NOT_FOUND;

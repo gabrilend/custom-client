@@ -37,7 +37,7 @@
 enum { HOLD_FORWARD, HOLD_BACK, HOLD_LEFT, HOLD_RIGHT, HOLD_STRAFE_LEFT, HOLD_STRAFE_RIGHT, HOLD_JUMP, HOLD_SWIM_DOWN, HOLD_COUNT };
 static const char *const HOLDS[HOLD_COUNT] = { "forward", "back", "left", "right", "strafe_left", "strafe_right", "jump", "swim_down" };
 
-typedef struct { unsigned keys; int walking, steps, turns; double turn_to; } Move;   /* turns: 1 when she faces turn_to first */
+typedef struct { unsigned keys; int walking, steps, turns; double turn_to; int has_weather; WeatherMsg weather; } Move;   /* turns: 1 when she faces turn_to first */
 struct HeadlessMoves {
     char   name[120];
     char   map[64];                     /* the map's folder the moves are for; "" any */
@@ -69,6 +69,37 @@ static WErr read_hold(const char *text, unsigned *keys, const char *where, int l
         *keys |= 1u << k;
         p += n;
     }
+    return W_OK;
+}
+
+/* a move's weather: { state = 0 to 65535, whole, grade = 0 to 1, abrupt = true or false } (1109 step 1v) */
+static WErr read_weather(const LuaValue *v, WeatherMsg *w, const char *where, int line, int i, WWhy *why)
+{
+    if (lua_value_type(v) != LUA_DATA_TABLE)
+        return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's weather must be a table ({ state = ..., grade = ..., abrupt = ... })", where, line, i);
+    int have_state = 0, have_grade = 0;
+    memset(w, 0, sizeof *w);
+    for (int k = 1; k <= lua_value_count(v); ++k) {
+        const char *key;
+        const LuaValue *f = lua_value_at(v, k, &key);
+        int fl = lua_value_line(f);
+        double n = lua_value_number(f);
+        if (key && !strcmp(key, "state")) {
+            if (lua_value_type(f) != LUA_DATA_NUMBER || !(n >= 0 && n <= 65535) || n != floor(n))
+                return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's weather state must be a whole number from 0 (fine) to 65535", where, fl, i);
+            w->state = (uint32_t)n;
+            have_state = 1;
+        } else if (key && !strcmp(key, "grade")) {
+            if (lua_value_type(f) != LUA_DATA_NUMBER || !(n >= 0 && n <= 1))
+                return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's weather grade must be a number from 0 to 1", where, fl, i);
+            w->grade = (float)n;
+            have_grade = 1;
+        } else if (key && !strcmp(key, "abrupt")) {
+            if (lua_value_type(f) != LUA_DATA_BOOL) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's weather abrupt must be true or false", where, fl, i);
+            w->abrupt = lua_value_true(f);
+        } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of a move's weather (state, grade, abrupt)", where, fl, key ? key : "a value with no name");
+    }
+    if (!have_state || !have_grade) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's weather needs state and grade", where, line, i);
     return W_OK;
 }
 
@@ -123,7 +154,7 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
             const char *key;
             const LuaValue *v = lua_value_at(mv, k, &key);
             int vl = lua_value_line(v);
-            if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d holds a value with no name (hold, seconds, walking, turn_to)", where, vl, i);
+            if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d holds a value with no name (hold, seconds, walking, turn_to, weather)", where, vl, i);
             if (!strcmp(key, "hold")) {
                 if (lua_value_type(v) != LUA_DATA_TEXT) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's hold must be text (\"\" for none)", where, vl, i);
                 WErr rc = read_hold(lua_value_text(v), &o->keys, where, vl, why);
@@ -142,10 +173,14 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
                     return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's turn_to must be a facing in radians, from -6.2832 to 6.2832 (0 north, rising west)", where, vl, i);
                 o->turns = 1;
                 o->turn_to = a;
-            } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of a move (hold, seconds, walking, turn_to)", where, vl, key);
+            } else if (!strcmp(key, "weather")) {
+                WErr rc = read_weather(v, &o->weather, where, vl, i, why);
+                if (rc) return rc;
+                o->has_weather = 1;
+            } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of a move (hold, seconds, walking, turn_to, weather)", where, vl, key);
         }
-        if (o->turns && seconds < 0 && !have_hold) seconds = 0;   /* a turn alone: no steps */
-        if ((!have_hold && seconds != 0) || seconds < 0) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d needs hold and seconds (or turn_to alone)", where, line, i);
+        if ((o->turns || o->has_weather) && seconds < 0 && !have_hold) seconds = 0;   /* a turn or the weather alone: no steps */
+        if ((!have_hold && seconds != 0) || seconds < 0) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d needs hold and seconds (or turn_to or weather alone)", where, line, i);
         o->steps = (int)floor(seconds / m->step + 0.5);
         if (o->steps < 1 && seconds > 0) o->steps = 1;
         if (o->steps > HEADLESS_STEPS_MAX - m->steps)
@@ -364,6 +399,7 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "steps_walled_pathing", r->steps_walled_pathing }, { "steps_on_closed", r->steps_on_closed },
         { "looks_placeholder", r->looks_placeholder }, { "table_placeholders", r->table_placeholders },
         { "light", r->light }, { "light_tables", r->light_tables }, { "light_hours", r->light_hours }, { "fog_from_map", r->fog_from_map },
+        { "weather_state", r->weather_state }, { "weather_grade", r->weather_grade }, { "weather_changes", r->weather_changes }, { "storm", r->storm },
         { "fog_mode", r->fog_mode }, { "fog_start", r->fog_start }, { "fog_end", r->fog_end }, { "fog_red", r->fog_red }, { "fog_green", r->fog_green }, { "fog_blue", r->fog_blue },
         { "sky_red", r->sky_red }, { "sky_green", r->sky_green }, { "sky_blue", r->sky_blue },
     };
@@ -468,11 +504,22 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     int last_seq = ms.seq;
     r.start_x = m.x; r.start_y = m.y; r.start_z = m.z;
     r.lowest_z = r.highest_z = m.z;
+    /* the weather (099, 1109 step 1v): 043's --weather from the start, at
+     * once, then each move's as it begins; the clock is the steps' */
+    Weather weather;
+    weather_init(&weather);
+    if (in->has_weather) weather_take(&weather, &in->weather, 0);
+    double clock = 0;
     fprintf(log, "headless: %s%s%d moves, %d steps of %g seconds, from (%.3f, %.3f, %.3f)\n", mv->name[0] ? mv->name : "", mv->name[0] ? ": " : "",
             mv->nmoves, mv->steps, mv->step, m.x, m.y, m.z);
     for (int i = 0; i < mv->nmoves; ++i) {
         const Move *o = &mv->moves[i];
         if (o->turns) m.o = o->turn_to;   /* she faces it at once, as a turn of the mouse does */
+        if (o->has_weather) {
+            weather_take(&weather, &o->weather, clock);
+            fprintf(log, "headless: move %d: the weather is state %u, grade %.2f%s, %.1f seconds in\n", i + 1, (unsigned)o->weather.state, o->weather.grade,
+                    o->weather.abrupt ? ", at once" : "", clock);
+        }
         MoverInput mi = {
             .forward = !!(o->keys & 1u << HOLD_FORWARD), .back = !!(o->keys & 1u << HOLD_BACK),
             .left = !!(o->keys & 1u << HOLD_LEFT), .right = !!(o->keys & 1u << HOLD_RIGHT),
@@ -510,8 +557,13 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             moves_step(&ms, &anim, &ai);
             if (ms.seq != last_seq) { ++r.her_animation_changes; last_seq = ms.seq; }
             ++r.steps;
+            clock += mv->step;
         }
     }
+    r.weather_state = (int)weather.now.state;
+    r.weather_grade = weather.now.grade;
+    r.weather_changes = weather.changes;
+    r.storm = weather_strength(&weather, clock);
     r.moves = mv->nmoves;
     r.end_x = m.x; r.end_y = m.y; r.end_z = m.z;
     r.end_facing = fmod(m.o, 2 * 3.14159265358979323846);
@@ -540,7 +592,7 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
         if ((light_rc = light_open(&lt, ws.tables, log, &lw)) == W_OK) {
             LightNow now;
             r.light_tables = !lt.none;
-            r.light = light_at(&lt, in->start.map_id, (float)m.x, (float)m.y, (float)m.z, in->hours, LIGHT_CLEAR, &now);
+            r.light = light_at_weather(&lt, in->start.map_id, (float)m.x, (float)m.y, (float)m.z, in->hours, LIGHT_CLEAR, (float)r.storm, &now);
             MapFog mf = { 0 };
             if (in->start.test_map && in->start.conv) {
                 W3iInfo info;
@@ -554,8 +606,8 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             r.fog_start = now.fog_start; r.fog_end = now.fog_end; r.fog_mode = now.fog_mode;
             r.fog_red = now.fog[0]; r.fog_green = now.fog[1]; r.fog_blue = now.fog[2];
             r.sky_red = now.sky[0][0]; r.sky_green = now.sky[0][1]; r.sky_blue = now.sky[0][2];
-            fprintf(log, "headless: the light at %.2f hours where she ends: %s%d, fog from %.1f to %.1f yards%s (mode %d), colour (%.3f, %.3f, %.3f), sky overhead (%.3f, %.3f, %.3f)\n",
-                    in->hours, r.light < 0 ? "none (the grey day) " : "light ", r.light, r.fog_start, r.fog_end, r.fog_from_map ? " (the map's own)" : "", r.fog_mode,
+            fprintf(log, "headless: the light at %.2f hours where she ends, the storm sets at %.2f: %s%d, fog from %.1f to %.1f yards%s (mode %d), colour (%.3f, %.3f, %.3f), sky overhead (%.3f, %.3f, %.3f)\n",
+                    in->hours, r.storm, r.light < 0 ? "none (the grey day) " : "light ", r.light, r.fog_start, r.fog_end, r.fog_from_map ? " (the map's own)" : "", r.fog_mode,
                     r.fog_red, r.fog_green, r.fog_blue, r.sky_red, r.sky_green, r.sky_blue);
             light_close(&lt);
         } else fprintf(log, "headless: the light: %s\n", lw.text);   /* a light table there but broken: the run's error, after the rest is let go */

@@ -23,6 +23,8 @@
  *   --pitch DEG       (pictures) the camera raised DEG degrees (up to 83)
  *   --clock MS        (pictures) start the world's animations MS milliseconds in
  *   --hour H          the time of day, 0 to 24 (default: this machine's clock; a --test-map run with no window: noon)
+ *   --weather S G     the weather from the start: state S (099-weather.h: 0 fine, 3-5 rain ...), grade G 0-1,
+ *                     at once (the server's weather isn't read yet; 1109 step 1v)
  *   --face DEG        her start facing turned DEG degrees (left)
  *   --walk S          (pictures) hold forward for S world-seconds
  *   --walking         walk toggled on from the start (173i), as the keypad's / does
@@ -96,6 +98,7 @@
 #include "089-headless-run.h"
 #include "091-model-solids.h"
 #include "094-wc3-pathing.h"
+#include "099-weather.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -417,7 +420,7 @@ static void refresh_tiles(App *app)
 static const ClientOption CLIENT_OPTIONS[] = {
     { "--maps", 1 }, { "--settings", 1 }, { "--world", 1 }, { "--no-read-ahead", 0 }, { "--client", 1 }, { "--shot", 1 },
     { "--zoom", 1 }, { "--front", 0 }, { "--turn", 1 }, { "--pitch", 1 }, { "--pose", 2 }, { "--clock", 1 }, { "--hour", 1 },
-    { "--face", 1 }, { "--walk", 1 }, { "--walking", 0 }, { "--dive", 1 }, { "--wait", 1 }, { "--wear", 1 }, { "--map", 3 },
+    { "--weather", 2 }, { "--face", 1 }, { "--walk", 1 }, { "--walking", 0 }, { "--dive", 1 }, { "--wait", 1 }, { "--wear", 1 }, { "--map", 3 },
     { "--goto", 2 }, { "--assets", 1 }, { NULL, 0 },
 };
 /* }}} */
@@ -466,7 +469,9 @@ int main(int argc, char **argv)
     time_t now = time(NULL);
     struct tm *lt = localtime(&now);
     float hours = (float)lt->tm_hour + (float)lt->tm_min / 60.0f;
-    int hour_given = 0;                                   /* --hour given: a headless run lights by it, else noon (1109 step 1t) */
+    int hour_given = 0;
+    WeatherMsg weather_given = { 0 };                       /* --weather (1109 step 1v) */
+    int has_weather = 0;                                   /* --hour given: a headless run lights by it, else noon (1109 step 1t) */
     float pose_ms = 0;
     /* {{{ a map handed in by the editor (1109): read first, so anything that
      * stops the start from here on is written in its receipt; the password
@@ -499,6 +504,16 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--pose") && i + 2 < argc) { pose_id = atoi(argv[++i]); pose_ms = (float)atof(argv[++i]); }
         else if (!strcmp(argv[i], "--clock") && i + 1 < argc) start_ms = atof(argv[++i]);
         else if (!strcmp(argv[i], "--hour") && i + 1 < argc) { hours = (float)atof(argv[++i]); hour_given = 1; }
+        else if (!strcmp(argv[i], "--weather") && i + 2 < argc) {
+            char *e1, *e2;
+            long st = strtol(argv[i + 1], &e1, 10);
+            double gr = strtod(argv[i + 2], &e2);
+            if (*e1 || *e2 || st < 0 || st > 0xFFFF || !(gr >= 0 && gr <= 1))
+                return start_failed(app, 2, "--weather: \"%s %s\" isn't a state (a whole number, 0 fine) and a grade from 0 to 1", argv[i + 1], argv[i + 2]);
+            weather_given = (WeatherMsg){ .state = (uint32_t)st, .grade = (float)gr, .abrupt = 1 };
+            has_weather = 1;
+            i += 2;
+        }
         else if (!strcmp(argv[i], "--face") && i + 1 < argc) face_deg = atof(argv[++i]);
         else if (!strcmp(argv[i], "--walk") && i + 1 < argc) walk_s = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--walking")) walking = 1;
@@ -513,7 +528,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--goto") && i + 2 < argc) { goto_x = atof(argv[++i]); goto_y = atof(argv[++i]); go_to = 1; }
     }
     if (!maps || !client) {
-        fprintf(stderr, "usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--assets DIR] [--shot FILE] [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]\n"
+        fprintf(stderr, "usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--assets DIR] [--shot FILE] [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--weather STATE GRADE] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]\n"
                         "       [--test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME] [--headless MOVES]]   (the password from W_CLIENT_PASSWORD)\n");
         return start_failed(app, 2, "the client needs --maps (the server's map files) and --client (the game's Data folder); scripts/run gives both");
     }
@@ -561,7 +576,8 @@ int main(int argc, char **argv)
         if (shot) return start_failed(app, 2, "--shot draws a picture, and --headless opens no window: give one or the other");
         HeadlessMoves *moves;
         if (headless_moves_read(test_map_headless(app->test_map), &moves, &why)) return start_failed(app, 2, "--headless: %s", why.text);
-        HeadlessIn hin = { .start = wsi, .moves = moves, .world_dir = app->world_dir, .hours = hour_given ? hours : HEADLESS_HOURS };
+        HeadlessIn hin = { .start = wsi, .moves = moves, .world_dir = app->world_dir, .hours = hour_given ? hours : HEADLESS_HOURS,
+                           .weather = weather_given, .has_weather = has_weather };
         WErr ran = headless_run(&hin, app->bye, NULL, &why);
         headless_moves_free(moves);
         if (ran) fprintf(stderr, "%s\n", why.text);
@@ -705,7 +721,16 @@ int main(int argc, char **argv)
     if (light_open(&lights, app->ws.tables, stdout, &why)) return start_failed(app, 1, "%s", why.text);   /* through the tables (074, 1109 step 1t) */
     app->sky = sky_new();
     LightNow light;
-    int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
+    /* the weather (099, 1109 step 1v): --weather's from the start, at
+     * once; nothing reads the server's yet */
+    Weather weather;
+    weather_init(&weather);
+    if (has_weather) {
+        weather_take(&weather, &weather_given, 0);
+        printf("weather: state %u, grade %.2f: the storm sets laid over at %.2f\n", (unsigned)weather_given.state, weather_given.grade, weather_strength(&weather, 0));
+    }
+    double world_s = 0;                                     /* the world's seconds since the frames began, for the weather's easing */
+    int light_id = light_at_weather(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, weather_strength(&weather, 0), &light);
     if (light_id < 0 && !lights.none) printf("light: map %d has no lights in Light.dbc; a plain grey day is used\n", app->map_id);
     else printf("light: %02d:%02d, light %d, fog from %.0f to %.0f yards (fog mode %d)\n", (int)hours, (int)(fmodf(hours, 1.0f) * 60), light_id, light.fog_start, light.fog_end, light.fog_mode);
     /* a test map's own fog, from its war3map.w3i (084, 1109 step 1j), in
@@ -758,6 +783,7 @@ int main(int argc, char **argv)
         /* {{{ input and movement */
         float dt = shot ? 0.05f : GetFrameTime();          /* pictures: steady 20 frames a world-second */
         if (dt > 0.1f) dt = 0.1f;                        /* a stalled frame doesn't fling her */
+        world_s += dt;
         if (IsKeyPressed(KEY_ESCAPE)) break;            /* the owner, 2026-10-06: Escape quits until there are menus (173b2) */
         /* Vertical Sync and Disable Resize, live (173b5): a change to
          * either (from the menu, when it exists) takes effect at once */
@@ -939,7 +965,8 @@ int main(int argc, char **argv)
         int water_kind = 0;
         float eye_surface = liquid_surface(app->waters, eye.x + app->ox, eye.y + app->oy, &water_kind);
         int under = eye_surface > -10000 && eye.z < eye_surface;
-        int lit = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, under ? LIGHT_UNDERWATER : LIGHT_CLEAR, &light);
+        int lit = light_at_weather(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, under ? LIGHT_UNDERWATER : LIGHT_CLEAR,
+                                   weather_strength(&weather, world_s), &light);
         /* a test map's own fog, when it has one, out of the water (084);
          * then the fog ends by the view distance at the latest (173b6) */
         map_fog_frame(&app->map_fog, under, (float)settings_num(app->settings, "farclip"), &light);
