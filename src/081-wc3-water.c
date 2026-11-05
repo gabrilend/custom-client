@@ -4,8 +4,8 @@
  *
  * For a general audience: at the start the water sheet's row for the
  * map's tileset is read, every frame of its ripples found and decoded,
- * and every tile point's depth looked at once (the counts). After that
- * the handle is only read.
+ * the map's settings read for its tint, and every tile point's depth
+ * looked at once (the counts). After that the handle is only read.
  */
 #include "081-wc3-water.h"
 #include "017-blp.h"
@@ -18,6 +18,7 @@
 #include <string.h>
 
 #define SHEET "TerrainArt\\Water.slk"
+#define W3I_NAME "war3map.w3i"           /* at the build folder's root, where the converter copies it */
 
 /* {{{ the handle */
 struct Wc3Water {
@@ -25,6 +26,9 @@ struct Wc3Water {
     Wc3WaterKind     kind;
     Wc3WaterFrame    frames[WC3_WATER_FRAMES_MAX];
     Wc3WaterCounts   counts;
+    W3iInfo          info;
+    int              has_info;
+    double           scale, x0, y0;
 };
 /* }}} */
 
@@ -67,9 +71,10 @@ void wc3_water_free(Wc3Water *w)
     free(w);
 }
 
-WErr wc3_water_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Water **out, WWhy *why)
+WErr wc3_water_open(Resolver *r, MpqChain *chain, const W3eGround *g, double scale, double x0, double y0, Wc3Water **out, WWhy *why)
 {
     *out = NULL;
+    if (!(scale > 0)) return w_fail(why, W_ERR_REFUSED, "a map rule's scale of %g: above 0 is needed", scale);
     if (!r) return w_fail(why, W_ERR_NOT_FOUND, "no resolver, so no converted map's WC3 water (a test-map run's)");
     WWhy inner;
     AssetAnswer a;
@@ -83,7 +88,9 @@ WErr wc3_water_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Water *
 
     Wc3Water *w = calloc(1, sizeof *w);
     w->g = g;
+    w->scale = scale; w->x0 = x0; w->y0 = y0;
     Wc3WaterKind *k = &w->kind;
+    memset(k->tint, 255, 4);
     snprintf(k->row, sizeof k->row, "%cSha", g->tileset_code);
     const char *file = slk_value_any_case(sheet, k->row, "texFile");
     double v;
@@ -121,6 +128,17 @@ WErr wc3_water_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Water *
         fr->width = img.width; fr->height = img.height; fr->rgba = img.rgba;   /* kept: blp_free would only free this */
     }
 
+    /* the map's settings: its water tint */
+    rc = asset_read(r, chain, W3I_NAME, ASSET_GROUND, &a, &inner);
+    if (rc && rc != W_ERR_NOT_FOUND) { rc = w_fail(why, rc, "%s: %s", W3I_NAME, inner.text); goto fail; }
+    if (!rc) {
+        rc = w3i_read(a.data, a.len, &w->info, &inner);
+        asset_answer_free(&a);
+        if (rc) { rc = w_fail(why, rc, "%s: %s", W3I_NAME, inner.text); goto fail; }
+        w->has_info = 1;
+        if (w->info.water_tinted) { k->tinted = 1; memcpy(k->tint, w->info.water_rgba, 4); }
+    }
+
     /* the points' depths, once */
     for (int j = 0; j < g->height; ++j)
         for (int i = 0; i < g->width; ++i) {
@@ -148,6 +166,7 @@ const Wc3WaterFrame *wc3_water_frame(const Wc3Water *w, int k)
 }
 
 Wc3WaterCounts wc3_water_counts(const Wc3Water *w) { return w->counts; }
+const W3iInfo *wc3_water_info(const Wc3Water *w) { return w->has_info ? &w->info : NULL; }
 
 int wc3_water_frame_at(const Wc3Water *w, double seconds)
 {
@@ -168,7 +187,11 @@ void wc3_water_colour(const Wc3WaterKind *k, double depth, uint8_t out[4])
         if (f > WC3_WATER_MAX_DEPTH - WC3_WATER_DEEP_LEVEL) f = WC3_WATER_MAX_DEPTH - WC3_WATER_DEEP_LEVEL;
         f /= WC3_WATER_MAX_DEPTH - WC3_WATER_DEEP_LEVEL;
     }
-    for (int c = 0; c < 4; ++c) out[c] = (uint8_t)lround(lo[c] + (hi[c] - lo[c]) * f);
+    for (int c = 0; c < 4; ++c) {
+        double v = lo[c] + (hi[c] - lo[c]) * f;
+        if (k->tinted) v = v * k->tint[c] / 255.0;
+        out[c] = (uint8_t)lround(v);
+    }
 }
 
 int wc3_water_point(const Wc3Water *w, int i, int j, double *depth, uint8_t rgba[4])
@@ -180,5 +203,18 @@ int wc3_water_point(const Wc3Water *w, int i, int j, double *depth, uint8_t rgba
     if (depth) *depth = d;
     if (rgba) wc3_water_colour(&w->kind, d, rgba);
     return 1;
+}
+
+int wc3_water_at(const Wc3Water *w, double x, double y, double *z, uint8_t rgba[4])
+{
+    const W3eGround *g = w->g;
+    double fi = ((w->y0 - y) / w->scale - g->offset_x) / 128, fj = ((x - w->x0) / w->scale - g->offset_y) / 128;
+    double ri = floor(fi + 0.5), rj = floor(fj + 0.5);
+    int i = ri < 0 ? 0 : ri > g->width - 1 ? g->width - 1 : (int)ri, j = rj < 0 ? 0 : rj > g->height - 1 ? g->height - 1 : (int)rj;
+    int on = i == ri && j == rj && fabs(fi - ri) * 128 * w->scale < 0.01 && fabs(fj - rj) * 128 * w->scale < 0.01;
+    const W3ePoint *p = w3e_point(g, i, j);
+    if (z) *z = w3e_water_z(p) * w->scale;
+    if (rgba) wc3_water_colour(&w->kind, (w3e_water_z(p) - w3e_ground_z(p)) / 128, rgba);
+    return on;
 }
 /* }}} */

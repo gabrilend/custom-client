@@ -574,8 +574,71 @@ here: real cliff and ramp models bent (their points' places, decision
 face is lit as if flat), real WC3 water (open question 12), and a
 window.
 
-Not built yet: WC3's water drawn (the plan's steps 2 to 4, decision
-67); a WC3
+**Step 1i is built** (2026-11-05, the same background work): a
+converted map's water drawn as WC3 draws it, tinted by the map's own
+`war3map.w3i`, and the converter's water reconciled with WC3's: the
+water plan's steps 2, 3 (this client's half) and 4. Decisions 70 to 75.
+
+- **Drawn (040, 082, 043):** in a test-map run with WC3's water (081),
+  every water and sea layer of the converted ground is drawn with WC3's
+  own frames (at the sheet's rate) and each point's own colour by its
+  depth: the picture times that colour, alpha too, unlit, fogged as
+  the rest of the world. Lava, slime and buildings' pools keep the
+  game's look. The shader's text moved to a window-free file,
+  `082-water-prep.c`, with the layer's points (`water_prep_layer`), so
+  both are tested without a window (decision 71).
+- **Tinted (083, 081):** a new reader, `083-w3i.c`, reads the map's
+  `war3map.w3i` (versions 18, 25, 28, 31 and later; only its flags,
+  tileset, fog and water tint) from the build's root, where
+  world-edit-to-execute's convert copies it since its draft PR #247.
+  With the tint's flag (0x10000) each colour is the rule's times the
+  tint (decision 72). The fog is read, not used yet.
+- **Reconciled (082):** each point on a WC3 tile point stands at that
+  point's own surface, so a dry corner of a wet cell sinks under its
+  bank as in WC3, where the converter drew it at the wet corner's
+  level; water the converter adds past the map's edge keeps its height
+  and takes the nearest point's colour (decision 73).
+
+Checked (`tests/044-test-client.c`, in the water section, before the
+archives): the w3i reader on made files of versions 18, 25, 28 and 31
+(each field; the tint used only with its flag; a file cut anywhere
+before the tint's end refused, naming the field; versions 17, 20 and 24
+refused); the made map tinted by its own `war3map.w3i`, untinted
+without its flag, refused when unreadable; a world place to its point;
+a made layer's 24 points, plain and as WC3's (the bank's corner sunk:
+2 points moved; 3 points past the grid kept); the shader's text. With
+the real conversions and their real `war3map.w3i` copied in as the
+converter now copies it:
+
+- **War in the Plaguelands**: its w3i (version 25, tileset Y, flags
+  0x1fc7a) tints its water (50, 255, 255, 255 read red first: open
+  question 13); its fog is style 0 (none). Its 5463 wet cells on the
+  grid are exactly WC3's cells with a wet corner (none either side's
+  alone), its surface WC3's at every wet corner; 2624 more wet cells
+  lie past the grid's south edge at its sea level. Its 223 layers'
+  48522 points as 040 draws them: 32901 on a tile point at WC3's
+  surface and colour (none moved), 15621 past the grid.
+- **Master Crafters**: its w3i (version 25, tileset A, flags 0xdc78)
+  sets no tint. Its 15648 wet cells are WC3's exactly; of its 358
+  layers' 93888 points, all on tile points, 31 at dry corners move
+  from the converter's height to WC3's surface.
+
+These w3i fields match world-edit-to-execute's Lua reader on both maps
+(flags, fog heights, density, the tint's four bytes). No memory errors
+under the address and undefined-behaviour checkers. Outside the tests
+(decision 63's way): the water shader compiled and linked on Mesa's
+software renderer (llvmpipe, GL 4.5 core) under a virtual X display,
+all 13 uniforms 040 and the sky set active; two made triangles drawn
+256 x 256 with a made frame and four made point colours, blended over
+a made background, matched as worked out in C on every pixel away from
+a texel's edge and the diagonal (36672 of 36672) for WC3's water
+unfogged (worst 2 of 255) and fogged whole (worst 1), lava (exact)
+and the game's own water (worst 1). Not checked here: real WC3 water
+frames and sheet (open question 12), a real tint's look (open question
+13), and Raylib drawing it in a window.
+
+Not built yet: the map's own fog (read by 083, not drawn: the world's
+fog is the zone's, 026); a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
 its replaceable pictures are left off); 034's prefetch, 040's water and
@@ -727,8 +790,10 @@ return {
    57 to 63).
 1h. ~~Cliffs and ramps bent to the ground, and WC3's water read.~~
    Done (2026-11-05): 079's bend in the model's name, 076 bending the
-   model, 081 reading WC3's water (decisions 64 to 69). WC3's water
-   drawn is next: the plan in decision 67, from its step 2.
+   model, 081 reading WC3's water (decisions 64 to 69).
+1i. ~~WC3's water drawn, tinted and reconciled (the water plan's steps
+   2 to 4).~~ Done (2026-11-05): 082's points and shader, 040 drawing
+   them, 083 reading `war3map.w3i`, 081 tinting (decisions 70 to 75).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1178,6 +1243,54 @@ return {
     real conversions' points against the rule worked out in the test
     from each point's stored numbers.
 
+## Decisions (2026-11-05, step 1i, answered here; the owner may overturn any)
+
+70. **Which water is WC3's.** In a test-map run where 081 opens, every
+    water or sea layer (LiquidType type 0 or 1) of the ground is drawn
+    as WC3's: a converted map's ground holds only its own water (kind
+    1). Lava, slime and buildings' pools keep the game's look. With no
+    WC3 water (no install, sheet, row or frame), everything as before.
+71. **The water shader in its own window-free file (082), with the
+    layer's points**, as decision 58 did for the ground: the test
+    program checks the very points and text the card gets. One shader,
+    a uniform (`wc3`) choosing WC3's branch: the picture times the
+    point's colour, alpha too, unlit (as the viewers draw WC3's water),
+    fogged by the zone's fog as everything else is. The frames are
+    shown at the sheet's `texRate`, not the game's 15 a second.
+72. **The map's tint multiplies each colour**, red, green, blue and
+    alpha each times the tint's over 255, and only when the map's flag
+    0x10000 ("use water tinting colour") is set; the bytes read red,
+    green, blue, alpha, as the published format notes give them
+    (world-edit-to-execute's Lua reader names them blue, green, red:
+    open question 13). A `war3map.w3i` 083 can't read stops WC3's water
+    with its reason, as a broken `war3map.w3e` stops WC3's ground,
+    rather than drawing it untinted unsaid.
+73. **Each drawn point at its own WC3 surface** (the plan's step 4).
+    On both real maps the converter's wet cells on the grid are exactly
+    WC3's cells with a wet corner (WC3's other water-marked cells lie
+    wholly under the ground), and its height at every wet corner is
+    WC3's; only a wet cell's dry corners differ, where the converter
+    keeps the wet level and WC3's surface dips under the bank (31
+    points on Master Crafters, none on War in the Plaguelands). So the
+    drawing takes WC3's surface at every tile point; water past the
+    map's edge (War in the Plaguelands' 2624 cells south of its grid,
+    at its sea level) keeps the file's height and takes the colour of
+    the grid's nearest point. The mover's water (027) stays the
+    converter's: where one swims is the server's ground files'.
+74. **083 reads only what the water needs, and every version WC3's
+    maps use**: 18 (Reign of Chaos: flags and tileset; no fog, no
+    tint), 25, 28 and later (the game's version, four numbers, after
+    the editor's from 28: the published notes; HiveWE may read it from
+    27, which no map uses). It stops at the water tint; a file that
+    ends before it is refused, naming the field; 19 to 24 (betas) and
+    below 18 refused as not supported. No handle: a plain record, in
+    READERS (libwreaders.so too).
+75. **The map's fog is read and kept (083, `wc3_water_info`), not
+    drawn**: the world's fog is the zone's (026, 037) for the sky,
+    ground and water alike, and a converted map's own fog belongs with
+    its lighting, a step of its own. Both real maps set fog style 0
+    (none).
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -1283,6 +1396,16 @@ return {
     HiveWE's reading, recalled rather than read here; checked only
     against a sheet made in the test. On the owner's machine with WC3:
     081 refusing the install's sheet, or a frame not found, says which.
+    (Since step 1i also: the frame repeating once a cell, and laid
+    columns east and rows south as the game's water is, decision 71.)
+13. **The map's water tint, unseen here.** Which flag turns it on
+    (0x10000, the published notes' and HiveWE's reading as recalled;
+    War in the Plaguelands sets both 0x8000 and 0x10000, so it can't
+    tell), and its byte order (red first by the notes; the Lua reader
+    names the bytes blue first). War in the Plaguelands reads as 50,
+    255, 255: a cyan tint red first, a yellow one blue first. On the
+    owner's machine with WC3: its water's colour in WC3 beside a Test
+    Map run says which.
 
 ## Related
 
@@ -1306,7 +1429,10 @@ return {
   (each cell's pieces), 033 (packed for the card) and 038. For step
   1h: `src/079-wc3-cliffs.info.md` (each cliff's bend),
   `src/076-placed-models.info.md` (a model bent by its name),
-  `src/081-wc3-water.info.md` (WC3's water read).
+  `src/081-wc3-water.info.md` (WC3's water read). For step 1i:
+  `src/082-water-prep.info.md` (the water's points and shader),
+  `src/083-w3i.info.md` (the map's settings), `src/040-water.info.md`
+  and 081.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

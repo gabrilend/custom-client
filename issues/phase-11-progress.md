@@ -13,7 +13,7 @@ of this client.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 1108 | [Phase 11 demo](./1108-phase-demo.md) | pending | Phase 4, Phase 7 |
-| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05; step 1g (its ground laid cell by cell by the ground's shader: every tileset in a chunk, each cell's variation) 2026-11-05; step 1h (its cliffs and ramps bent to the ground, and WC3's water read: the first of four water steps) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
+| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05; step 1g (its ground laid cell by cell by the ground's shader: every tileset in a chunk, each cell's variation) 2026-11-05; step 1h (its cliffs and ramps bent to the ground, and WC3's water read: the first of four water steps) 2026-11-05; step 1i (its water drawn as WC3's, tinted by its `war3map.w3i`, each point at WC3's own surface) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
 | 1110 | [A hosted map's models come with it](./1110-a-hosted-maps-models-come-with-it.md) | pending (decided 2026-11-04; from world-edit-to-execute's pull request #227) | 105a, Phase 7, 707, 1101-1107 |
 
 The capstone names the issues to be written when the phase begins
@@ -101,6 +101,19 @@ bent; up to 23.33 unbent). WC3's water is read without a window
 colour by depth), checked on both maps' wet points with a made sheet;
 drawing it is the plan's next three steps. Real WC3 models, water and
 a window unchecked. Decisions 64 to 69 in 1109.
+
+2026-11-05: 1109's step 1i. A converted map's water is drawn as WC3
+draws it: WC3's frames and each point's colour by depth (082's points
+and shader, 040), tinted by the map's own `war3map.w3i` when it says
+(083, a new reader; the converter copies the file since
+world-edit-to-execute's draft PR #247), each point at WC3's own
+surface. The converter's wet cells match WC3's exactly on War in the
+Plaguelands (5463) and Master Crafters (15648); 31 dry-corner points
+on Master Crafters sink to WC3's surface. War in the Plaguelands' w3i
+tints its water; Master Crafters' doesn't. The shader drawn on Mesa's
+software renderer under a virtual display matched on every checked
+pixel. Real WC3 water art, the tint's byte order and a window
+unchecked. Decisions 70 to 75 in 1109.
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

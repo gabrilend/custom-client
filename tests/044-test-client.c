@@ -59,6 +59,8 @@
 #include "../src/079-wc3-cliffs.h"
 #include "../src/080-ground-shader.h"
 #include "../src/081-wc3-water.h"
+#include "../src/082-water-prep.h"
+#include "../src/083-w3i.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -3538,15 +3540,47 @@ static unsigned char *t_water_frame(int f, size_t *len)
     return t_blp2(4, 4, px, len);
 }
 static int t_rgba_is(const uint8_t a[4], int r, int g, int b, int al) { return a[0] == r && a[1] == g && a[2] == b && a[3] == al; }
-/* WC3's colour rule worked out here: the RGBA at depth d (cells) */
-static void t_water_rule(double d, int out[4])
+/* WC3's colour rule worked out here: the RGBA at depth d (cells), then
+ * tinted by `tint` (RGBA) when given */
+static void t_water_rule(double d, const uint8_t *tint, int out[4])
 {
     static const int SMIN[4] = { 10, 20, 30, 100 }, SMAX[4] = { 74, 84, 94, 164 }, DMIN[4] = { 200, 150, 100, 200 }, DMAX[4] = { 0, 50, 100, 255 };
     const int *lo = SMIN, *hi = SMAX;
     double f;
     if (d * 128 <= 64) f = d * 128 < 10 ? 0 : (d * 128 - 10) / 54;
     else { lo = DMIN; hi = DMAX; f = d * 128 >= 72 ? 1 : (d * 128 - 64) / 8; }
-    for (int c = 0; c < 4; ++c) out[c] = (int)floor(lo[c] + (hi[c] - lo[c]) * f + 0.5);
+    for (int c = 0; c < 4; ++c) out[c] = (int)floor((lo[c] + (hi[c] - lo[c]) * f) * (tint ? tint[c] / 255.0 : 1) + 0.5);
+}
+static int t_rgba_near(const uint8_t a[4], const int b[4]) { for (int c = 0; c < 4; ++c) if (abs(a[c] - b[c]) > 1) return 0; return 1; }
+/* a made war3map.w3i: `version` (18, 25, 28, 31), its flags, the main
+ * tileset L, fog style 1 from 1000 to 4000, density 0.25, coloured `fog`,
+ * the water tint `water`; `*tint_end` the byte after the tint (or, for
+ * 18, after the tileset); some of what follows after it */
+static void t_w3i(W3eOut *o, int version, uint32_t flags, const uint8_t fog[4], const uint8_t water[4], size_t *tint_end)
+{
+    o->n = 0;
+    wo32(o, (uint32_t)version); wo32(o, 3); wo32(o, 6052);
+    if (version >= 28) { wo32(o, 1); wo32(o, 31); wo32(o, 1); wo32(o, 12345); }
+    wo_raw(o, "A Name", 7); wo_raw(o, "An Author", 10); wo_raw(o, "", 1); wo_raw(o, "1-8", 4);
+    for (int k = 0; k < 8; ++k) wof(o, (float)(k * 100 - 300));
+    for (int k = 0; k < 4; ++k) wo32(o, 6);
+    wo32(o, 84); wo32(o, 52);
+    wo32(o, flags); wo8(o, 'L');
+    if (version < 25) {                                  /* Reign of Chaos's own fields, not read */
+        static const char RT[] = "text\0title\0sub";
+        wo32(o, 0); wo_raw(o, RT, sizeof RT); wo32(o, 2);
+        *tint_end = o->n - 8 - sizeof RT;
+        return;
+    }
+    wo32(o, (uint32_t)-1); wo_raw(o, "\0text\0title\0", 13);   /* its model, text, title, subtitle */
+    wo32(o, 0);
+    wo_raw(o, "\0\0\0\0", 4);
+    wo32(o, 1); wof(o, 1000); wof(o, 4000); wof(o, 0.25f); wo_raw(o, fog, 4);
+    wo_raw(o, "RAhr", 4); wo_raw(o, "Default", 8); wo8(o, 'L'); wo_raw(o, water, 4);
+    *tint_end = o->n;
+    if (version >= 28) wo32(o, 1);
+    if (version >= 31) { wo32(o, 3); wo32(o, 2); }
+    wo32(o, 0); wo32(o, 0);                              /* no players, no forces */
 }
 
 static void wc3_water_tests(const char *dir, const char *build)
@@ -3575,6 +3609,50 @@ static void wc3_water_tests(const char *dir, const char *build)
         wc3_water_colour(&k, 5, d[1]);
         check(t_rgba_is(c[4], 150, 125, 100, 214) && t_rgba_is(c[5], 100, 100, 100, 228) && t_rgba_is(d[0], 0, 50, 100, 255) && t_rgba_is(d[1], 0, 50, 100, 255),
               "past 64/128 deep, from its least to its most at 72/128 (a quarter at 66/128, half at 68/128), its most beyond");
+    }
+    /* }}} */
+
+    /* {{{ the map's settings (083): its flags, tileset, fog and water tint */
+    {
+        static const uint8_t FOG[4] = { 30, 120, 255, 200 }, WATER[4] = { 50, 255, 128, 240 };
+        W3eOut o = { 0 };
+        size_t end;
+        W3iInfo in;
+        int all = 1;
+        static const int V[3] = { 25, 28, 31 };
+        for (int k = 0; k < 3; ++k) {
+            t_w3i(&o, V[k], 0x1fc7a, FOG, WATER, &end);
+            e = w3i_read(o.b, o.n, &in, &why);
+            all &= !e && in.version == V[k] && in.flags == 0x1fc7a && in.tileset_code == 'L' && in.has_environment && in.fog_style == 1 && in.fog_start == 1000
+                   && in.fog_end == 4000 && in.fog_density == 0.25f && t_rgba_is(in.fog_rgba, 30, 120, 255, 200) && t_rgba_is(in.water_rgba, 50, 255, 128, 240) && in.water_tinted;
+        }
+        check(all, "war3map.w3i, versions 25, 28 (the game's version after the editor's) and 31: its flags, tileset, fog (style, heights, density, colour red first) and water tint, used (flag 0x10000)");
+        t_w3i(&o, 25, 0xfc7a, FOG, WATER, &end);
+        e = w3i_read(o.b, o.n, &in, &why);
+        check(!e && !in.water_tinted && t_rgba_is(in.water_rgba, 50, 255, 128, 240), "without flag 0x10000: the tint read, not used");
+        t_w3i(&o, 18, 0x10000, FOG, WATER, &end);
+        e = w3i_read(o.b, o.n, &in, &why);
+        check(!e && in.version == 18 && in.tileset_code == 'L' && !in.has_environment && !in.water_tinted && t_rgba_is(in.water_rgba, 255, 255, 255, 255) && in.fog_style == 0,
+              "version 18 (Reign of Chaos): its flags and tileset; no fog, no tint (white)");
+        /* each shorter file than its fields: refused, naming where it ends */
+        t_w3i(&o, 31, 0x10000, FOG, WATER, &end);
+        int cut_ok = 1, named = 1;
+        for (size_t n = 0; n < end; ++n) {
+            e = w3i_read(o.b, n, &in, &why);
+            cut_ok &= e == W_ERR_CORRUPT;
+            named &= strstr(why.text, "ends inside its") != NULL;
+        }
+        e = w3i_read(o.b, end, &in, &why);
+        check(cut_ok && named && !e && in.water_tinted, "a version 31 file cut anywhere before its water tint's end: refused as broken, naming the field; cut just after it: read");
+        e = w3i_read(o.b, o.n, &in, &why);
+        int bad_ok = !e;
+        static const uint32_t BADV[3] = { 17, 20, 24 };
+        for (int k = 0; k < 3; ++k) {
+            t_le32(o.b, BADV[k]);
+            bad_ok &= w3i_read(o.b, o.n, &in, &why) == W_ERR_UNSUPPORTED && strstr(why.text, "version") != NULL;
+        }
+        check(bad_ok, "versions 17, 20 and 24: refused as not supported, naming the version");
+        free(o.b);
     }
     /* }}} */
 
@@ -3633,7 +3711,8 @@ static void wc3_water_tests(const char *dir, const char *build)
         check(!e, e ? why.text : "a resolver with the map's folder and the made install opens");
         if (e) goto made_done;
         Wc3Water *w = NULL;
-        e = wc3_water_open(r, NULL, g[0], &w, &why);
+        const double WS = 1 / 30.72, WX0 = 1000, WY0 = 2000;    /* the map's rule: point (i, j) at (WX0 + WS 128 j, WY0 - WS 128 i) */
+        e = wc3_water_open(r, NULL, g[0], WS, WX0, WY0, &w, &why);
         check(!e, e ? why.text : "the map's WC3 water opens");
         if (!e) {
             const Wc3WaterKind *k = wc3_water_kind(w);
@@ -3657,37 +3736,150 @@ static void wc3_water_tests(const char *dir, const char *build)
                 uint8_t c[4];
                 int wet = wc3_water_point(w, p % 4, p / 4, &d, c), ex[4];
                 if (p < 2) { points_ok &= !wet; continue; }
-                t_water_rule(D[p] / 128, ex);
+                t_water_rule(D[p] / 128, NULL, ex);
                 points_ok &= wet && fabs(d - D[p] / 128) < 1e-6 && t_rgba_is(c, ex[0], ex[1], ex[2], ex[3]);
             }
             points_ok &= !wc3_water_point(w, 4, 0, NULL, NULL) && !wc3_water_point(w, 0, 2, NULL, NULL) && !wc3_water_point(w, -1, 0, NULL, NULL);
             check(points_ok, "each point: dry, or its ground above the water, not wet; each wet one its depth (the drawn surface less its ground, a level down counted) and its colour by the rule; outside the grid none");
             snprintf(line, sizeof line, "the map's points: %d wet, %d shallow, %d deep, the deepest %.4f cells", n.wet, n.shallow, n.deep, n.deepest);
             check(n.wet == 6 && n.shallow == 3 && n.deep == 3 && fabs(n.deepest - 255.9 / 128) < 1e-6, line);
+            check(!wc3_water_info(w) && !k->tinted && t_rgba_is(k->tint, 255, 255, 255, 255), "no war3map.w3i in any place: untinted");
+            /* a world place to its point, by the map's rule: every point's
+             * depth (units), a dry one's too, its colour by it */
+            static const double DA[8] = { 127.9, -72.1, 7.9, 27.9, 63.9, 67.9, 227.9, 255.9 };
+            int at_ok = 1, ex[4];
+            for (int p = 0; p < 8; ++p) {
+                double z = 0;
+                uint8_t c[4];
+                int i = p % 4, j = p / 4;
+                t_water_rule(DA[p] / 128, NULL, ex);
+                at_ok &= wc3_water_at(w, WX0 + WS * 128 * j, WY0 - WS * 128 * i, &z, c) == 1 && fabs(z - 127.9 * WS) < 1e-9 && t_rgba_is(c, ex[0], ex[1], ex[2], ex[3]);
+            }
+            uint8_t c[4];
+            double z;
+            t_water_rule(DA[0] / 128, NULL, ex);
+            int between = !wc3_water_at(w, WX0 + WS * 64, WY0, NULL, NULL) && !wc3_water_at(w, WX0 + 0.02, WY0, NULL, NULL) && wc3_water_at(w, WX0 + 0.005, WY0, NULL, NULL);
+            int off = !wc3_water_at(w, WX0 - WS * 128, WY0 + WS * 128, &z, c) && t_rgba_is(c, ex[0], ex[1], ex[2], ex[3]);
+            t_water_rule(DA[7] / 128, NULL, ex);
+            off &= !wc3_water_at(w, WX0 + WS * 128 * 5, WY0 - WS * 128 * 9, NULL, c) && t_rgba_is(c, ex[0], ex[1], ex[2], ex[3]);
+            check(at_ok && between && off, "a world place to its point by the map's rule: on a point (within a hundredth of a yard) its surface and its colour by its depth, a dry point's or one under the ground too; between points or off the grid: not on one, the grid's nearest point's colour");
+
+            /* {{{ a layer's points (082): one chunk over the map's south-west
+             * corner, its corners (r, c) on points (c, 1 - r); cells (0, 0) to
+             * (0, 2) on the grid, cell (1, 0) reaching a row south of it */
+            {
+                AdtTile *t = calloc(1, sizeof *t);
+                const float step = ADT_CHUNK_SIZE / 8;
+                t->nliquids = 1;
+                t->liquids = calloc(1, sizeof *t->liquids);
+                AdtLiquid *q = &t->liquids[0];
+                q->chunk = 5; q->kind = 1;
+                t->chunks[5].x = (float)(WX0 + step); t->chunks[5].y = (float)WY0;
+                q->wet[0][0] = q->wet[0][1] = q->wet[0][2] = q->wet[1][0] = 1;
+                for (int rr = 0; rr < 9; ++rr) for (int cc = 0; cc < 9; ++cc) { q->height[rr][cc] = (float)(127.9 * WS); q->depth[rr][cc] = (uint8_t)(rr * 9 + cc); }
+                q->height[0][0] += 1;                    /* the converter's level over the bank at corner (0, 0) */
+                const double OX = 900, OY = 1900;
+                WaterVerts pv, pw;
+                e = water_prep_layer(t, 0, OX, OY, NULL, &pv, &why);
+                int plain = !e && pv.count == 24 && !pv.colors && !pv.on_grid && !pv.off_grid && !pv.moved
+                            && fabs(pv.vertices[0] - (t->chunks[5].x - OX)) < 1e-4 && fabs(pv.vertices[1] - (t->chunks[5].y - OY)) < 1e-4 && pv.vertices[2] == q->height[0][0]
+                            && fabs(pv.texcoords[0] - t->chunks[5].y / step) < 1e-4 && fabs(pv.texcoords[1] - t->chunks[5].x / step) < 1e-4 && pv.texcoords2[0] == 0;
+                /* the second point of the first cell: corner (0, 1) */
+                plain &= !e && fabs(pv.vertices[3] - (t->chunks[5].x - OX)) < 1e-4 && fabs(pv.vertices[4] - (t->chunks[5].y - step - OY)) < 1e-4 && fabs(pv.texcoords2[2] - 1 / 255.0f) < 1e-7;
+                check(plain, "a layer's points: two triangles a wet cell (24 for 4), placed from the drawing origin, the picture once a cell by world place, the file's height and depth; no colours");
+                e = water_prep_layer(t, 0, OX, OY, w, &pw, &why);
+                int pts_ok = !e && pw.count == 24 && pw.colors && pw.on_grid == 21 && pw.off_grid == 3 && pw.moved == 2;
+                for (int v = 0; !e && v < pw.count; ++v) {
+                    int rr = (int)lround((t->chunks[5].x - (pw.vertices[v * 3] + OX)) / step), cc = (int)lround((t->chunks[5].y - (pw.vertices[v * 3 + 1] + OY)) / step);
+                    int pj = 1 - rr, on = pj >= 0;
+                    t_water_rule(DA[(on ? pj : 0) * 4 + cc] / 128, NULL, ex);
+                    double want = on ? 127.9 * WS : q->height[rr][cc];
+                    pts_ok &= fabs(pw.vertices[v * 3 + 2] - want) < 1e-5 && t_rgba_is(pw.colors + v * 4, ex[0], ex[1], ex[2], ex[3])
+                              && pw.vertices[v * 3] == pv.vertices[v * 3] && pw.vertices[v * 3 + 1] == pv.vertices[v * 3 + 1] && pw.texcoords2[v * 2] == pv.texcoords2[v * 2];
+                }
+                check(pts_ok, "as WC3's water: each point on a tile point at that point's own surface (the bank's corner sunk to it: 2 points moved) and coloured by its depth; the 3 off the grid at the file's height, the nearest point's colour; placed as before");
+                water_verts_free(&pv); water_verts_free(&pw);
+                e = water_prep_layer(t, 1, OX, OY, NULL, &pv, &why);
+                int refused = e == W_ERR_REFUSED;
+                memset(q->wet, 0, sizeof q->wet);
+                e = water_prep_layer(t, 0, OX, OY, w, &pv, &why);
+                check(refused && !e && pv.count == 0 && !pv.vertices, "a layer past the tile's: refused; a layer with no wet cell: no points");
+                check(strstr(WATER_VS, "in vec4 vertexColor;") && strstr(WATER_VS, "col = vertexColor;") && strstr(WATER_FS, "uniform float raw, wc3;")
+                      && strstr(WATER_FS, "if (wc3 > 0.5) { vec4 w = texture(texture0, uv) * col; frag = vec4(mix(w.rgb, fog_col, fog), w.a); return; }"),
+                      "the water shader's text (082): each point's colour carried to the picture, WC3's water the picture times it, alpha too, fogged and unlit");
+                water_verts_free(&pv);
+                free(t->liquids); free(t);
+            }
+            /* }}} */
             wc3_water_free(w);
         }
         /* the refusals: the converter's water stays */
-        e = wc3_water_open(NULL, NULL, g[0], &w, &why);
+        e = wc3_water_open(NULL, NULL, g[0], WS, WX0, WY0, &w, &why);
         check(e == W_ERR_NOT_FOUND && !w, "no resolver: not found");
-        e = wc3_water_open(r, NULL, g[1], &w, &why);
+        e = wc3_water_open(r, NULL, g[0], 0, WX0, WY0, &w, &why);
+        check(e == W_ERR_REFUSED && !w, "a rule's scale of 0: refused");
+        e = wc3_water_open(r, NULL, g[1], WS, WX0, WY0, &w, &why);
         check(e == W_ERR_NOT_FOUND && !w && strstr(why.text, "no row ZSha"), e ? why.text : "a tileset with no row: opened");
         static const struct { char code; WErr want; const char *says; } BAD[4] = {
             { 'A', W_ERR_NOT_FOUND, "Water03.blp is in no place" }, { 'B', W_ERR_CORRUPT, "numTex" }, { 'C', W_ERR_CORRUPT, "Smin_R is 300" }, { 'D', W_ERR_CORRUPT, "texFile is empty" } };
         int bad_ok = 1;
         for (int b = 0; b < 4; ++b) {
             g[0]->tileset_code = BAD[b].code;
-            e = wc3_water_open(r, NULL, g[0], &w, &why);
+            e = wc3_water_open(r, NULL, g[0], WS, WX0, WY0, &w, &why);
             bad_ok &= e == BAD[b].want && !w && strstr(why.text, BAD[b].says) != NULL;
             if (!e) wc3_water_free(w);
         }
         check(bad_ok, "a frame no place has: not found, naming it; numTex 0, a colour past 255, no texFile: refused as broken, naming the column");
+        g[0]->tileset_code = 'L';
         resolver_free(r);
         r = NULL;
+        /* the map's war3map.w3i in its folder: tinted by it when its flag
+         * says, read and untinted when not, refused when broken */
+        {
+            static const uint8_t FOG[4] = { 0, 0, 0, 255 }, TINT[4] = { 128, 255, 0, 200 };
+            static const struct { uint32_t flags; int version; WErr want; int tinted; } W3I[3] = { { 0x10000, 25, W_OK, 1 }, { 0x8000, 31, W_OK, 0 }, { 0x10000, 20, W_ERR_UNSUPPORTED, 0 } };
+            int tint_ok = 1;
+            for (int v = 0; v < 3; ++v) {
+                W3eOut wo = { 0 };
+                size_t end;
+                t_w3i(&wo, 25, W3I[v].flags, FOG, TINT, &end);
+                t_le32(wo.b, (uint32_t)W3I[v].version);
+                t_write(map, "war3map.w3i", wo.b, wo.n);
+                free(wo.b);
+                Resolver *r2 = NULL;
+                Wc3Water *w2 = NULL;
+                e = resolver_open(&place, &r2, &why);
+                if (!e) e = wc3_water_open(r2, NULL, g[0], WS, WX0, WY0, &w2, &why);
+                tint_ok &= e == W3I[v].want;
+                if (W3I[v].want) tint_ok &= !w2 && strstr(why.text, "war3map.w3i") != NULL;
+                if (!e) {
+                    const Wc3WaterKind *k = wc3_water_kind(w2);
+                    const W3iInfo *in = wc3_water_info(w2);
+                    tint_ok &= in && in->version == W3I[v].version && k->tinted == W3I[v].tinted && (!W3I[v].tinted || t_rgba_is(k->tint, 128, 255, 0, 200));
+                    int ex[4];
+                    uint8_t c[4];
+                    for (int p = 2; p < 8; ++p) {
+                        double d;
+                        wc3_water_point(w2, p % 4, p / 4, &d, c);
+                        t_water_rule(d, W3I[v].tinted ? TINT : NULL, ex);
+                        tint_ok &= t_rgba_near(c, ex);
+                    }
+                    wc3_water_at(w2, WX0, WY0, NULL, c);
+                    t_water_rule(127.9 / 128, W3I[v].tinted ? TINT : NULL, ex);
+                    tint_ok &= t_rgba_near(c, ex);
+                    wc3_water_free(w2);
+                }
+                if (r2) resolver_free(r2);
+            }
+            check(tint_ok, "the map's war3map.w3i from its folder: with its tint's flag each colour times the tint (red, green, blue and alpha over 255); without, untinted; a version it can't read: refused, naming the file");
+            snprintf(path, sizeof path, "%s/war3map.w3i", map);
+            remove(path);
+        }
         /* no install: not found */
         place.wc3[0] = '\0';
         e = resolver_open(&place, &r, &why);
         if (!e) {
-            e = wc3_water_open(r, NULL, g[0], &w, &why);
+            e = wc3_water_open(r, NULL, g[0], WS, WX0, WY0, &w, &why);
             check(e == W_ERR_NOT_FOUND && strstr(why.text, "Water.slk"), "no Warcraft III install: not found (no Water.slk), so the converter's water stays");
             resolver_free(r);
             r = NULL;
@@ -3714,6 +3906,10 @@ static void wc3_water_tests(const char *dir, const char *build)
         free(wb);
         check(!e, e ? why.text : "its war3map.w3e reads");
         if (e) return;
+        ConvertedMap m;
+        e = converted_map_read(build, &m, &why);
+        check(!e, e ? why.text : "its map.lua reads");
+        if (e) { w3e_free(g); return; }
         /* an install made for it: its tileset's row, three frames */
         char sheet[4000], id[8];
         t_water_head(sheet, sizeof sheet);
@@ -3739,9 +3935,18 @@ static void wc3_water_tests(const char *dir, const char *build)
         Resolver *r = NULL;
         Wc3Water *w = NULL;
         e = resolver_open(&place, &r, &why);
-        if (!e) e = wc3_water_open(r, NULL, g, &w, &why);
+        if (!e) e = wc3_water_open(r, NULL, g, m.wc3_scale, m.wc3_x0, m.wc3_y0, &w, &why);
         check(!e, e ? why.text : "the converted map's WC3 water opens, its row by its tileset");
         if (!e) {
+            /* its settings, when the build carries war3map.w3i (the converter's draft PR #247) */
+            const W3iInfo *in = wc3_water_info(w);
+            const Wc3WaterKind *kd = wc3_water_kind(w);
+            if (in) {
+                snprintf(line, sizeof line, "its war3map.w3i (version %d, tileset %c, flags %x): fog style %d from %.0f to %.0f, density %.2f, colour %d %d %d %d; water tint %d %d %d %d, %s",
+                         in->version, in->tileset_code, in->flags, in->fog_style, in->fog_start, in->fog_end, in->fog_density, in->fog_rgba[0], in->fog_rgba[1], in->fog_rgba[2], in->fog_rgba[3],
+                         in->water_rgba[0], in->water_rgba[1], in->water_rgba[2], in->water_rgba[3], kd->tinted ? "used" : "not used (no flag 0x10000)");
+                check(in->has_environment && in->tileset_code == g->tileset_code && kd->tinted == ((in->flags & 0x10000) != 0) && (!kd->tinted || !memcmp(kd->tint, in->water_rgba, 4)), line);
+            } else printf("  (no war3map.w3i in %s: its water is untinted)\n", build);
             /* each point worked out here from its stored numbers */
             int wet = 0, shallow = 0, deep = 0, wrong = 0;
             double deepest = 0;
@@ -3758,13 +3963,85 @@ static void wc3_water_tests(const char *dir, const char *build)
                     ++wet;
                     if (dd * 128 <= 64) ++shallow; else ++deep;
                     if (dd > deepest) deepest = dd;
-                    t_water_rule(dd, ex);
+                    t_water_rule(dd, kd->tinted ? kd->tint : NULL, ex);
                     wrong += fabs(d - dd) > 1e-9 || abs(c[0] - ex[0]) > 1 || abs(c[1] - ex[1]) > 1 || abs(c[2] - ex[2]) > 1 || abs(c[3] - ex[3]) > 1;
                 }
             Wc3WaterCounts n = wc3_water_counts(w);
             snprintf(line, sizeof line, "its %d wet points (%d shallow, %d deep, the deepest %.2f cells) each its depth and colour by WC3's rule, worked out here from the stored numbers (%d wrong)",
                      wet, shallow, deep, deepest, wrong);
             check(wet > 0 && !wrong && n.wet == wet && n.shallow == shallow && n.deep == deep && fabs(n.deepest - deepest) < 1e-9, line);
+
+            /* the converter's water against WC3's (the plan's step 4), and
+             * its points as 040 draws them (082): each ground file's layers */
+            int cw = g->width - 1, ch = g->height - 1;
+            unsigned char *conv = calloc((size_t)cw * ch, 1);
+            long cells = 0, outside = 0, twice = 0, verts = 0, on = 0, off = 0, moved = 0, moved_wet = 0, pts_wrong = 0, layers = 0, prep_wrong = 0;
+            double wet_worst = 0;
+            const double s = m.wc3_scale;
+            const float step = ADT_CHUNK_SIZE / 8;
+            AdtTile *t = malloc(sizeof *t);
+            for (int tx = 0; tx < 64; ++tx)
+                for (int ty = 0; ty < 64; ++ty) {
+                    AssetAnswer a;
+                    snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, tx, ty);
+                    if (asset_read(r, NULL, path, ASSET_GROUND, &a, &why)) continue;
+                    WErr bad = adt_read(a.data, a.len, 0, t, &why);
+                    asset_answer_free(&a);
+                    if (bad) { check(0, why.text); continue; }
+                    for (int k = 0; k < t->nliquids; ++k) {
+                        const AdtLiquid *q = &t->liquids[k];
+                        const AdtChunk *c = &t->chunks[q->chunk];
+                        ++layers;
+                        for (int rr = 0; rr < 8; ++rr)
+                            for (int cc = 0; cc < 8; ++cc) {
+                                if (!q->wet[rr][cc]) continue;
+                                ++cells;
+                                double X = (m.wc3_y0 - (c->y - (cc + 0.5) * step)) / s, Y = (c->x - (rr + 0.5) * step - m.wc3_x0) / s;
+                                int i = (int)floor((X - g->offset_x) / 128), j = (int)floor((Y - g->offset_y) / 128);
+                                if (i < 0 || j < 0 || i >= cw || j >= ch) { ++outside; continue; }
+                                twice += conv[j * cw + i];
+                                conv[j * cw + i] = 1;
+                            }
+                        WaterVerts pv;
+                        if (water_prep_layer(t, k, 0, 0, w, &pv, &why)) { ++prep_wrong; continue; }
+                        verts += pv.count; on += pv.on_grid; off += pv.off_grid; moved += pv.moved;
+                        for (int v = 0; v < pv.count; ++v) {
+                            /* the point, worked out here from the place */
+                            double wx = pv.vertices[v * 3], wy = pv.vertices[v * 3 + 1];
+                            double fi = ((m.wc3_y0 - wy) / s - g->offset_x) / 128, fj = ((wx - m.wc3_x0) / s - g->offset_y) / 128;
+                            int i = (int)lround(fi), j = (int)lround(fj), rr = (int)lround((c->x - wx) / step), cc = (int)lround((c->y - wy) / step);
+                            int is_on = i >= 0 && j >= 0 && i < g->width && j < g->height;
+                            int ci = i < 0 ? 0 : i >= g->width ? g->width - 1 : i, cj = j < 0 ? 0 : j >= g->height ? g->height - 1 : j;
+                            const W3ePoint *p = w3e_point(g, ci, cj);
+                            double wz = p->water_level - 89.6, gz = p->height + (p->layer_height - 2) * 128.0;
+                            int ex[4];
+                            t_water_rule((wz - gz) / 128, kd->tinted ? kd->tint : NULL, ex);
+                            double want = is_on ? wz * s : q->height[rr][cc];
+                            pts_wrong += fabs(pv.vertices[v * 3 + 2] - want) > 1e-3 || !t_rgba_near(pv.colors + v * 4, ex);
+                            if (is_on && p->has_water && wz > gz) { double dz = fabs(q->height[rr][cc] - wz * s); if (dz > wet_worst) wet_worst = dz; moved_wet += dz > 0.001; }
+                        }
+                        water_verts_free(&pv);
+                    }
+                    adt_free(t);
+                }
+            free(t);
+            long both = 0, conv_only = 0, wc3_only = 0;
+            for (int j = 0; j < ch; ++j)
+                for (int i = 0; i < cw; ++i) {
+                    int any = 0;
+                    for (int q = 0; q < 4; ++q) {
+                        const W3ePoint *p = w3e_point(g, i + (q & 1), j + (q >> 1));
+                        any |= p->has_water && p->water_level - 89.6 > p->height + (p->layer_height - 2) * 128.0;
+                    }
+                    both += any && conv[j * cw + i]; conv_only += !any && conv[j * cw + i]; wc3_only += any && !conv[j * cw + i];
+                }
+            free(conv);
+            snprintf(line, sizeof line, "the converter's %ld wet cells on the grid (%ld past it, none twice) are WC3's cells with a wet corner: %ld both, %ld its alone, %ld WC3's alone; at wet corners its surface WC3's (worst %.4f yards)",
+                     cells - outside, outside, both, conv_only, wc3_only, wet_worst);
+            check(cells > 0 && !twice && !conv_only && !wc3_only && wet_worst < 0.001, line);
+            snprintf(line, sizeof line, "its %ld water layers' %ld points drawn as WC3's (082): %ld on a tile point, at WC3's own surface and colour (%ld moved off the converter's height, at dry corners alone), %ld past the grid at the file's height (%ld wrong)",
+                     layers, verts, on, moved, off, pts_wrong);
+            check(verts > 0 && on + off == verts && !prep_wrong && !pts_wrong && !moved_wet, line);
             wc3_water_free(w);
         }
         if (r) resolver_free(r);

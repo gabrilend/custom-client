@@ -90,6 +90,7 @@
 #include "074-tables.h"
 #include "075-adt-heights.h"
 #include "078-wc3-ground.h"
+#include "081-wc3-water.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -228,6 +229,7 @@ typedef struct {
     Tables   *tables;                                 /* the client's tables, per row, through the resolver in a test-map run (074-tables.h) */
     ConvertedMap conv;                                /* a test map's map.lua: which map, where she starts (073-converted-map.h) */
     Wc3Ground   *wc3_ground;                          /* a test map's own WC3 ground and tilesets, when found (078-wc3-ground.h) */
+    Wc3Water    *wc3_water;                           /* its WC3 water, when found (081-wc3-water.h) */
     AdtHeights *adt_heights;                          /* a test map's heights from its own ground files, while the server has none (075) */
     char   world_in_map[700];                         /* a test map's default --world: <folder>/world */
 } App;
@@ -705,6 +707,20 @@ int main(int argc, char **argv)
     app->waters = liquid_new();
     app->water = water_new(&app->chain, &app->textures, &why);
     if (!app->water) return start_failed(app, 1, "%s", why.text);
+    /* a test map's water as WC3 draws it, when its sheet and frames are
+     * found (a player with WC3: 081, tinted by its war3map.w3i);
+     * otherwise said, and the converter's water stays */
+    if (app->wc3_ground) {
+        WErr w = wc3_water_open(app->assets, &app->chain, wc3_ground_w3e(app->wc3_ground), app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_water, &why);
+        if (w == W_OK) {
+            const Wc3WaterKind *k = wc3_water_kind(app->wc3_water);
+            Wc3WaterCounts n = wc3_water_counts(app->wc3_water);
+            water_use_wc3(app->water, app->wc3_water);
+            printf("test map: its water drawn as WC3's (%s: %d frames, %d wet points, %d deep)%s\n", k->row, k->frames, n.wet, n.deep,
+                   k->tinted ? ", tinted by its war3map.w3i" : wc3_water_info(app->wc3_water) ? ", untinted (its war3map.w3i sets no tint)" : ", untinted (no war3map.w3i in its build)");
+        } else if (w == W_ERR_NOT_FOUND) printf("test map: its water keeps the converter's look: %s\n", why.text);
+        else return start_failed(app, 1, "%s", why.text);
+    }
     app->doodads = doodads_new(&app->chain, app->assets, &app->textures, app->solids, app->waters, app->water, &why);
     if (!app->doodads) return start_failed(app, 1, "%s", why.text);
     if (app->test_map) doodads_wc3_scale(app->doodads, app->conv.wc3_scale);   /* a map's own WC3 models, in yards by its rule (1109 step 1c) */
@@ -1063,6 +1079,7 @@ int main(int argc, char **argv)
     doodads_free(app->doodads);
     ground_free(app->ground);
     water_free(app->water);
+    wc3_water_free(app->wc3_water);                           /* after the water drawer that drew with it */
     horizon_free(app->horizon);
     sky_free(app->sky);
     UnloadShader(model_sh);
