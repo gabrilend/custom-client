@@ -53,8 +53,9 @@ Window-free (CORE: the test program and the executable).
   file, a Reign of Chaos file, the flag unset, a scale not above 0, or
   a start or end that isn't a number.
 - `int map_fog_apply(const MapFog *f, LightNow *l);`
-  Puts the map's fog into `l` (its colour, start and end; the rest of
-  the light stays the zone's) and returns 1; returns 0 and leaves `l`
+  Puts the map's fog into `l` (its colour, start and end, and fog_mode
+  0: none of the original's modes, 1109 step 1u; the rest of the light
+  stays the zone's) and returns 1; returns 0 and leaves `l`
   as it is when `f` is NULL or off.
 - `int map_fog_frame(const MapFog *f, int under, float farclip, LightNow *l);`
   A frame's fog, as 043 sets it after reading the zone's light into

@@ -707,7 +707,7 @@ int main(int argc, char **argv)
     LightNow light;
     int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
     if (light_id < 0 && !lights.none) printf("light: map %d has no lights in Light.dbc; a plain grey day is used\n", app->map_id);
-    else printf("light: %02d:%02d, light %d, fog from %.0f to %.0f yards\n", (int)hours, (int)(fmodf(hours, 1.0f) * 60), light_id, light.fog_start, light.fog_end);
+    else printf("light: %02d:%02d, light %d, fog from %.0f to %.0f yards (fog mode %d)\n", (int)hours, (int)(fmodf(hours, 1.0f) * 60), light_id, light.fog_start, light.fog_end, light.fog_mode);
     /* a test map's own fog, from its war3map.w3i (084, 1109 step 1j), in
      * place of the zone's over everything drawn, out of the water; a map
      * that turns none on, or has no war3map.w3i, keeps the zone's */

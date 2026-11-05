@@ -1878,7 +1878,7 @@ static void converted_tests(const char *dir, const char *build)
         memcpy(&upx, &px, 4); memcpy(&upy, &py, 4); memcpy(&upz, &pz, 4); memcpy(&uin, &in36, 4); memcpy(&uout, &out36, 4); memcpy(&uz, &zero, 4);
         (void)F1;
         /* Light, 15 fields: id, map, x, y, z, inner, outer, 8 sets */
-        uint32_t la_cells[15] = { 10, 900, uz, uz, uz, uz, uz, 1, 2, 0, 0, 0, 0, 0, 0 };
+        uint32_t la_cells[15] = { 10, 900, uz, uz, uz, uz, uz, 1, 2, 7, 0, 0, 0, 0, 0 };   /* its storm set: 7 (step 1u) */
         /* Two more spheres on map 900 that both hold the point (2000, 2000):
          * Q (id 14) centred 5 yards off, inner 10, outer 200, set 1 (red at noon);
          * P (id 15) centred 40 yards off, inner 50, outer 60, set 4 (green).
@@ -1891,37 +1891,46 @@ static void converted_tests(const char *dir, const char *build)
             float v[5] = { (17066.666f - sph[k][1]) * 36, sph[k][2] * 36, (17066.666f - sph[k][0]) * 36, sph[k][3] * 36, sph[k][4] * 36 };
             memcpy(us[k], v, sizeof v);
         }
-        uint32_t lb_cells[90] = { 11, 900, uz, uz, uz, uz, uz, 3, 3, 0, 0, 0, 0, 0, 0,
+        /* step 1u: the fog rules' maps' defaults, sets 5 and 6 (a fog end of
+         * 180 inches, 5 yards; shares of -0.5 and -3): 16 on map 571 (the
+         * second fog mode), 17 on map 1 and 18 on map 2 (the first) */
+        uint32_t lb_cells[135] = { 11, 900, uz, uz, uz, uz, uz, 3, 3, 0, 0, 0, 0, 0, 0,
                                   12, 900, upx, upy, upz, uin, uout, 4, 99, 0, 0, 0, 0, 0, 0,
                                   13, 901, upx, upy, upz, uin, uout, 4, 4, 0, 0, 0, 0, 0, 0,
                                   14, 900, us[0][0], us[0][1], us[0][2], us[0][3], us[0][4], 1, 1, 0, 0, 0, 0, 0, 0,
                                   15, 900, us[1][0], us[1][1], us[1][2], us[1][3], us[1][4], 4, 4, 0, 0, 0, 0, 0, 0,
-                                  1, 0, uz, uz, uz, uz, uz, 1, 1, 0, 0, 0, 0, 0, 0 };
+                                  1, 0, uz, uz, uz, uz, uz, 1, 1, 0, 0, 0, 0, 0, 0,
+                                  16, 571, uz, uz, uz, uz, uz, 5, 5, 0, 0, 0, 0, 0, 0,
+                                  17, 1, uz, uz, uz, uz, uz, 5, 5, 0, 0, 0, 0, 0, 0,
+                                  18, 2, uz, uz, uz, uz, uz, 6, 6, 0, 0, 0, 0, 0, 0 };
         static unsigned char b[4000];
         size_t n = t_dbc(b, 1, 15, la_cells, "", 1);
         t_write(la, "DBFilesClient/Light.dbc", b, n);
-        n = t_dbc(b, 6, 15, lb_cells, "", 1);
+        n = t_dbc(b, 9, 15, lb_cells, "", 1);
         t_write(lb, "DBFilesClient/Light.dbc", b, n);
         t_write(lc, "DBFilesClient/Light.dbc", b, n);
         /* LightIntBand, 34 fields: id, count, 16 times, 16 colours. Set 1's
          * fog (band 7, id 8): black at midnight, red at noon; its sky
          * overhead (band 2, id 3): blue all day; set 4's fog (id 62): green.
          * Every other band no place has: a placeholder row, the grey day's. */
-        uint32_t ib[3 * 34];
+        uint32_t ib[4 * 34];
         memset(ib, 0, sizeof ib);
         ib[0] = 3; ib[1] = 1; ib[2] = 0; ib[18] = 0x0000FF;
         ib[34] = 8; ib[35] = 2; ib[36] = 0; ib[37] = 1440; ib[52] = 0x000000; ib[53] = 0xFF0000;
         ib[68] = 62; ib[69] = 1; ib[70] = 0; ib[86] = 0x00FF00;
-        n = t_dbc(b, 3, 34, ib, "", 1);
+        ib[102] = 116; ib[103] = 1; ib[104] = 0; ib[120] = 0x0000FF;   /* storm set 7's fog (step 1u): blue all day */
+        n = t_dbc(b, 4, 34, ib, "", 1);
         t_write(lb, "DBFilesClient/LightIntBand.dbc", b, n);
         /* LightFloatBand: set 1's fog ends 1000 yards off (36000), starts at half;
          * set 4's ends 200 (7200), starts at a quarter */
-        float fv[4] = { 36000, 0.5f, 7200, 0.25f };
-        uint32_t fb[4 * 34];
+        /* (step 1u) set 5's ends at 180 inches with a share of -0.5, set 6's
+         * at 200 yards with -3, storm set 7's at 2000 yards with a half */
+        float fv[10] = { 36000, 0.5f, 7200, 0.25f, 180, -0.5f, 7200, -3, 72000, 0.5f };
+        uint32_t fb[10 * 34];
         memset(fb, 0, sizeof fb);
-        static const uint32_t FID[4] = { 1, 2, 19, 20 };
-        for (int k = 0; k < 4; ++k) { fb[k * 34] = FID[k]; fb[k * 34 + 1] = 1; memcpy(&fb[k * 34 + 18], &fv[k], 4); }
-        n = t_dbc(b, 4, 34, fb, "", 1);
+        static const uint32_t FID[10] = { 1, 2, 19, 20, 25, 26, 31, 32, 37, 38 };
+        for (int k = 0; k < 10; ++k) { fb[k * 34] = FID[k]; fb[k * 34 + 1] = 1; memcpy(&fb[k * 34 + 18], &fv[k], 4); }
+        n = t_dbc(b, 10, 34, fb, "", 1);
         t_write(lb, "DBFilesClient/LightFloatBand.dbc", b, n);
         /* LightParams: set 1 names skybox 5, its water 0.5 / 0.6 / 0.7 / 0.8 (fields 6-9); set 4 has none */
         float wa[4] = { 0.5f, 0.6f, 0.7f, 0.8f };
@@ -1945,10 +1954,10 @@ static void converted_tests(const char *dir, const char *build)
         Tables *lts = le ? NULL : tables_new(lr, NULL);
         LightTables lt;
         if (!le) le = light_open(&lt, lts, place.log, &why);
-        check(!le && !lt.none && lt.ncopies == 2 && lt.from == ASSET_FROM_OVERLAY && lt.nlights == 7 && lt.lights[0].id == 10 && lt.lights[0].fallback
+        check(!le && !lt.none && lt.ncopies == 2 && lt.from == ASSET_FROM_OVERLAY && lt.nlights == 10 && lt.lights[0].id == 10 && lt.lights[0].fallback
               && lt.lights[2].id == 12 && fabsf(lt.lights[2].x - 100) < 0.01f && fabsf(lt.lights[2].y - 200) < 0.01f && fabsf(lt.lights[2].inner - 10) < 0.001f
               && fabsf(lt.lights[2].outer - 30) < 0.001f && lt.lights[2].set[LIGHT_UNDERWATER] == 99 && lt.skyboxes,
-              le ? why.text : "Light's rows from both places, the map's first (074's search): seven lights, a sphere's place, radii and sets in world yards");
+              le ? why.text : "Light's rows from both places, the map's first (074's search): ten lights, a sphere's place, radii and sets in world yards");
         if (!le) {
             LightNow far, mid, six, eve, in, half, other, under;
             AssetCounts c0, c1;
@@ -1959,12 +1968,15 @@ static void converted_tests(const char *dir, const char *build)
                      far.water_alpha[0], far.water_alpha[1], far.water_alpha[2], far.water_alpha[3]);
             check(id == 10 && far.fog[0] == 1 && far.fog[1] == 0 && far.fog[2] == 0 && far.fog_end == 1000 && far.fog_start == 500 && far.sky[0][2] == 1 && far.sky[0][0] == 0
                   && far.sun[0] == LIGHT_GREY_SUN && far.shade[1] == LIGHT_GREY_SHADE && !strcmp(far.skybox, "Environments\\Stars\\Made.m2")
-                  && far.water_alpha[0] == 0.7f && far.water_alpha[1] == 0.8f && far.water_alpha[2] == 0.5f && far.water_alpha[3] == 0.6f, line);   /* ocean (fields 8, 9), then river (6, 7) */
+                  && far.water_alpha[0] == 0.7f && far.water_alpha[1] == 0.8f && far.water_alpha[2] == 0.5f && far.water_alpha[3] == 0.6f && far.fog_mode == 2, line);   /* ocean (fields 8, 9), then river (6, 7) */
             light_at(&lt, 900, 1000, 1000, 0, 0, LIGHT_CLEAR, &mid);
             light_at(&lt, 900, 1000, 1000, 0, 6, LIGHT_CLEAR, &six);
             light_at(&lt, 900, 1000, 1000, 0, 18, LIGHT_CLEAR, &eve);
-            snprintf(line, sizeof line, "the fog's colour through the day: midnight %.3f red, 6:00 %.3f (half way to noon's), 18:00 %.3f (half way back, round midnight)", mid.fog[0], six.fog[0], eve.fog[0]);
-            check(mid.fog[0] == 0 && fabsf(six.fog[0] - 0.5f) < 0.002f && fabsf(eve.fog[0] - 0.5f) < 0.002f, line);
+            LightNow one;
+            light_at(&lt, 900, 1000, 1000, 0, 1, LIGHT_CLEAR, &one);
+            snprintf(line, sizeof line, "the fog's colour through the day, each cut down to a whole 255th (step 1u): midnight %.0f/255 red, 1:00 %.3f/255 (21.25 cut to 21), 6:00 %.3f/255 (127.5 cut to 127), 18:00 %.3f/255 (half way back, round midnight)",
+                     mid.fog[0] * 255, one.fog[0] * 255, six.fog[0] * 255, eve.fog[0] * 255);
+            check(mid.fog[0] == 0 && one.fog[0] == 21.0f / 255 && six.fog[0] == 127.0f / 255 && eve.fog[0] == 127.0f / 255, line);
             id = light_at(&lt, 900, 100, 205, 0, 12, LIGHT_CLEAR, &in);
             snprintf(line, sizeof line, "inside the sphere's inner radius (5 yards from it): light %d whole, fog (%.2f, %.2f, %.2f) from %.0f to %.0f, water %.2f, skybox \"%s\"",
                      id, in.fog[0], in.fog[1], in.fog[2], in.fog_start, in.fog_end, in.water_alpha[0], in.skybox);
@@ -1987,6 +1999,33 @@ static void converted_tests(const char *dir, const char *build)
             id = light_at(&lt, 901, 100, 205, 0, 12, LIGHT_CLEAR, &other);
             check(id == 13 && other.fog[1] == 1 && other.fog_end == 200,
                   "inside that map's sphere: the sphere, laid over row 1");
+            /* {{{ the original's fog rules and storms (1109 step 1u) */
+            LightNow f1, f2, f571, st0, sth, st1, sti, sthalf, plain;
+            int i1 = light_at(&lt, 1, 0, 0, 0, 12, LIGHT_CLEAR, &f1);
+            int i2 = light_at(&lt, 2, 0, 0, 0, 12, LIGHT_CLEAR, &f2);
+            int i571 = light_at(&lt, 571, 0, 0, 0, 12, LIGHT_CLEAR, &f571);
+            snprintf(line, sizeof line, "the fog's end stored as 180 inches (5 yards): on map 1 light %d ends at %.1f (the floor, not 5), its share -0.5 kept: starts at %.1f, fog mode %d",
+                     i1, f1.fog_end, f1.fog_start, f1.fog_mode);
+            check(i1 == 17 && f1.fog_end == LIGHT_FOG_END_LEAST && f1.fog_start == -5 && f1.fog_mode == 1, line);
+            snprintf(line, sizeof line, "the same set on map 571 (the second fog mode): light %d, fog from %.1f (a negative share counts as 0) to %.1f, fog mode %d", i571, f571.fog_start, f571.fog_end, f571.fog_mode);
+            check(i571 == 16 && f571.fog_start == 0 && f571.fog_end == LIGHT_FOG_END_LEAST && f571.fog_mode == 2, line);
+            snprintf(line, sizeof line, "a share of -3 held to -1: light %d on map 2, fog from %.1f to %.1f", i2, f2.fog_start, f2.fog_end);
+            check(i2 == 18 && f2.fog_start == -200 && f2.fog_end == 200 && f2.fog_mode == 1, line);
+            light_at(&lt, 900, 1000, 1000, 0, 12, LIGHT_CLEAR, &plain);
+            light_at_weather(&lt, 900, 1000, 1000, 0, 12, LIGHT_CLEAR, 0, &st0);
+            light_at_weather(&lt, 900, 1000, 1000, 0, 12, LIGHT_CLEAR, 0.5f, &sth);
+            light_at_weather(&lt, 900, 1000, 1000, 0, 12, LIGHT_CLEAR, 1, &st1);
+            snprintf(line, sizeof line, "a storm over the default (its storm set 7: blue fog to 2000 yards): none %s light_at's; half (%.2f, %.2f, %.2f) from %.0f to %.0f; whole (%.2f, %.2f, %.2f) from %.0f to %.0f",
+                     memcmp(&st0, &plain, sizeof plain) ? "differs from" : "is", sth.fog[0], sth.fog[1], sth.fog[2], sth.fog_start, sth.fog_end, st1.fog[0], st1.fog[1], st1.fog[2], st1.fog_start, st1.fog_end);
+            check(!memcmp(&st0, &plain, sizeof plain) && fabsf(sth.fog[0] - 0.5f) < 1e-5f && sth.fog[1] == 0 && fabsf(sth.fog[2] - 0.5f) < 1e-5f && fabsf(sth.fog_end - 1500) < 0.01f
+                  && fabsf(sth.fog_start - 750) < 0.01f && st1.fog[0] == 0 && st1.fog[2] == 1 && st1.fog_end == 2000 && st1.fog_start == 1000 && fabsf(sth.sky[0][2] - 0.8f) < 1e-5f, line);   /* the storm set has no sky band: the grey day's 0.6 there, half over the clear set's blue 1 */
+            int si = light_at_weather(&lt, 900, 100, 205, 0, 12, LIGHT_CLEAR, 1, &sti);
+            light_at_weather(&lt, 900, 100, 220, 0, 12, LIGHT_CLEAR, 1, &sthalf);
+            snprintf(line, sizeof line, "a whole storm in the sphere with no storm set: light %d keeps its own green fog (%.2f, %.2f, %.2f); half way out, half its and half the stormy default's (%.2f, %.2f, %.2f)",
+                     si, sti.fog[0], sti.fog[1], sti.fog[2], sthalf.fog[0], sthalf.fog[1], sthalf.fog[2]);
+            check(si == 12 && sti.fog[0] == 0 && sti.fog[1] == 1 && sti.fog[2] == 0 && sti.fog_end == 200
+                  && fabsf(sthalf.fog[1] - 0.5f) < 1e-5f && fabsf(sthalf.fog[2] - 0.5f) < 1e-5f && sthalf.fog[0] == 0, line);
+            /* }}} */
             id = light_at(&lt, 900, 100, 205, 0, 12, LIGHT_UNDERWATER, &under);
             asset_counts(lr, &c1);
             fflush(place.log);
@@ -6124,10 +6163,10 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         int same = ran == 2 && t_receipts_same(r1, r2, diff, sizeof diff);
         snprintf(line, sizeof line, "run twice (1109 step 5): the two receipts' counts are %s (all but started, ended and seconds)", diff);
         check(same && res[0].end_x == res[1].end_x && res[0].end_y == res[1].end_y && res[0].end_z == res[1].end_z && res[0].distance == res[1].distance, line);
-        snprintf(line, sizeof line, "the light where she ends, at noon (026 through 074, 1109 step 1t): %s%d, the tables %s, fog from %.1f to %.1f yards%s, colour (%.3f, %.3f, %.3f), sky (%.3f, %.3f, %.3f), twice the same",
+        snprintf(line, sizeof line, "the light where she ends, at noon (026 through 074, 1109 step 1t): %s%d, the tables %s, fog from %.1f to %.1f yards%s (fog mode %d: none of the original's), colour (%.3f, %.3f, %.3f), sky (%.3f, %.3f, %.3f), twice the same",
                  h->light < 0 ? "none (the set's tables are empty) " : "light ", h->light, h->light_tables ? "there" : "in no place", h->fog_start, h->fog_end,
-                 h->fog_from_map ? " (the map's own)" : "", h->fog_red, h->fog_green, h->fog_blue, h->sky_red, h->sky_green, h->sky_blue);
-        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->light < 0 && h->fog_end > 0 && h->fog_start <= h->fog_end
+                 h->fog_from_map ? " (the map's own)" : "", h->fog_mode, h->fog_red, h->fog_green, h->fog_blue, h->sky_red, h->sky_green, h->sky_blue);
+        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->light < 0 && h->fog_mode == 0 && h->fog_end > 0 && h->fog_start <= h->fog_end
               && (h->fog_from_map || (h->fog_red == LIGHT_GREY_FOG && h->fog_green == LIGHT_GREY_FOG && h->fog_end <= LIGHT_GREY_FOG_END)) && h->sky_blue == LIGHT_GREY_SKY
               && res[1].fog_end == h->fog_end && res[1].fog_red == h->fog_red && res[1].light == h->light, line);
         snprintf(line, sizeof line, "the placed models in the headless world (091, 1109 step 1o): %d models and %d buildings read, %d placed copies (%d WC3 models and %d stand-ins walked through, %d left out), %d solid copies, %d solid triangles; %d steps on models' floors, %d against their walls",
@@ -6348,6 +6387,11 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
 
 int main(int argc, char **argv)
 {
+    /* each check's line goes out whole, as it is written: the parts write
+     * their warnings to the standard error, unbuffered, and with the
+     * output sent to a file a fully buffered stdout let one land in the
+     * middle of a check's line (1109 step 1u) */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
     const char *client = argc > 2 ? argv[2] : "/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data";
     Settings *st = settings_new();                        /* the tests' settings store (014-settings.h), renewed where a test needs defaults */

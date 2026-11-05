@@ -1352,6 +1352,52 @@ the original (from 306's clean-room notes, not run); any real 3.3.5a
 light table (none here); the window's sky and fog (raylib isn't here;
 043 compiles under gcc and clang -Werror).
 
+**Step 1u is built** (2026-11-05, the same background work): the
+original's light rules from 306's notes, in `src/026-light.c`.
+Decisions 151 to 156.
+
+- **The test program's output (044):** its standard output is now line
+  buffered, so a warning a part writes to the standard error lands
+  between check lines, not inside one, and `grep -c '^  ok:'` counts
+  every check again (decision 156).
+- **Colours in whole 255ths (026):** each colour band's value, after the
+  blend between its two moments, is cut down to a whole 255th, as the
+  original stores it; lights and storms are blended after that, unrounded
+  (decision 151).
+- **The fog's rules (026):** on the blended light, the start's share of
+  the end is held to -1 to 1 and the end is no nearer than 10 yards; the
+  far clip still ends it, as before (084, 173b6). Below map 530 a
+  negative share is kept (the fog starts behind the eye); from map 530
+  on, the second fog mode, it counts as 0 (decisions 152, 153). The
+  light says which mode its fog follows (`fog_mode`: 1, 2, or 0 for the
+  grey day and a test map's own fog); 043 prints it and the run with no
+  window counts it in the receipt. The second mode's curve, its rate and
+  its end pushed to the far clip are not built (decision 153).
+- **Storms (026):** `light_at_weather` lays each light's storm set
+  (Light's field 10, under water 11) over its own by the storm's strength,
+  0 to 1; a light naming none keeps its own. Nothing reads the weather
+  yet, so 043 and the run with no window pass 0 (decision 154).
+- **Left, with reasons (decision 155):** zone lights, override lights,
+  the indoor fog blend, and the second fog mode's curve.
+
+Checked (`tests/044-test-client.c`): made tables: the fog's colour at
+1:00 (21.25 cut to 21) and 6:00 and 18:00 (127.5 cut to 127); a fog end
+stored as 180 inches is 10 yards, not 5, with its share of -0.5 kept on
+map 1 (fog from -5) and counted as 0 on map 571 (from 0), and a share
+of -3 held to -1; a storm of 0 the same as no storm, half laying half
+the storm set (fog colour, distances; a band the storm set lacks the
+grey day's), whole laying it all; a light with no storm set keeping its
+own in a whole storm, half of it and half the stormy default between its
+radii. On the converter builds: the run with no window's fog mode 0
+(their sets' tables are empty: the grey day, or the map's own fog).
+
+Not checked: every rule here against the original (306's clean-room
+notes, not run): the truncation (rather than rounding to the nearest),
+which values it applies to, and whether lights are blended before or
+after it; the 10-yard floor and the share's range applied once to the
+blended light rather than to each; map 530 as the second mode's first
+map; the storm sets' field numbers (026's layout, recalled).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1361,9 +1407,10 @@ the asset forge's real set;
 a placeholder row for tables other than a creature's (step 1r gives
 every table the client reads a layout, but only 041 and 088 ask for
 one); the layouts written out for the converter (decision 134); the
-light's other differences from the original (306: rounding each colour
-to a 255th, fog end held to 10 yards and the far clip, the second fog
-mode, storms, zone and override lights); logging in, and the `lost-connection` ending
+light's other differences from the original (306: the second fog
+mode's curve and rate, zone and override lights, the indoor fog blend,
+the seven-ring sky dome; decision 155), and reading the weather for
+storms (decision 154); logging in, and the `lost-connection` ending
 (Phase 5's 609).
 
 ## Intended behavior
@@ -1558,6 +1605,10 @@ return {
    the grey day said when the tables are missing, and the light where
    she ends in the run with no window and its receipt (decisions 145
    to 150).
+1u. ~~The original's light rules.~~ Done (2026-11-05): colours cut to
+   whole 255ths, the fog end's floor and the start's range, the two fog
+   modes' start rule, storm sets by strength, and the test program's
+   output line buffered (decisions 151 to 156).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2651,6 +2702,69 @@ return {
     parameter row names and no place has is no skybox for that light
     (no placeholder row is asked for: it would have no model to name).
 
+## Decisions (2026-11-05, step 1u, answered here; the owner may overturn any)
+
+151. **Colours are cut down to whole 255ths after the time blend.** 306's
+    note: "after blending between two times, the original cuts each
+    colour channel down to a whole step of 255". Read as truncation on
+    the 0-255 scale (with a thousandth's margin for a float that lands
+    a hair under a whole step), on each colour band of each set, before
+    a storm set or other lights are blended over it; those blends, and
+    the fog distances, are not rounded (the note names only the time
+    blend and colours).
+152. **The fog's floor and range are applied once, to the blended
+    light.** The end no nearer than 10 yards; the start's share of the
+    end held to -1 to 1, the start then that share of the (floored) end.
+    The note doesn't say whether the original applies them to each
+    light or to the blend; once, at the end, is the simpler and gives
+    the same answer wherever a single light is used. They apply only to
+    fog from the light tables: not to this client's grey day (its own
+    fixed fog) or a test map's own fog (084). The far clip ending the
+    fog is unchanged (084's `map_fog_frame`, 173b6).
+153. **The second fog mode: chosen and its start rule kept; its curve
+    left.** From map 530 on (306: "maps numbered 530 and above when
+    shaders are available"; this client always draws with shaders) a
+    negative share counts as 0; below 530 it is kept, so the fog starts
+    behind the eye (the shaders' fog clamps, so this draws). The light
+    says its mode (`fog_mode`), 043 prints it and the receipt counts it.
+    Not built: the end pushed to the far clip when at least 27.78 yards,
+    the rate from 1.5 to 7 and its doubling under water, and the curve.
+    The notes give no formula for the rate, and say the curve is in the
+    original's shipped shader files, which aren't here; pushing the end
+    out while drawing the straight-line fog would thin the fog well
+    below the original's, so the end stays the table's until the curve
+    is read. Both modes are drawn straight-line from start to end.
+154. **Storm sets laid over by strength, with nothing reading the
+    weather yet.** `light_at_weather` lays each light's storm set
+    (Light's field 10; under water 11) over its own set by the storm's
+    strength, 0 to 1, before the lights are blended; a light that names
+    no storm set keeps its own, and a band the storm set lacks takes
+    the grey day's value (as decision 145 for any set). The field
+    numbers are 026's layout (recalled, unchecked). The weather comes
+    from the server (Phase 5) and nothing here reads it, so 043 and the
+    run with no window pass 0 and draw as before; `light_at` is
+    `light_at_weather` with 0.
+155. **Left, where 306's notes run out.** Zone lights ("up to 5 zone
+    lights by percentage") and override lights ("with their own
+    fades"): the notes name no table, field or fade rule, so building
+    them would be invention. The indoor fog blend (outdoor fog into a
+    building group's own over its first 25 yards): it needs the WMO
+    groups' fog and their boundaries, which this client doesn't read
+    yet (305). The seven-ring dome (note 4.4) is its own step (037).
+    The fog's colour as sky colour 6 was already so: the sky's five
+    colours are bands 2 to 6 and the fog band 7, the sixth (026's
+    layout, recalled).
+156. **The test program's output is line buffered.** The parts write
+    their warnings to the standard error, unbuffered; with both sent to
+    one file, the test program's fully buffered output let a warning
+    land inside a check's line, so a count of lines starting "  ok:"
+    missed it. Its `main` now sets its standard output line buffered.
+    The interleave falls where the buffer happens to fill, so it came
+    and went: step 1s's saved runs count the same either way (dd14's
+    Master Crafters 564), and step 1t's last dd14 Master Crafters run
+    counted 575 by line start against 576 checks; the 576 reported was
+    right. No new numbered file: `.file-index-counter` stays at 98.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -2848,7 +2962,8 @@ return {
   and 043; [303](./303-wdt-and-streaming.md) (the WDT parser). For
   step 1t: `src/026-light.info.md` (the light through the tables), 074,
   097, 089, 043 and 084; [306](./306-light-and-sky.md) (the light and
-  sky, and the original's notes).
+  sky, and the original's notes). For step 1u: 026 (the original's
+  colour, fog and storm rules), 084, 089, 043 and 044's `main`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

@@ -66,8 +66,9 @@ WErr map_w3i_read(Resolver *r, MpqChain *chain, W3iInfo *out, WWhy *why);
  * a start or end that isn't a number. */
 void map_fog_from_w3i(const W3iInfo *in, double yards_per_unit, MapFog *out);
 
-/* Puts the map's fog into `l` (its colour, start and end; the rest of
- * the light stays the zone's) and returns 1; returns 0 and leaves `l`
+/* Puts the map's fog into `l` (its colour, start and end, and fog_mode
+ * 0: none of the original's modes, 1109 step 1u; the rest of the light
+ * stays the zone's) and returns 1; returns 0 and leaves `l`
  * as it is when `f` is NULL or off. */
 int map_fog_apply(const MapFog *f, LightNow *l);
 

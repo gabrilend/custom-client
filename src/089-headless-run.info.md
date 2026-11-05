@@ -73,7 +73,9 @@ the Light row whose colours weigh most there, -1 for the fixed grey day;
 light_tables 1 when the four light tables are in some place; light_hours,
 the time of day it was taken at, noon unless 043's --hour; fog_from_map 1
 when a test map's own war3map.w3i fog is laid over it, as the window
-does; fog_start and fog_end in yards, fog_red/green/blue the window's
+does; fog_mode, the original's fog mode the light's fog follows (026,
+step 1u: 1 below map 530, 2 from it, 0 for the grey day or the map's
+own fog); fog_start and fog_end in yards, fog_red/green/blue the window's
 clear colour, sky_red/green/blue the sky overhead, each 0-1).
 
 Window-free (CORE: the test program and the executable).
@@ -108,7 +110,8 @@ Window-free (CORE: the test program and the executable).
   test map's own fog over it as the window draws it, 084): the light
   whose colours weigh most (-1 none: the grey day), whether the light
   tables are there, the fog's start and end (yards), its colour (the
-  window's clear colour) and the sky overhead, 0-1
+  window's clear colour) and the sky overhead, 0-1; the mode the fog
+  follows (026: 0, 1 or 2)
 - `WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy *why);`
   Runs it: the start (world_start_open), her figure (her character from
   025, else the baseline set's stand-in, 088), each creature's look
