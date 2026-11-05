@@ -11,6 +11,20 @@ built as they come into sight; the far horizon from the low-detail map
 (`src/039-horizon.c`). A walking tile load stalls about 14 ms (docs/047).
 Checked: a far jump leaves exactly what starting there gives.
 
+**The WDT parser: built 2026-11-05** (1109's step 1s, decisions 140
+to 144), simpler than below: `src/098-wdt.c` in the reader library
+reads a WDT's bytes (`wdt_read`) into a struct with no pointers (MVER,
+MPHD's flags, MAIN's 64 x 64 tile flags, and for a one-building map
+MWMO's name and MODF's placement); `wdt_has_tile`, `wdt_big_alpha`,
+`wdt_wmo_only` ask it. Finding the file stays the caller's (the
+resolver). The ground (033), its reading ahead (034), the heights
+(075) and the run with no window (089) now take a tile the WDT doesn't
+list as open sea without asking for its file. Checked against
+world-edit-to-execute's own WDT writer and five maps it converted;
+the original's WDTs only where an install is. Not built: the global
+WMO placed as the map (it is read and named, not drawn), and the
+streaming policy below (034 and 043's ring stay as they are).
+
 ## Intended behavior
 
 **Since 2026-10-07:** the streamer thread below becomes loading stations

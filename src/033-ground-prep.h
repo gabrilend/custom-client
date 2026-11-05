@@ -44,6 +44,9 @@ typedef struct {
     const Wc3Ground *wc3;             /* also places its cliffs in each tile's doodads (078, 079) */
     char      map_name[64];
     int       big_alpha;              /* 1: the map's blend maps are the 8-bit form (020-adt.h) */
+    int       ntiles;                 /* tiles its WDT lists (098-wdt.h; 1109 step 1s) */
+    uint8_t   tiles[4096];            /* 1: the WDT lists tile (tile x * 64 + tile y): it has a ground file */
+    char      wmo[260];               /* a map that is one building and no ground: the building's name (098), else "" */
     MapWorld *world;
     double    ox, oy;
 } GroundPlace;
@@ -86,8 +89,9 @@ typedef struct {
                                        * its chunk's four pictures where it has one; NULL: no chunk on the WC3 grid */
 } GroundPrep;
 
-/* Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
- * with `why`. */
+/* Reads the map's WDT (098) for its blend-map form and its tile list,
+ * and fills `p`. W_OK, or a code with `why` (no WDT in any place, or one
+ * that isn't one: no MPHD or MAIN). */
 WErr  ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);
 
 /* Prepares tile (tx, ty). `on_card`, when given, answers whether a
@@ -96,7 +100,13 @@ WErr  ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const
  * unpacked (sending finds them there, or unpacks them itself if they
  * have gone since). W_OK with `*out` (freed by ground_prep_free);
  * W_ERR_NOT_FOUND when the map has no ground file there (open sea: not a
- * failure, nothing to draw); another code, with `why`, for a fault. */
+ * failure, nothing to draw): its WDT lists no tile there (no file is
+ * asked for), or lists one no place has (said on the standard error:
+ * 1109 step 1s); another code, with `why`, for a fault. */
+/* 1 when the map's WDT lists tile (tx, ty) (it has a ground file), 0
+ * otherwise or off the grid. */
+int   ground_place_has_tile(const GroundPlace *p, int tx, int ty);
+
 WErr  ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void *ctx, const char *name), void *ctx, GroundPrep **out, WWhy *why);
 
 /* Frees a prepared tile. `keep_adt`: 1 when the ground file was taken

@@ -22,6 +22,7 @@
 #include "061-mdx.h"
 #include "088-figure-model.h"
 #include "091-model-solids.h"
+#include "098-wdt.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -199,6 +200,8 @@ typedef struct {
     unsigned char loaded[64 * 64];      /* 1: its ground file read for its water; 2: none there */
     int          big_alpha, tiles_entered, ground_files;
     unsigned char entered[64 * 64];
+    int          tiles_known;           /* 1: its WDT's tile list read (098; 1109 step 1s); 0: each file asked for */
+    unsigned char listed[64 * 64];      /* 1: the WDT lists the tile */
 } Here;
 
 static float ground_at(void *ctx, float x, float y, float z_top, float *gx, float *gy)
@@ -231,11 +234,15 @@ static void near_tiles(Here *h, double x, double y)
         for (int b = ty - 1; b <= ty + 1; ++b) {
             if (a < 0 || b < 0 || a > 63 || b > 63 || h->loaded[a * 64 + b]) continue;
             h->loaded[a * 64 + b] = 2;
+            if (h->tiles_known && !h->listed[a * 64 + b]) continue;   /* the WDT lists no ground here: open sea, no file asked for */
             char path[300];
             snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", h->ws->map_name, h->ws->map_name, b, a);   /* west-east number first */
             AssetAnswer f;
             WWhy w;
-            if (asset_read(h->ws->assets, &h->ws->chain, path, ASSET_GROUND, &f, &w)) continue;   /* open sea */
+            if (asset_read(h->ws->assets, &h->ws->chain, path, ASSET_GROUND, &f, &w)) {   /* open sea */
+                if (h->tiles_known) fprintf(h->log, "headless: the map's WDT lists tile %d, %d, but %s is in no place: no ground there\n", a, b, path);
+                continue;
+            }
             AdtTile *t = calloc(1, sizeof *t);
             if (t && !adt_read(f.data, f.len, h->big_alpha, t, &w)) {
                 liquid_add_tile(h->waters, a, b, t);
@@ -433,8 +440,15 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
         AssetAnswer f;
         WWhy w;
         if (!asset_read(ws.assets, &ws.chain, wdt, ASSET_GROUND, &f, &w)) {
-            int big = adt_wdt_big_alpha(f.data, f.len, &w);
-            h->big_alpha = big > 0;
+            Wdt *t = malloc(sizeof *t);
+            if (t && !wdt_read(f.data, f.len, t, &w)) {
+                h->big_alpha = wdt_big_alpha(t);
+                h->tiles_known = 1;
+                for (int k = 0; k < WDT_TILES; ++k) h->listed[k] = (t->tile_flags[k] & WDT_MAIN_HAS_ADT) != 0;
+                fprintf(log, "headless: its WDT lists %d ground tile%s%s%s\n", t->ntiles, t->ntiles == 1 ? "" : "s",
+                        wdt_wmo_only(t) ? "; it is one building, not yet placed: " : "", wdt_wmo_only(t) ? t->wmo : "");
+            } else if (t) fprintf(log, "headless: %s: %s; each tile's file is asked for\n", wdt, w.text);
+            free(t);
             asset_answer_free(&f);
         }
     }

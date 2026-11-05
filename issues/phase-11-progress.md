@@ -243,3 +243,12 @@ values (a size of 1, an opaque alpha, a visible "unknown Map 900"), a
 table no place has can take one, and the window's creatures (041) ask
 for them as 088 does. The baseline set's widths come from the layouts.
 Decisions 134 to 139 in 1109.
+
+2026-11-05: 1109's step 1s, a map's tile list. `098-wdt.c`, in the
+reader library, reads a map's WDT file: its flags, which of its 64 x 64
+tiles have ground, and for a one-building map that building and where
+it stands. The ground, its reading ahead, the heights and the run with
+no window now take the WDT's list as the map's tiles, so a tile it
+doesn't list is open sea without asking for a file. World-edit-to-
+execute's own WDT writer and five maps it converted agree with the
+reader tile for tile. Decisions 140 to 144 in 1109.

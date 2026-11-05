@@ -172,6 +172,10 @@ typedef struct {
  * can't be read. */
 int adt_wdt_big_alpha(const unsigned char *s, size_t len, WWhy *why);
 
+/* One MDDF (`doodad` 1: 36 bytes) or MODF (0: 64 bytes) entry at `e` as
+ * an AdtPlace, as adt_read reads them (also a WDT's MODF: 098-wdt.h). */
+void adt_place_read(const unsigned char *e, int doodad, AdtPlace *p);
+
 /* Reads one ground file. W_OK; otherwise a code, and `why` names what was
  * wrong and where (block tag, chunk index). `out` is large (about 5 MB):
  * allocate it, don't put it on the stack. */

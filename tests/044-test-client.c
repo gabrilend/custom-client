@@ -73,6 +73,7 @@
 #include "../src/091-model-solids.h"
 #include "../src/094-wc3-pathing.h"
 #include "../src/097-table-layouts.h"
+#include "../src/098-wdt.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -1435,6 +1436,24 @@ static size_t t_dbc(unsigned char *out, uint32_t rows, uint32_t fields, const ui
     memcpy(out + 20 + rows * fields * 4, text, text_len);
     return 20 + rows * fields * 4 + text_len;
 }
+/* a made WDT (098): MVER 18, MPHD `flags` (32 bytes), MAIN with `on`'s
+ * tiles (tile x * 64 + tile y, -1 ending; flags 1), MWMO `wmo`, and a
+ * MODF when `modf` (64 bytes); `main_len` MAIN's size (32768 whole).
+ * Returns its length; `out` 40000 bytes or more. */
+static size_t t_wdt(unsigned char *out, uint32_t flags, const int *on, size_t main_len, const char *wmo, const unsigned char *modf)
+{
+    size_t at = 0;
+    memset(out, 0, 40000);
+    memcpy(out, "REVM", 4); t_le32(out + 4, 4); t_le32(out + 8, 18); at = 12;
+    memcpy(out + at, "DHPM", 4); t_le32(out + at + 4, 32); t_le32(out + at + 8, flags); at += 8 + 32;
+    memcpy(out + at, "NIAM", 4); t_le32(out + at + 4, (uint32_t)main_len);
+    for (int k = 0; on && on[k] >= 0; ++k) if ((size_t)on[k] * 8 + 4 <= main_len) t_le32(out + at + 8 + (size_t)on[k] * 8, 1);
+    at += 8 + main_len;
+    size_t wl = wmo[0] ? strlen(wmo) + 1 : 0;
+    memcpy(out + at, "OMWM", 4); t_le32(out + at + 4, (uint32_t)wl); memcpy(out + at + 8, wmo, wl); at += 8 + wl;
+    if (modf) { memcpy(out + at, "FDOM", 4); t_le32(out + at + 4, 64); memcpy(out + at + 8, modf, 64); at += 8 + 64; }
+    return at;
+}
 /* map.lua of five parts (each a line of fields, "" to leave it out), read back */
 static WErr t_conv(const char *folder, const char *format, const char *map, const char *start, const char *rule, const char *more, ConvertedMap *m, WWhy *why)
 {
@@ -1546,6 +1565,53 @@ static void converted_tests(const char *dir, const char *build)
         t_write_text(folder, "map.lua", "return { format = 1, map = { id = 900, directory = 'x' } \n");
         e = converted_map_read(folder, &m, &why);
         check(e == W_ERR_CORRUPT, "a map.lua that isn't Lua data: corrupt");
+    }
+    /* }}} */
+
+    /* {{{ a map's tile list, from its WDT (098; 1109 step 1s) */
+    {
+        unsigned char *b = malloc(40000);
+        Wdt *w = malloc(sizeof *w);
+        WWhy ww;
+        static const int ON[] = { 33 * 64 + 30, 33 * 64 + 31, 34 * 64 + 32, -1 };   /* not the same turned round: which number is which shows */
+        size_t n = t_wdt(b, 0x4, ON, 32768, "", NULL);
+        WErr we = wdt_read(b, n, w, &ww);
+        check(!we && w->version == 18 && w->flags == 4 && w->ntiles == 3 && wdt_has_tile(w, 33, 30) && wdt_has_tile(w, 34, 32) && !wdt_has_tile(w, 30, 33)
+              && !wdt_has_tile(w, 32, 34) && !wdt_has_tile(w, 64, 0) && !wdt_has_tile(w, -1, 5) && !wdt_has_tile(NULL, 33, 30)
+              && wdt_big_alpha(w) == 1 && wdt_big_alpha(w) == adt_wdt_big_alpha(b, n, &ww) && !wdt_wmo_only(w) && !w->wmo[0] && !w->has_place,
+              we ? ww.text : "a ground map's WDT: version 18, its flags, its three tiles listed by tile x * 64 + tile y (and not the other way round), 8-bit blend maps, no building");
+        unsigned char e[64];
+        memset(e, 0, sizeof e);
+        t_le32(e, 0); t_le32(e + 4, 7);
+        float pos[3] = { 100, 50, 200 }, rot[3] = { 0, 90, 0 }, lo[3] = { 90, 40, 190 }, hi[3] = { 110, 60, 210 };
+        for (int k = 0; k < 3; ++k) { memcpy(e + 8 + k * 4, &pos[k], 4); memcpy(e + 20 + k * 4, &rot[k], 4); memcpy(e + 32 + k * 4, &lo[k], 4); memcpy(e + 44 + k * 4, &hi[k], 4); }
+        e[58] = 3;
+        n = t_wdt(b, 0x1, NULL, 32768, "World\\wmo\\Dungeon\\Made\\Made.wmo", e);
+        we = wdt_read(b, n, w, &ww);
+        check(!we && w->ntiles == 0 && wdt_wmo_only(w) && !strcmp(w->wmo, "World\\wmo\\Dungeon\\Made\\Made.wmo") && w->has_place && w->place.uid == 7
+              && fabsf(w->place.x - (17066.666f - 200)) < 0.01f && fabsf(w->place.y - (17066.666f - 100)) < 0.01f && w->place.z == 50 && w->place.rot[1] == 90
+              && w->place.doodad_set == 3 && w->place.scale == 1 && fabsf(w->place.hi[0] - (17066.666f - 190)) < 0.01f && w->place.lo[2] == 40 && !wdt_big_alpha(w),
+              we ? ww.text : "a map that is one building: no tile, its building's name (MWMO) and where it stands (MODF, in world axes as an ADT's building)");
+        int bad = 0;
+        n = t_wdt(b, 0, ON, 32768, "", NULL);
+        b[0] = 'X';
+        bad += wdt_read(b, n, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "MVER");
+        n = t_wdt(b, 0, ON, 100, "", NULL);
+        bad += wdt_read(b, n, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "MAIN block is 100 bytes");
+        n = t_wdt(b, 0, ON, 32768, "", NULL);
+        bad += wdt_read(b, 60 + 100, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "MAIN block at byte 52") && strstr(ww.text, "past the file's end");
+        memcpy(b + 12, "XXXX", 4);
+        bad += wdt_read(b, n, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "no MPHD");
+        n = t_wdt(b, 0, ON, 32768, "", NULL);
+        memcpy(b + 52, "XXXX", 4);
+        bad += wdt_read(b, n, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "no MAIN");
+        n = t_wdt(b, 0, NULL, 32768, "", e);
+        t_le32(b + n - 64 - 4, 10);                       /* MODF says 10 bytes: then the file runs on past it as another block */
+        bad += wdt_read(b, n - 54, w, &ww) == W_ERR_CORRUPT && strstr(ww.text, "MODF block is 10 bytes");
+        bad += wdt_read(NULL, 0, w, &ww) == W_ERR_CORRUPT;
+        check(bad == 7, "a WDT that isn't one: refused naming what is wrong (no MVER first, a short MAIN, a block past the end, no MPHD, no MAIN, a short MODF, nothing)");
+        free(w);
+        free(b);
     }
     /* }}} */
 
@@ -2013,6 +2079,49 @@ static void converted_tests(const char *dir, const char *build)
             if (src && !strcmp(src, "map")) ++by_map;
             wanted[uid] = 1;
             for (int k = 0; k < 3; ++k) where[uid][k] = lua_value_number(lua_value_item(at, k + 1));
+        }
+        {
+            /* its WDT's tile list (098; 1109 step 1s): the converter's own, each tile it lists with its ground file and no other */
+            AssetAnswer wa;
+            Wdt *wd = malloc(sizeof *wd);
+            snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m.directory, m.directory);
+            WErr we = asset_read(r, NULL, path, ASSET_GROUND, &wa, &why);
+            if (!we) { we = wdt_read(wa.data, wa.len, wd, &why); asset_answer_free(&wa); }
+            int agree = 0, listed = 0, files = 0, first = -1;
+            for (int x = 0; !we && x < 64; ++x)
+                for (int y = 0; y < 64; ++y) {
+                    AssetAnswer a;
+                    snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, y, x);   /* tile (x, y): west-east number first */
+                    int file = !asset_read(r, NULL, path, ASSET_GROUND, &a, &why);
+                    if (file) asset_answer_free(&a);
+                    int on = wdt_has_tile(wd, x, y);
+                    files += file; listed += on; agree += file == on;
+                    if (on && first < 0) first = x * 64 + y;
+                }
+            snprintf(line, sizeof line, "its WDT (the converter's, read by 098): version %u, %d tiles listed and %d ground files, the same tiles (%d of 4096 agree); 8-bit blend maps; a ground map, no building",
+                     wd->version, listed, files, agree);
+            check(!we && wd->version == 18 && listed > 0 && listed == files && agree == 4096 && wdt_big_alpha(wd) && !wdt_wmo_only(wd) && !wd->wmo[0] && !wd->has_place,
+                  we ? why.text : line);
+            /* the client asks its list, not every file: a tile it doesn't list is open sea before any file is asked for */
+            GroundPlace gp;
+            int unlisted = -1;
+            for (int k = 0; k < 4096 && unlisted < 0; ++k) if (!wdt_has_tile(wd, k / 64, k % 64)) unlisted = k;
+            WErr ge = ground_place_init(&gp, NULL, r, m.directory, NULL, 0, 0, &why);
+            GroundPrep *gprep = NULL;
+            WErr gt = ge || unlisted < 0 ? W_ERR_REFUSED : ground_prep_tile(&gp, unlisted / 64, unlisted % 64, NULL, NULL, &gprep, &why);
+            check(!ge && gp.ntiles == listed && first >= 0 && ground_place_has_tile(&gp, first / 64, first % 64) && !ground_place_has_tile(&gp, unlisted / 64, unlisted % 64)
+                  && gt == W_ERR_NOT_FOUND && strstr(why.text, "WDT lists no ground") && !gprep && gp.big_alpha == 1 && !gp.wmo[0],
+                  ge ? why.text : "the ground's tiles are the WDT's (033): one it doesn't list is open sea, no file asked for");
+            AdtHeights *ah = NULL;
+            WErr he = adt_heights_open(r, NULL, m.directory, &ah, &why);
+            MapTile *mt = he || first < 0 ? NULL : adt_heights_tile(ah, 0, first / 64, first % 64, &why);
+            WWhy why2;
+            MapTile *none = he || unlisted < 0 ? NULL : adt_heights_tile(ah, 0, unlisted / 64, unlisted % 64, &why2);
+            check(!he && mt && !none && strstr(why2.text, "WDT lists no ground") && adt_heights_made(ah) == 1,
+                  he ? why.text : "and the heights' (075): a listed tile made, one not listed open sea without a file");
+            if (mt) maps_free_tile(mt);
+            adt_heights_free(ah);
+            free(wd);
         }
         AssetAnswer wdt;
         snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m.directory, m.directory);
@@ -6987,6 +7096,41 @@ int main(int argc, char **argv)
         s = mpq_chain_read(&gc, "World\\Maps\\Northrend\\Northrend.wdt", &len, &from);
         check(s && adt_wdt_big_alpha(s, len, &why) == 1, "Northrend's are the 8-bit form");
         free(s);
+        {
+            /* the tile lists (098; 1109 step 1s): Kalimdor's, and every map's in Map.dbc, some of them one building */
+            Wdt *wd = malloc(sizeof *wd);
+            s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor.wdt", &len, &from);
+            WErr we = s ? wdt_read(s, len, wd, &why) : W_ERR_NOT_FOUND;
+            free(s);
+            snprintf(line, sizeof line, "Kalimdor's WDT lists %d tiles, Astranaar's (Kalimdor_32_26: tile 26, 32) among them, not the other way round; ground, no building", we ? 0 : wd->ntiles);
+            check(!we && wd->version == 18 && wd->ntiles > 100 && wdt_has_tile(wd, 26, 32) && !wdt_wmo_only(wd) && !wdt_big_alpha(wd), we ? why.text : line);
+            unsigned char *ms = mpq_chain_read(&gc, "DBFilesClient\\Map.dbc", &len, &from);
+            Dbc md;
+            int maps = 0, read = 0, buildings = 0, placed = 0, ground = 0;
+            char first_bad[600] = "";
+            if (ms && !dbc_open(&md, ms, len, &why))
+                for (uint32_t row = 0; row < md.rows; ++row) {
+                    const char *dir = dbc_text(&md, row, 2);
+                    char wp[300];
+                    if (!dir || !dir[0]) continue;
+                    snprintf(wp, sizeof wp, "World\\Maps\\%s\\%s.wdt", dir, dir);
+                    unsigned char *ws = mpq_chain_read(&gc, wp, &len, &from);
+                    if (!ws) continue;                         /* a map row with no files (test and unused maps) */
+                    ++maps;
+                    if (!wdt_read(ws, len, wd, &why)) {
+                        ++read;
+                        size_t wl = strlen(wd->wmo);
+                        if (wdt_wmo_only(wd)) { ++buildings; placed += wd->has_place && wl > 4 && !strcasecmp(wd->wmo + wl - 4, ".wmo"); }
+                        else ground += wd->ntiles > 0;
+                    } else if (!first_bad[0]) snprintf(first_bad, sizeof first_bad, "%.200s: %.300s", wp, why.text);
+                    free(ws);
+                }
+            free(ms);
+            snprintf(line, sizeof line, "every map's WDT reads (%d of %d%s%.100s): %d with ground tiles, %d one building, %d of those naming a .wmo and where it stands",
+                     read, maps, first_bad[0] ? "; " : "", first_bad, ground, buildings, placed);
+            check(maps > 10 && read == maps && buildings > 0 && placed == buildings && ground + buildings == maps, line);
+            free(wd);
+        }
 
         AdtTile *t = malloc(sizeof *t);
         s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor_32_26.adt", &len, &from);

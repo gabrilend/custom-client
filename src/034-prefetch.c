@@ -87,7 +87,9 @@ static void read_tile(Prefetch *pf, int i, GroundPrep **ground, int *state)
     *state = 0;
     pthread_mutex_lock(&pf->lock);
     int prepare = pf->place && !pf->skip[i];
+    int unlisted = pf->place && !ground_place_has_tile(pf->place, tx, ty);
     pthread_mutex_unlock(&pf->lock);
+    if (unlisted) { *state = 2; return; }                 /* the map's WDT lists no ground here (open sea): no file asked for (1109 step 1s) */
     if (prepare) {
         /* the ground prepared: its file read (and so kept) on the way */
         int got = ground_prep_tile(pf->place, tx, ty, pf->on_card, pf->on_card_ctx, ground, &why);
