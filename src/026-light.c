@@ -60,7 +60,7 @@ WErr light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why)
         l->x = 17066.666f - pz / 36.0f; l->y = 17066.666f - px / 36.0f; l->z = py / 36.0f;
         l->inner = as_float(dbc_u32(d, r, 6)) / 36.0f;
         l->outer = as_float(dbc_u32(d, r, 7)) / 36.0f;
-        for (uint32_t s = 0; s < 5; ++s) l->set[s] = 8 + s <= d->fields ? dbc_u32(d, r, 8 + s) : 0;   /* 074 refused one narrower than 9 */
+        for (uint32_t s = 0; s < 5; ++s) l->set[s] = 8 + s <= d->fields ? dbc_u32(d, r, 8 + s) : 0;   /* 074 refused one narrower than 12 (097: sets 1 to 5 read, 1109 step 1w) */
     }
     t->record1 = -1;
     for (int k = 0; k < t->nlights && t->record1 < 0; ++k) if (t->lights[k].id == 1) t->record1 = k;

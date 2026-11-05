@@ -1469,6 +1469,58 @@ building fog's layout and units; the blend's straight line and the box
 as the group's boundary; the window's weather (raylib isn't here; 043
 compiles under gcc and clang -Werror).
 
+**Step 1w is built** (2026-11-05, the same background work): the
+tables' layouts held to the converter's. Decisions 166 to 171; the new
+check `tests/100-layouts-match-converter.lua`.
+
+- **The check (100):** given a world-edit-to-execute tree (`--wete DIR`;
+  its `src/` is enough, so an exported commit works), it has the
+  converter's own `src/wowbuild/dbc.lua` write one row of every table
+  in its LAYOUTS, every column a different value (whole numbers from
+  the column's place, signed ones below zero, decimals, texts naming
+  the column), then reads the written bytes back through this client's
+  table reader (016) by 097's layout and compares, column by column:
+  the fields and bytes a row, the name (a localised text's columns by
+  their base name), the kind, the value read back, the localised mask,
+  and that every column the converter's `seen` says this client reads
+  is one 097 marks as read. Columns 097 reads that `seen` doesn't list
+  are printed as notes. With no tree it says so and passes (decision
+  166).
+- **097 in the reader library:** the check asks the layouts from Lua,
+  so 097 moved from CORE's own list to READERS (CORE still has it,
+  through READERS; it needs only 013) (decision 167).
+- **One disagreement, on this side:** the converter's Light (#260)
+  says this client reads its fields 8 to 12; 097 marked only 8 and 9
+  read, though 026 reads all five sets since step 1u (the storm sets
+  10 and 11, and 12, read and not yet used). 097 now marks 10 to 12
+  read, so a Light copy narrower than 12 fields is refused (decision
+  168).
+- **The light tables' widths now name the converter:** Light 15,
+  LightParams 9, LightIntBand and LightFloatBand 34 are the baseline
+  set's and #260's alike.
+- **044:** a build's width check takes the four light tables as well,
+  when the build has them (one converted with #260), and passes them
+  over when it doesn't.
+
+Checked: against world-edit-to-execute's commit 306b40f40 (#260, its
+`src/` exported to the scratch folder; ai-stuff left as it was), all
+eleven tables the converter writes agree: AreaTable (36), CreatureDisplayInfo
+(16), CreatureModelData (28), Faction (57), FactionTemplate (14), Light
+(15), LightFloatBand (34), LightIntBand (34), LightParams (9),
+LoadingScreens (4) and Map (66). Planted disagreements were caught and
+taken back: LightParams' Glow as a whole number (its kind and its value
+read back), Map's ExpansionID and RaidOffset swapped (both names and
+values), and Light's sets 3 to 5 unmarked (the converter's `seen`).
+On the two #260 builds, 4 of 4 light tables are as wide as 097's.
+
+Not checked: either copy against a 3.3.5a file (still none in either
+project); the nine tables of 097 the converter doesn't write
+(CreatureDisplayInfoExtra, CharStartOutfit, ItemDisplayInfo,
+CharHairGeosets, CharacterFacialHairStyles, CharSections,
+HelmetGeosetVisData, LiquidType, LightSkybox), whose widths come from
+the readers, the test program's made tables and the baseline set
+(decision 169).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1688,6 +1740,11 @@ return {
    building's fogs and 026 blends them in indoors, not yet called;
    a converted map's own light (#260) taken by the checks, and "no row
    1" said only for a map with no default (decisions 157 to 165).
+1w. ~~The tables' layouts held to the converter's.~~ Done (2026-11-05):
+   `tests/100-layouts-match-converter.lua` has the converter write a
+   row of each of its eleven tables and reads it back by 097; all agree
+   once 097 marks Light's sets 3 to 5 read; 097 is in the reader
+   library (decisions 166 to 171).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2920,6 +2977,45 @@ return {
     DBFilesClient/Light.dbc. The id (20000 on these maps) isn't fixed in
     the checks: it is whatever the map's own default is.
 
+166. **The layouts are held to the converter's by its own written
+    bytes.** A Lua check by the repo's "matches Lua" pattern (050, 062,
+    064: a project folder, `--build`, `--wete`), not a comparison of
+    the two lists' texts: the converter's own `dbc.write` makes the
+    file, this client's own 016 and 097 read it, so what is compared is
+    what one writes and the other reads. It skips, saying so, when no
+    world-edit-to-execute tree is given, since the tree is outside this
+    repo (an exported commit is enough). A disagreement is a failure;
+    a column this client reads that the converter's `seen` doesn't
+    list is a note (decision 170).
+167. **097 moves into the reader library.** The check reads the layouts
+    through `libwreaders.so` from LuaJIT, as 050, 062 and 064 read
+    their parts; 097 needs only 013 and keeps no state, so it belongs
+    with the readers, and any Lua caller can ask it the same way. CORE
+    takes it through READERS as before; nothing else changes.
+168. **Light's sets 3 to 5 are read (the converter was right).** 026
+    reads all five of a light's parameter sets (fields 8 to 12) since
+    step 1u, but 097 still marked 10 to 12 unchecked; #260's `seen`
+    lists all five. 097 now marks them read by 026, so 074 refuses a
+    Light copy narrower than 12 fields where it refused one narrower
+    than 9. The fifth set (field 12) is read and not yet used; that it
+    is the ghost world's is recalled. Every Light this client has met
+    (the baseline set's, #260's, the test program's) is 15 wide.
+169. **The nine tables the converter doesn't write stay unchecked in
+    width.** CreatureDisplayInfoExtra, CharStartOutfit,
+    ItemDisplayInfo, CharHairGeosets, CharacterFacialHairStyles,
+    CharSections, HelmetGeosetVisData, LiquidType and LightSkybox: the
+    converter has no layout for them, so nothing on its side agrees or
+    disagrees. Their read columns stay checked from this client's
+    readers, their widths as `width_from` says.
+170. **The converter's `seen` gaps are notes, for its side.** Its `seen`
+    omits ID (field 1) of AreaTable, Faction, FactionTemplate and
+    LoadingScreens, which 074 reads to find a row, and LightIntBand's
+    and LightFloatBand's Time2 to Time15 and Data2 to Data15, which 026
+    reads (it lists only Num, Time1 and Data1). Nothing here is wrong
+    for it: `seen` is the converter's account of this client and lags
+    it. Printed by the check, not failed, and left to world-edit-to-execute.
+171. **The file counter is at 100** (`tests/100-layouts-match-converter.lua`).
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -3120,7 +3216,11 @@ return {
   sky, and the original's notes). For step 1u: 026 (the original's
   colour, fog and storm rules), 084, 089, 043 and 044's `main`. For
   step 1v: `src/099-weather.info.md` (the weather's storm), 026, 021,
-  089 and 043; [305](./305-wmo-renderer.md) (a building's fogs).
+  089 and 043; [305](./305-wmo-renderer.md) (a building's fogs). For
+  step 1w: `tests/100-layouts-match-converter.lua` (the layouts
+  held to the converter's), `src/097-table-layouts.info.md`, 016, 026
+  and 044; [106](./106-dbc-parser.md) (layouts); world-edit-to-execute's
+  draft PR #260 (commit 306b40f40, its light tables).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

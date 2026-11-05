@@ -43,7 +43,7 @@ CFLAGS=(-std=c11 -D_FILE_OFFSET_BITS=64 -D_POSIX_C_SOURCE=200809L -O2 -g -Wall -
 
 # {{{ the parts, in reading order
 # READERS: the game's file formats, no window: the shared library is made of these
-READERS=(013-errors 015-mpq 016-dbc 017-blp 049-jpeg 020-adt 021-wmo 022-m2 023-anim 024-particles 059-loose-folders 061-mdx 063-w3e 077-slk 083-w3i 098-wdt)
+READERS=(013-errors 015-mpq 016-dbc 017-blp 049-jpeg 020-adt 021-wmo 022-m2 023-anim 024-particles 059-loose-folders 061-mdx 063-w3e 077-slk 083-w3i 097-table-layouts 098-wdt)
 # CORE: every part that needs no window (the readers and the game's arithmetic):
 # the test program links these alone
 CORE=(014-settings "${READERS[@]}" 018-maps 019-navmesh-slope 025-character 026-light 027-liquid
@@ -51,7 +51,7 @@ CORE=(014-settings "${READERS[@]}" 018-maps 019-navmesh-slope 025-character 026-
       060-resolver 067-test-map 068-goodbye 073-converted-map 074-tables 075-adt-heights 076-placed-models 078-wc3-ground 079-wc3-cliffs
       080-ground-shader 081-wc3-water 082-water-prep 084-map-fog
       085-baseline-set 087-world-start 088-figure-model 089-headless-run 091-model-solids 094-wc3-pathing
-      097-table-layouts 099-weather)
+      099-weather)
 # DRAWING: the parts that send things to the graphics card
 DRAWING=(036-texture 037-sky 038-ground 039-horizon 040-water 041-figure 042-doodads)
 sources() { for p in "$@"; do printf '%s\n' "${SRC}/${p}.c"; done; }

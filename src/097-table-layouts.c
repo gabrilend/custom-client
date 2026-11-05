@@ -125,8 +125,10 @@ static const TableGroup LIQUID_TYPE[] = {                   /* 45 */
 static const TableGroup LIGHT[] = {                         /* 15 */
     { "ID", U, 1, "026", 0, 0 }, { "ContinentID", U, 1, "026", 0, 0 }, { "X", F, 1, "026", 0, 0 }, { "Y", F, 1, "026", 0, 0 },
     { "Z", F, 1, "026", 0, 0 }, { "FalloffStart", F, 1, "026", 0, 0 }, { "FalloffEnd", F, 1, "026", 0, 0 },
-    { "LightParamsID1", U, 1, "026", 0, 0 }, { "LightParamsID2", U, 1, "026", 0, 0 }, { "LightParamsID3", U, 1, NULL, 0, 0 },
-    { "LightParamsID4", U, 1, NULL, 0, 0 }, { "LightParamsID5", U, 1, NULL, 0, 0 }, { "LightParamsID6", U, 1, NULL, 0, 0 },
+    { "LightParamsID1", U, 1, "026", 0, 0 }, { "LightParamsID2", U, 1, "026", 0, 0 },
+    { "LightParamsID3", U, 1, "026", 0, 0 }, { "LightParamsID4", U, 1, "026", 0, 0 },   /* the storm sets (1109 step 1u) */
+    { "LightParamsID5", U, 1, "026", 0, 0 },                 /* read into set[4], not yet used (the ghost world's: recalled) */
+    { "LightParamsID6", U, 1, NULL, 0, 0 },
     { "LightParamsID7", U, 1, NULL, 0, 0 }, { "LightParamsID8", U, 1, NULL, 0, 0 }, END,
 };
 static const TableGroup LIGHT_INT_BAND[] = {                /* 34 */
@@ -168,10 +170,10 @@ static const TableLayout LAYOUTS[] = {
     { "CharSections", 10, 1, "025's last column read (10), the test program's made table", CHAR_SECTIONS },
     { "HelmetGeosetVisData", 8, 1, "recalled (025 reads to 6)", HELMET_GEOSET_VIS_DATA },
     { "LiquidType", 45, 1, "the baseline set's (085; 040 reads to 16)", LIQUID_TYPE },
-    { "Light", 15, 1, "the baseline set's (085; 026 reads to 9)", LIGHT },
-    { "LightIntBand", 34, 1, "the baseline set's (085), 026's check", LIGHT_INT_BAND },
-    { "LightFloatBand", 34, 1, "the baseline set's (085), 026's check", LIGHT_FLOAT_BAND },
-    { "LightParams", 9, 1, "the baseline set's (085; 026 reads to 9)", LIGHT_PARAMS },
+    { "Light", 15, 1, "the baseline set's (085) and the converter's (#260; 026 reads to 12)", LIGHT },
+    { "LightIntBand", 34, 1, "the baseline set's (085) and the converter's (#260)", LIGHT_INT_BAND },
+    { "LightFloatBand", 34, 1, "the baseline set's (085) and the converter's (#260)", LIGHT_FLOAT_BAND },
+    { "LightParams", 9, 1, "the baseline set's (085) and the converter's (#260; 026 reads to 9)", LIGHT_PARAMS },
     { "LightSkybox", 3, 1, "the baseline set's (085; 026 reads to 2)", LIGHT_SKYBOX },
 };
 #define NLAYOUTS ((int)(sizeof LAYOUTS / sizeof LAYOUTS[0]))

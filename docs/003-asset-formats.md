@@ -41,6 +41,13 @@ in `src/`.
   each field's name, offset and type. A generator turns layout files into the
   C structs used here *and* the Lua layouts used by world-edit-to-execute, so
   the two projects cannot drift apart.
+- Built so far (2026-11-05): the layouts are C data (`src/097-table-layouts.c`,
+  issue 106), the converter keeps its own Lua copy, and no generator exists.
+  The two are held to each other by `tests/100-layouts-match-converter.lua`:
+  the converter writes a row of each of its eleven tables, this client reads
+  it back by its own layouts, and every width, column name, kind and value
+  must agree (issue 1109 step 1w). Neither copy is checked against a 3.3.5a
+  file.
 - DBCs the client needs early: `ChrRaces`, `ChrClasses`, `CharacterFacial*`,
   `SpellIcon`, `Spell`, `Item`, `ItemDisplayInfo`, `Map`, `Light`,
   `LoadingScreens`, `LiquidType`, `Talent`, `TalentTab`, `CreatureDisplayInfo`,
