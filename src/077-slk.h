@@ -1,0 +1,57 @@
+/*
+ * 077-slk.h (issue 302; the C twin of world-edit-to-execute's
+ * src/parsers/slk.lua) - Warcraft III's spreadsheets (SYLK), read
+ *
+ * For a general audience: Warcraft III keeps its stock tables
+ * (TerrainArt\Terrain.slk, which says where each ground tileset's
+ * picture is; Units\UnitData.slk ...) in SYLK, a line-based text
+ * spreadsheet. Row 1 names the columns, column 1 names each row, and a
+ * row is asked for by that name: "Ldrt"'s "dir" and "file" say its
+ * picture is TerrainArt\LordaeronSummer\Lords_Dirt.blp.
+ *
+ * The format, as the Lua reads it (lines end in \n or \r\n):
+ *   ID;PWXL;N;E            the head: a file without an "ID;" line is none
+ *   C;X1;Y1;K"alias"       a cell: column 1, row 1, value "alias"
+ *   C;X2;K"code"           a field left out keeps the last cell's (the
+ *                          row and column start at 1)
+ *   C;Y2;X1;K"AHbz"        fields in any order; K is the last
+ *   C;X11;K4               an unquoted value is kept as written ("4")
+ *   E                      the end: nothing after it is read
+ * Other records (B, F, P, O ...) say nothing the game's data needs and
+ * are passed over. Inside a quoted value ";;" is one ";", and a closing
+ * quote is dropped when there is one. A value is text here; the Lua
+ * turns an unquoted number into a number, which reads back the same.
+ * Two rows with one name are one row: the later one's cells win, the
+ * earlier one's other cells stay (the Lua's rows[id]).
+ *
+ * In the reader library (window-free); every function is safe on any
+ * thread with its own handle, and reading one handle from many threads
+ * at once is safe too.
+ */
+#ifndef EG_SLK_H
+#define EG_SLK_H
+
+#include "013-errors.h"
+
+#include <stddef.h>
+
+typedef struct Slk Slk;
+
+/* Reads the sheet's bytes into a new handle (freed by slk_free). W_OK;
+ * W_ERR_CORRUPT with `why` when there is no "ID;" head, no row 1 naming
+ * column 1, or a cell's column or row is not a whole number from 1 to
+ * 65535. */
+WErr        slk_read(const unsigned char *s, size_t len, Slk **out, WWhy *why);
+void        slk_free(Slk *k);
+
+/* The value of row `id`'s cell in the column named `column` (both as
+ * written, capitals counting, as in the Lua), or NULL when the sheet has
+ * no such row, column or cell. Valid while the handle lives. */
+const char *slk_value(const Slk *k, const char *id, const char *column);
+
+/* The rows named in column 1 (every one once, in the order first met),
+ * and the k-th's name (NULL past the end). */
+int         slk_rows(const Slk *k);
+const char *slk_row_id(const Slk *k, int i);
+
+#endif

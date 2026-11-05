@@ -37,6 +37,13 @@ Measured against the clean-room checklist's note 4.5
     4, 2, 1 (bits 4 to 6); not handled here;
   - **shine:** a chunk marked for specular gives layer 1 a reflection
     look in the no-shader path.
+- **WC3's ground** (2026-11-04): read and made ready without the window,
+  [302a](./302a-wc3-ground-read-and-prepared.md) (`src/063-w3e.c`): each
+  point's heights and water, each cell's tileset pictures and subtiles,
+  cliff and blighted cells marked, a stroke's area redone alone; checked
+  against world-edit-to-execute's Lua. Not yet drawn: painting it onto
+  the one mesh beside WoW's layers, and seating cliffs on it (docs/009
+  answer 1), are still this issue's.
 - **One quirk**, with a correction switch off by default: a scrolling
   layer's counter wraps from 64 to 0 only when it grows, so one moving
   towards negative numbers never wraps and loses precision over a very
@@ -47,10 +54,16 @@ ask the resolver (105a: `ground_prep_pixels` through `asset_get`): in
 a test-map run the map's own when its build folder has them, the
 checker when no place has them; with no resolver the archives, as
 before. A converted map's tiles name the game's `Tileset\...`
-pictures (W02b), so its ground draws as any ADT. **WC3's tilesets on
-this mesh are the next step** (1109 decision 27): they need PR #3's
-`.w3e` reading and a ground shader for WC3's blend, and a WC3
-install's tileset pictures as a place.
+pictures (W02b), so its ground draws as any ADT. Since 1109's step 1d
+(2026-11-05) a converted map whose build carries `war3map.w3e`, in a
+run with a Warcraft III install (`assetWc3`), draws WC3's own tileset
+pictures on this mesh instead (`src/078-wc3-ground.c`, through 033):
+no new shader, each chunk's four layers and blend picture laid the way
+WC3 lays its cells (1109 decisions 32-41). Still to come: cliffs and
+blight (laid whole with their south-west tileset for now), the
+tilesets' variation pictures (one whole tile a tileset for now), and
+chunks with more than four tilesets (the rest folded): the last two
+are where a ground shader for WC3's own blend would earn its place.
 
 ## Intended behavior
 

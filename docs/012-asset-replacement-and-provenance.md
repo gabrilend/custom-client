@@ -41,9 +41,24 @@ places in order:
       ├─ 1. replacement packs (loose folders, ours)          → source = "pack"
       ├─ 2. assets the server delivered (2026-10-09)         → source = "server"
       ├─ 3. overlays (loose folders: converted WC3 maps)     → source = "overlay"
-      ├─ 4. the owner's Blizzard client (MPQ chain)          → source = "blizzard"
+      ├─ 4. the owner's Blizzard client (MPQ chain), then    → source = "blizzard"
+      │     their Warcraft III install, if plugged in
       └─ 5. placeholder (magenta checker / box / beep)       → source = "placeholder"
 ```
+
+The Warcraft III install (2026-11-05, issue 1109 step 1d) follows
+world-edit-to-execute's `docs/wow-client-bridge.md` (2026-11-04: "the
+player's packs, the server's files, the player's own Blizzard install
+if they plugged it in, the baseline set, and only then the
+wire-frame"): its archives (war3.mpq, War3x.mpq, War3Patch.mpq) are
+read after the game's own, by the client's own archive reader, from the
+folder the `assetWc3` setting names under the profile's assets (default
+`assets/wc3`; a link to the install will do). A converted map's own
+WC3 models name WC3's stock pictures, and its ground WC3's tilesets;
+with no install those stand in as the checker, or (the ground) keep the
+converter's own pictures. The baseline set (the asset forge's) has no
+place yet: it will sit between the Blizzard install and the placeholder
+when it exists.
 
 Overlays (issue 105a's second step) sit after the server's assets: the
 server holds the truth about the world it runs (docs/001), so where a

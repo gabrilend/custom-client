@@ -48,6 +48,9 @@
 #include "../src/074-tables.h"
 #include "../src/075-adt-heights.h"
 #include "../src/076-placed-models.h"
+#include "../src/077-slk.h"
+#include "../src/078-wc3-ground.h"
+#include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -62,6 +65,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #undef W_OK                              /* <unistd.h>'s access() mode (2) would hide 013-errors.h's W_OK (0): every == W_OK below would test for 2 */
+#include <time.h>
 
 static int checks, fails;
 
@@ -328,6 +332,286 @@ static void made_mdx(Bytes *o)
     c = open_chunk(o, "PIVT");
     for (int i = 0; i < 9; ++i) putf(o, (float)i);
     close_chunk(o, c);
+}
+/* }}} */
+
+/* {{{ 302a: WC3's ground, written here and read back (no game data needed).
+ * The writer's pieces: the head, then one 7-byte tile point at a time
+ * (063-w3e.h has the layout). */
+typedef struct { unsigned char *b; size_t n, cap; } W3eOut;
+static void wo_raw(W3eOut *o, const void *p, size_t n)
+{
+    if (o->n + n > o->cap) {
+        size_t cap = (o->n + n) * 2;
+        unsigned char *b = realloc(o->b, cap);
+        if (!b) { fprintf(stderr, "no memory for a WC3 ground file\n"); exit(1); }
+        o->b = b; o->cap = cap;
+    }
+    memcpy(o->b + o->n, p, n);
+    o->n += n;
+}
+static void wo32(W3eOut *o, uint32_t v) { unsigned char b[4] = { (unsigned char)v, (unsigned char)(v >> 8), (unsigned char)(v >> 16), (unsigned char)(v >> 24) }; wo_raw(o, b, 4); }
+static void wo16(W3eOut *o, uint16_t v) { unsigned char b[2] = { (unsigned char)v, (unsigned char)(v >> 8) }; wo_raw(o, b, 2); }
+static void wo8(W3eOut *o, unsigned v) { unsigned char b = (unsigned char)v; wo_raw(o, &b, 1); }
+static void wof(W3eOut *o, float f) { uint32_t v; memcpy(&v, &f, 4); wo32(o, v); }
+/* ground and cliff: the tileset ids run together ("LdrtLgrs") */
+static void w3e_head(W3eOut *o, int version, char code, const char *ground, const char *cliff, int w, int h, float ox, float oy)
+{
+    o->n = 0;
+    wo_raw(o, "W3E!", 4); wo32(o, (uint32_t)version); wo8(o, (unsigned char)code); wo32(o, 1);
+    wo32(o, (uint32_t)(strlen(ground) / 4)); wo_raw(o, ground, strlen(ground));
+    wo32(o, (uint32_t)(strlen(cliff) / 4)); wo_raw(o, cliff, strlen(cliff));
+    wo32(o, (uint32_t)w); wo32(o, (uint32_t)h); wof(o, ox); wof(o, oy);
+}
+/* marks: byte 4's high bits (0x10 ramp, 0x20 blight, 0x40 water, 0x80 boundary) */
+static void w3e_pt(W3eOut *o, int raw_h, unsigned water_word, int tex, int marks, int details, int cvar, int layer, int ctex)
+{
+    wo16(o, (uint16_t)raw_h); wo16(o, (uint16_t)water_word);
+    wo8(o, (unsigned)(tex | marks)); wo8(o, (unsigned)(details | cvar << 5)); wo8(o, (unsigned)(layer | ctex << 4));
+}
+
+/* The first ground, 5 x 4 tile points (rows from the south), three ground
+ * tilesets (0 and 2 extended), one cliff tileset. Its cells, worked out
+ * by hand from 063-w3e.h's rules:
+ *   (0,0) bare: its south-west corner is blighted
+ *   (3,1) bare: point (4,2) is a cliff level up and no corner is a ramp
+ *   (2,2) and (3,2) textured although on two levels: point (3,3) is a ramp
+ * Point (1,1) has water over it; (2,1) has the mark but the water is
+ * below its ground; (0,3), (4,3) and (2,3) carry the boundary marks. */
+static const int W3E_A_TEX[4][5] = { { 0, 0, 1, 1, 2 }, { 0, 1, 1, 2, 2 }, { 0, 0, 0, 2, 2 }, { 1, 1, 0, 0, 0 } };
+static const int W3E_A_DETAILS[4][5] = { { 0, 5, 7, 0, 9 }, { 3, 0, 20, 1, 2 }, { 16, 4, 6, 11, 3 }, { 0, 0, 0, 0, 0 } };
+static void w3e_fixture_a(W3eOut *o, int version)
+{
+    w3e_head(o, version, 'L', "LdrtLgrsLrok", "CLdi", 5, 4, -256.0f, -192.0f);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 5; ++x) {
+            int raw = 8192 + 4 * (x * 10 + y * 3), marks = 0, layer = 2, ctex = 15, cvar = 0;
+            unsigned water = 8192;                                  /* level 0 */
+            if (x == 4 && y == 0) raw = -100;                        /* a height stored below 0 */
+            if (x == 0 && y == 0) marks |= 0x20;
+            if (x == 1 && y == 1) { marks |= 0x40; water = 8192 + 4 * 200; }
+            if (x == 2 && y == 1) { marks |= 0x40; water = 8192 + 4 * 10; }
+            if (x == 0 && y == 3) marks |= 0x80;
+            if (x == 4 && y == 3) water |= 0x4000;
+            if (x == 2 && y == 3) water |= 0xC000;
+            if ((x == 3 && y == 3) || (x == 4 && y == 3) || (x == 4 && y == 2)) layer = 3;
+            if (x == 3 && y == 3) marks |= 0x10;
+            if (x == 4 && y == 2) { cvar = 5; ctex = 0; }
+            w3e_pt(o, raw, water, W3E_A_TEX[y][x], marks, W3E_A_DETAILS[y][x], cvar, layer, ctex);
+        }
+}
+/* A ground of every bit at random, width x height, from `seed` (the same
+ * small generator each run): nground tilesets named "T0aa".. */
+static uint32_t w3e_rand(uint32_t *s) { *s = *s * 1664525u + 1013904223u; return *s >> 8; }
+static void w3e_fixture_random(W3eOut *o, int version, int w, int h, int nground, uint32_t seed)
+{
+    char ids[16 * 4 + 1] = "";
+    for (int k = 0; k < nground; ++k) snprintf(ids + 4 * k, 5, "T%xaa", k);
+    w3e_head(o, version, 'Z', ids, "CLdiCLgr", w, h, 1024.5f, -3072.25f);
+    for (int k = 0; k < w * h; ++k) {
+        unsigned char b[7];
+        for (int i = 0; i < 7; ++i) b[i] = (unsigned char)w3e_rand(&seed);
+        b[4] = (unsigned char)((b[4] & 0xF0) | (b[4] & 0x0F) % nground);
+        b[4] &= (unsigned char)~(w3e_rand(&seed) % 4 ? 0x20 : 0);   /* blight on about a quarter */
+        b[6] = (unsigned char)((b[6] & 0xF0) | (2 + w3e_rand(&seed) % 3));   /* levels 2 to 4: cliffs here and there */
+        wo_raw(o, b, 7);
+    }
+}
+/* the preparations of the same ground agree to the byte */
+static int w3e_preps_same(const W3ePrep *a, const W3ePrep *b)
+{
+    size_t np = (size_t)a->width * a->height, nc = (size_t)(a->width - 1) * (a->height - 1);
+    return a->width == b->width && a->height == b->height && a->used == b->used
+        && !memcmp(a->ground_z, b->ground_z, np * sizeof(float)) && !memcmp(a->water_z, b->water_z, np * sizeof(float))
+        && !memcmp(a->wet, b->wet, np) && !memcmp(a->cells, b->cells, nc * 8) && !memcmp(a->cell_kind, b->cell_kind, nc);
+}
+static const uint8_t *w3e_cell(const W3ePrep *p, int i, int j) { return p->cells + ((size_t)j * (p->width - 1) + i) * 8; }
+static int w3e_cell_is(const W3ePrep *p, int i, int j, const int *want, int n)
+{
+    const uint8_t *c = w3e_cell(p, i, j);
+    for (int k = 0; k < 8; ++k) if (c[k] != (k < n * 2 ? want[k] : W3E_NONE)) return 0;
+    return 1;
+}
+static double w3e_seconds(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+
+static void check_wc3_ground(void)
+{
+    W3eOut o = { 0 };
+    W3eGround *g = NULL;
+    W3ePrep *p = NULL;
+    WWhy why;
+    char line[700];
+
+    printf("WC3's ground (war3map.w3e, issue 302a)\n");
+    for (int version = 11; version <= 12; ++version) {
+        w3e_fixture_a(&o, version);
+        WErr e = w3e_read(o.b, o.n, &g, &why);
+        snprintf(line, sizeof line, "a 5 x 4 ground written here, version %d, is read (%s)", version, e ? why.text : "W_OK");
+        check(!e && g->version == version && g->width == 5 && g->height == 4, line);
+        if (e) return;
+        if (version == 12) break;
+        w3e_free(g);
+    }
+    check(g->tileset_code == 'L' && !strcmp(g->tileset, "lordaeron_summer") && g->custom_tileset == 1,
+          "its main tileset: L, lordaeron_summer; its own tileset list");
+    check(g->nground == 3 && !memcmp(g->ground_ids, "LdrtLgrsLrok", 12) && g->ncliff == 1 && !memcmp(g->cliff_ids, "CLdi", 4),
+          "three ground tilesets and one cliff tileset, by id");
+    check(g->offset_x == -256.0f && g->offset_y == -192.0f, "its south-west corner at (-256, -192)");
+    const W3ePoint *a = w3e_point(g, 1, 2), *low = w3e_point(g, 4, 0), *cl = w3e_point(g, 4, 2);
+    check(a->height_raw == 8192 + 4 * 16 && a->height == 16.0f, "a point's height: (raw - 8192) / 4 = 16");
+    check(low->height_raw == -100 && low->height == -2073.0f, "a height stored below 0 (-100) reads as -2073");
+    check(cl->layer_height == 3 && cl->cliff_texture == 0 && cl->cliff_variation == 5 && cl->texture_details == 3,
+          "byte 6: the cliff level in the low half, the cliff tileset in the high; byte 5: variation low, cliff variation high");
+    check(a->cliff_texture == 15 && a->layer_height == 2 && a->ground_texture == 0 && w3e_point(g, 4, 1)->ground_texture == 2,
+          "byte 4's low half is the ground tileset; no cliff is 15");
+    check(w3e_point(g, 0, 0)->is_blight && w3e_point(g, 3, 3)->is_ramp && w3e_point(g, 1, 1)->has_water
+          && w3e_point(g, 0, 3)->is_boundary && !w3e_point(g, 1, 0)->is_blight, "byte 4's marks: blight, ramp, water, boundary");
+    check(w3e_point(g, 4, 3)->water_flags == 0x4000 && w3e_point(g, 4, 3)->boundary && w3e_point(g, 2, 3)->water_flags == 0xC000
+          && !w3e_point(g, 1, 2)->boundary && w3e_point(g, 2, 3)->water_raw == 8192,
+          "the water word's top bits are the other boundary mark, its low 14 bits the level");
+    check(w3e_point(g, 5, 0) == NULL && w3e_point(g, 0, -1) == NULL, "outside the grid: no point");
+    check(!memcmp(w3e_texture_name(g, 4, 1), "Lrok", 4) && w3e_texture_name(g, 9, 9) == NULL, "a point's tileset by id");
+    check(w3e_walkable(g, 1, 0) && !w3e_walkable(g, 1, 1) && !w3e_walkable(g, 0, 3) && !w3e_walkable(g, 4, 3) && !w3e_walkable(g, 5, 0),
+          "walkable: not with water, not on either boundary mark, not outside");
+    double wx, wy, tx, ty;
+    w3e_tile_to_world(g, 2, 3, &wx, &wy);
+    w3e_world_to_tile(g, -1.0, -193.0, &tx, &ty);
+    check(wx == 0 && wy == 192 && tx == 1 && ty == -1, "tile point (2, 3) is at (0, 192); (-1, -193) is in the cell of (1, -1)");
+    check(w3e_ground_z(cl) == 46.0 + 128 && w3e_ground_z(a) == 16.0, "ground z: the height and 128 for each cliff level over 2");
+    check(w3e_water_z(w3e_point(g, 1, 1)) == 200 - 89.6 && w3e_is_wet(w3e_point(g, 1, 1)), "water z: the level less 89.6; over the ground, wet");
+    check(!w3e_is_wet(w3e_point(g, 2, 1)) && !w3e_is_wet(a), "water below its ground, or no water mark: not wet");
+    W3eStats st;
+    w3e_stats(g, &st);
+    check(st.total == 20 && st.water == 2 && st.blight == 1 && st.ramp == 1 && st.boundary == 3 && st.layers[2] == 17 && st.layers[3] == 3
+          && st.min_height == -2073 && st.max_height == 49, "counts: 20 points, 2 with water, 1 blighted, 1 ramp, 3 on the boundary, 3 a level up");
+
+    /* the preparation */
+    static const uint8_t EXT[3] = { 1, 0, 1 };
+    WErr e = w3e_prep(g, EXT, 3, &p, &why);
+    check(!e, e ? why.text : "the ground is prepared");
+    if (e) { w3e_free(g); free(o.b); return; }
+    check(p->ground_z[2 * 5 + 4] == 174.0f && p->water_z[1 * 5 + 1] == (float)(200 - 89.6) && p->water_z[0] == (float)-1e30
+          && p->wet[1 * 5 + 1] == 1 && p->wet[1 * 5 + 2] == 0, "its heights in floats, water -1e30 where there's none");
+    check(p->cell_kind[0] == W3E_CELL_BLIGHT && w3e_cell_is(p, 0, 0, NULL, 0), "cell (0, 0), a corner blighted: bare");
+    check(p->cell_kind[1 * 4 + 3] == W3E_CELL_CLIFF && w3e_cell_is(p, 3, 1, NULL, 0), "cell (3, 1), a cliff with no ramp: bare");
+    check(w3e_cell_is(p, 1, 0, (int[]){ 0, 21, 1, 1 + 8 + 4 }, 2),
+          "cell (1, 0): tileset 0 whole (extended, variation 5: subtile 21), then 1 on south-east, north-west, north-east");
+    check(w3e_cell_is(p, 2, 1, (int[]){ 0, 0, 1, 2, 2, 1 + 4 }, 3),
+          "cell (2, 1): three tilesets, lowest first; extended variation 20 is subtile 0; 1 south-west, 2 south-east and north-east");
+    check(w3e_cell_is(p, 3, 0, (int[]){ 1, 15, 2, 13 }, 2), "cell (3, 0): a plain tileset at variation 0 is the whole tile, 15");
+    check(w3e_cell_is(p, 0, 2, (int[]){ 0, 15, 1, 8 + 4 }, 2), "cell (0, 2): extended variation 16 is the whole tile, 15");
+    check(w3e_cell_is(p, 3, 2, (int[]){ 0, 16 + 11, 2, 2 + 1 }, 2) && w3e_cell_is(p, 2, 2, (int[]){ 0, 16 + 6, 2, 1 }, 2),
+          "cells (2, 2) and (3, 2): on two levels but by a ramp, so textured");
+    check(w3e_cell_is(p, 0, 1, (int[]){ 0, 16 + 3, 1, 1 }, 2) && p->used == 10, "10 of the 12 cells textured");
+    check(w3e_variation(0, 3) == 0 && w3e_variation(1, 15) == 31 && w3e_variation(1, 31) == 0, "subtiles from variations at the edges");
+    W3ePrep *plain = NULL;
+    if (!w3e_prep(g, NULL, 0, &plain, &why)) {
+        check(w3e_cell(plain, 1, 0)[1] == 0 && w3e_cell(plain, 0, 2)[1] == 0 && plain->used == 10, "with no tileset extended: variations 5 and 16 are subtile 0");
+        w3e_prep_free(plain);
+    } else check(0, why.text);
+
+    /* an editor's stroke: one point changed, only its cells redone */
+    W3ePoint *edit = &g->points[1 * 5 + 2];
+    edit->ground_texture = 2; edit->layer_height = 4; edit->height = 99;
+    W3eArea t;
+    e = w3e_prep_area(p, g, 2, 1, 2, 1, &t, &why);
+    W3ePrep *fresh = NULL;
+    if (!e) e = w3e_prep(g, EXT, 3, &fresh, &why);
+    check(!e && t.x0 == 1 && t.y0 == 0 && t.x1 == 2 && t.y1 == 1 && fresh && w3e_preps_same(p, fresh),
+          "after one point is raised a cliff level: its four cells redone, and the same bytes as preparing it all again");
+    snprintf(line, sizeof line, "with %d textured cells now (the cliff left four bare)", p->used);
+    check(p->used == 6 && p->cell_kind[0 * 4 + 1] == W3E_CELL_CLIFF, line);
+    w3e_prep_free(fresh); fresh = NULL;
+    check(w3e_prep_area(p, g, 7, 0, 9, 3, &t, &why) == W_ERR_REFUSED && t.x1 < t.x0, "an area beside the grid: refused, nothing touched");
+    w3e_prep_area(p, g, -5, -5, 0, 0, &t, &why);
+    check(t.x0 == 0 && t.y0 == 0 && t.x1 == 0 && t.y1 == 0, "an area over the corner is cut to the grid: one cell");
+
+    /* the same reader on the random ground: every edit's area against a whole preparation */
+    w3e_fixture_random(&o, 11, 33, 25, 6, 7);
+    W3eGround *r = NULL;
+    e = w3e_read(o.b, o.n, &r, &why);
+    check(!e && r->nground == 6 && r->ncliff == 2 && !strcmp(r->tileset, "sunken_ruins"), e ? why.text : "a 33 x 25 ground of random points is read");
+    if (!e) {
+        check(w3e_prep_area(p, r, 0, 0, 1, 1, NULL, &why) == W_ERR_REFUSED, "a preparation refuses a ground of another size");
+        static const uint8_t EXT6[6] = { 1, 1, 0, 1, 0, 0 };
+        W3ePrep *rp = NULL, *whole = NULL;
+        int same = 0, tries = 200;
+        uint32_t seed = 99;
+        e = w3e_prep(r, EXT6, 6, &rp, &why);
+        for (int k = 0; !e && k < tries; ++k) {
+            int x0 = (int)(w3e_rand(&seed) % 40) - 4, y0 = (int)(w3e_rand(&seed) % 30) - 4;
+            int x1 = x0 + (int)(w3e_rand(&seed) % 6), y1 = y0 + (int)(w3e_rand(&seed) % 6);
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x) {
+                    W3ePoint *q = (W3ePoint *)w3e_point(r, x, y);
+                    if (!q) continue;
+                    q->ground_texture = (uint8_t)(w3e_rand(&seed) % 6); q->layer_height = (uint8_t)(2 + w3e_rand(&seed) % 3);
+                    q->is_ramp = w3e_rand(&seed) % 5 == 0; q->is_blight = w3e_rand(&seed) % 7 == 0;
+                    q->texture_details = (uint8_t)(w3e_rand(&seed) % 32); q->has_water = (uint8_t)(w3e_rand(&seed) % 2);
+                    q->height = (float)(w3e_rand(&seed) % 400) - 200; q->water_level = (float)(w3e_rand(&seed) % 400) - 200;
+                }
+            WErr a2 = w3e_prep_area(rp, r, x0, y0, x1, y1, NULL, &why);
+            if (a2 == W_ERR_REFUSED) { ++same; continue; }        /* the whole area off the grid: nothing to compare */
+            if (a2 || w3e_prep(r, EXT6, 6, &whole, &why)) break;
+            same += w3e_preps_same(rp, whole);
+            w3e_prep_free(whole); whole = NULL;
+        }
+        snprintf(line, sizeof line, "%d of %d random strokes: redoing their area alone gives the bytes of preparing it all again", same, tries);
+        check(!e && same == tries, line);
+        w3e_prep_free(rp);
+        w3e_free(r);
+    }
+
+    /* the time a stroke costs on a large map */
+    w3e_fixture_random(&o, 11, 257, 257, 16, 3);
+    if (!w3e_read(o.b, o.n, &r, &why)) {
+        W3ePrep *big = NULL;
+        double t0 = w3e_seconds();
+        e = w3e_prep(r, NULL, 0, &big, &why);
+        double t1 = w3e_seconds();
+        for (int k = 0; !e && k < 100; ++k) w3e_prep_area(big, r, 100 + k, 100, 104 + k, 104, NULL, &why);
+        double t2 = w3e_seconds();
+        snprintf(line, sizeof line, "a 257 x 257 ground prepared in %.2f ms; a 5 x 5 stroke redone in %.4f ms", (t1 - t0) * 1e3, (t2 - t1) * 1e3 / 100);
+        check(!e && (t2 - t1) / 100 < (t1 - t0), line);
+        w3e_prep_free(big);
+        w3e_free(r);
+    } else check(0, why.text);
+
+    /* files that aren't, each refused with its reason */
+    w3e_fixture_a(&o, 11);
+    size_t whole_len = o.n;
+    static const struct { size_t len; const char *what; } CUT[] = {
+        { 3, "three bytes" }, { 10, "cut in its head" }, { 25, "cut in its tileset ids" }, { 50, "cut before its size" },
+        { 70, "cut in its points" }, { 0, "nothing" },
+    };
+    int refused = 0;
+    for (size_t k = 0; k < sizeof CUT / sizeof CUT[0]; ++k) {
+        size_t n = CUT[k].len ? CUT[k].len : 0;
+        if (k == 4) n = whole_len - 1;
+        W3eGround *bad = NULL;
+        refused += w3e_read(o.b, n, &bad, &why) == W_ERR_CORRUPT && bad == NULL && why.text[0];
+    }
+    snprintf(line, sizeof line, "%d of 6 grounds cut short refused as corrupt, each with its sentence", refused);
+    check(refused == 6, line);
+    o.b[0] = 'X';
+    W3eGround *bad = NULL;
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "W3E!"), "a file not starting W3E!: corrupt");
+    o.b[0] = 'W';
+    memcpy(o.b + 13, (uint8_t[]){ 0xFF, 0xFF, 0xFF, 0xFF }, 4);    /* the ground tileset count: -1 */
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "below 0"), "a tileset count below 0: corrupt (the Lua reads it as none)");
+    w3e_head(&o, 11, 'P', "", "", 0, 3, 0, 0);
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "0 x 3"), "a ground 0 points wide: corrupt (the Lua reads it as empty)");
+    w3e_head(&o, 11, 'P', "Ldrt", "", 1, 1, 0, 0);
+    w3e_pt(&o, 8192, 8192, 0, 0, 0, 0, 2, 15);
+    W3ePrep *one = NULL;
+    check(!w3e_read(o.b, o.n, &bad, &why) && !strcmp(bad->tileset, "unknown_P") && !w3e_prep(bad, NULL, 0, &one, &why) && one->used == 0,
+          "a single point, an unknown main tileset: read, named unknown_P, no cells");
+    w3e_prep_free(one);
+    w3e_free(bad);
+
+    w3e_prep_free(p);
+    w3e_free(g);
+    free(o.b);
 }
 /* }}} */
 
@@ -1931,6 +2215,542 @@ static void placed_tests(const char *dir)
 }
 /* }}} */
 
+/* {{{ Warcraft III's own install and a converted map's WC3 ground (1109
+ * step 1d): the install as a resolver place (015, 060), its tileset sheet
+ * (077), the map's ground painted with its tilesets (078, 033). Files and
+ * archives made here; the converter's real output too when the build
+ * folder carries the map's war3map.w3e. */
+
+/* a BLP2 of plain BGRA pixels, w x h, one level, from RGBA */
+static unsigned char *t_blp2(int w, int h, const unsigned char *rgba, size_t *len)
+{
+    size_t at = 148 + 1024, n = (size_t)w * h;
+    *len = at + n * 4;
+    unsigned char *s = calloc(1, *len);
+    memcpy(s, "BLP2", 4);
+    t_le32(s + 4, 1);
+    s[8] = 3; s[9] = 8;
+    t_le32(s + 12, (uint32_t)w); t_le32(s + 16, (uint32_t)h);
+    t_le32(s + 20, (uint32_t)at); t_le32(s + 84, (uint32_t)(n * 4));
+    for (size_t i = 0; i < n; ++i) {
+        s[at + i * 4] = rgba[i * 4 + 2]; s[at + i * 4 + 1] = rgba[i * 4 + 1];
+        s[at + i * 4 + 2] = rgba[i * 4]; s[at + i * 4 + 3] = rgba[i * 4 + 3];
+    }
+    return s;
+}
+/* a tileset picture as WC3 lays them out, in one colour: 4 x 4 subtiles of
+ * 64 (8 x 4 when extended, the right half whole variations), subtile s's
+ * alpha full on exactly the quarters of its corner bits (south-east 1,
+ * south-west 2, north-east 4, north-west 8; north at the top) */
+static const unsigned char T_COLOURS[16][3] = {
+    { 200, 40, 40 }, { 40, 200, 40 }, { 40, 40, 200 }, { 200, 200, 40 }, { 40, 200, 200 }, { 200, 40, 200 }, { 120, 120, 120 }, { 250, 150, 50 },
+    { 50, 150, 250 }, { 150, 250, 50 }, { 90, 30, 160 }, { 160, 90, 30 }, { 30, 160, 90 }, { 230, 230, 230 }, { 20, 20, 20 }, { 100, 180, 140 },
+};
+static unsigned char *t_tileset(int k, int extended, size_t *len)
+{
+    int w = extended ? 512 : 256, h = 256;
+    unsigned char *rgba = malloc((size_t)w * h * 4);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            unsigned char *p = rgba + ((size_t)y * w + x) * 4;
+            memcpy(p, T_COLOURS[k % 16], 3);
+            int s = (y / 64) * 4 + (x / 64), sx = x % 64, sy = y % 64;
+            int bit = sy < 32 ? (sx < 32 ? 8 : 4) : (sx < 32 ? 2 : 1);
+            p[3] = (x >= 256 || (s & bit)) ? 255 : 0;
+        }
+    unsigned char *b = t_blp2(w, h, rgba, len);
+    free(rgba);
+    return b;
+}
+/* the chunk's colour at blend point (px, py), as 038's shader mixes it:
+ * layer 0, then layers 1 to 3 over it by the point's strengths */
+static void t_mix(const unsigned char *const cols[4], const unsigned char *rgb, unsigned char out[3])
+{
+    double c[3];
+    for (int d = 0; d < 3; ++d) c[d] = cols[0][d];
+    for (int l = 1; l < 4; ++l) for (int d = 0; d < 3; ++d) c[d] += (cols[l][d] - c[d]) * (rgb[l - 1] / 255.0);
+    for (int d = 0; d < 3; ++d) out[d] = (unsigned char)(c[d] + 0.5);
+}
+/* Compares a painted tile with WC3's own laying: in each painted chunk,
+ * each blend point's mixed colour against the colour of the tile point
+ * at its cell's corner nearest it (with these pictures, WC3's layering
+ * gives each quarter of a cell its corner's tileset), or the cell's
+ * south-west point's for a bare cell. Counts points that match, in all
+ * and in chunks of four tilesets or fewer. `cols` is each tileset's
+ * colour; `tex_set` gives each of the tile's pictures its tileset, -1
+ * for the ground file's own. */
+typedef struct { long points, same, exact_points, exact_same; int chunks, hit_twice; double worst_centre; } TPaintCheck;
+static void t_paint_check(const Wc3Ground *w, const W3ePrep *prep, const AdtTile *adt, int chunk_tex[256][4], const unsigned char *blend, int stride,
+                          const unsigned char painted[256], const int *tex_set, unsigned char *hit, TPaintCheck *pc)
+{
+    const W3eGround *g = wc3_ground_w3e(w);
+    const float step = ADT_CHUNK_SIZE / 8;
+    for (int k = 0; k < 256; ++k) {
+        if (!painted[k]) continue;
+        ++pc->chunks;
+        const AdtChunk *c = &adt->chunks[k];
+        int crow = k / 16, ccol = k % 16;
+        const unsigned char *cols[4];
+        for (int l = 0; l < 4; ++l) { int t = tex_set[chunk_tex[k][l]]; cols[l] = T_COLOURS[(t < 0 ? 15 : t) % 16]; }
+        int ci[8][8], cj[8][8], used[16] = { 0 }, nused = 0;
+        for (int r = 0; r < 8; ++r)
+            for (int cc = 0; cc < 8; ++cc) {
+                double fx, fy;
+                ci[r][cc] = -1;
+                if (!wc3_ground_cell_at(w, c->x - (r + 0.5) * step, c->y - (cc + 0.5) * step, &ci[r][cc], &cj[r][cc], &fx, &fy)) { ci[r][cc] = -1; continue; }
+                double off = fabs(fx - 0.5) > fabs(fy - 0.5) ? fabs(fx - 0.5) : fabs(fy - 0.5);
+                if (off > pc->worst_centre) pc->worst_centre = off;
+                size_t at = (size_t)cj[r][cc] * (g->width - 1) + ci[r][cc];
+                if (hit) { if (hit[at]) ++pc->hit_twice; hit[at] = 1; }
+                for (int q = 0; q < 4; ++q) {
+                    int t = w3e_point(g, ci[r][cc] + (q & 1), cj[r][cc] + (q >> 1))->ground_texture;
+                    if (t < 16 && !used[t]) { used[t] = 1; ++nused; }
+                }
+            }
+        for (int py = 0; py < 64; ++py)
+            for (int px = 0; px < 64; ++px) {
+                double rf = py * 8.0 / 63.0, cf = px * 8.0 / 63.0;
+                int r = rf >= 8 ? 7 : (int)rf, cc = cf >= 8 ? 7 : (int)cf;
+                if (ci[r][cc] < 0) continue;
+                int i = ci[r][cc], j = cj[r][cc];
+                int bare = prep->cell_kind[(size_t)j * (g->width - 1) + i] != W3E_CELL_TEXTURED;
+                int east = cf - cc >= 0.5, north = rf - r < 0.5;
+                int t = bare ? w3e_point(g, i, j)->ground_texture : w3e_point(g, i + east, j + north)->ground_texture;
+                unsigned char got[3];
+                const unsigned char *b = blend + ((size_t)(crow * 64 + py) * 1024 + (size_t)(ccol * 64 + px)) * stride;
+                t_mix(cols, b, got);
+                int same = abs(got[0] - T_COLOURS[t % 16][0]) <= 1 && abs(got[1] - T_COLOURS[t % 16][1]) <= 1 && abs(got[2] - T_COLOURS[t % 16][2]) <= 1;
+                ++pc->points; pc->same += same;
+                if (nused <= 4) { ++pc->exact_points; pc->exact_same += same; }
+            }
+    }
+}
+
+static void wc3_place_tests(const char *dir, const char *build)
+{
+    char root[400], folder[520], wc3[520], path[900], line[1000];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-wc3", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the WC3 install's fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the tileset sheet (077) */
+    {
+        static const char SHEET[] =
+            "ID;PWXL;N;E\r\nB;X4;Y5;D0\r\nC;X1;Y1;K\"tileID\"\r\nC;X2;K\"dir\"\r\nC;X3;K\"file\"\r\nC;X4;K\"note\"\r\n"
+            "C;X1;Y2;K\"Ldrt\"\r\nC;X2;K\"TerrainArt\\LordaeronSummer\"\r\nC;X3;K\"Lords_Dirt\"\r\nC;X4;K\"a;;b\"\r\n"
+            "F;P0;FG0G;X2\r\nC;Y3;X1;K\"Lgrs\"\r\nC;X3;K\"Lords_Grass\"\r\nC;X4;K42\r\n"
+            "C;X1;Y4;K\"Ldrt\"\r\nC;X3;K\"Lords_Dirt2\"\r\nE\r\nC;X1;Y5;K\"Gone\"\r\n";
+        Slk *k = NULL;
+        e = slk_read((const unsigned char *)SHEET, strlen(SHEET), &k, &why);
+        check(!e, e ? why.text : "a SYLK sheet reads (CR LF lines, cells that leave their row or column out, other records passed over)");
+        if (!e) {
+            const char *d = slk_value(k, "Ldrt", "dir"), *f = slk_value(k, "Ldrt", "file"), *n = slk_value(k, "Ldrt", "note");
+            check(d && !strcmp(d, "TerrainArt\\LordaeronSummer") && f && !strcmp(f, "Lords_Dirt2") && n && !strcmp(n, "a;b"),
+                  "a row named twice is one row: the later one's cells win, the earlier one's others stay; \";;\" is one \";\"");
+            check(slk_value(k, "Lgrs", "file") && !strcmp(slk_value(k, "Lgrs", "file"), "Lords_Grass") && !strcmp(slk_value(k, "Lgrs", "note"), "42")
+                  && !slk_value(k, "Lgrs", "dir"), "fields in any order; an unquoted value kept as written; a cell it hasn't: none");
+            check(slk_rows(k) == 2 && !strcmp(slk_row_id(k, 0), "Ldrt") && !strcmp(slk_row_id(k, 1), "Lgrs") && !slk_row_id(k, 2)
+                  && !slk_value(k, "Gone", "file") && !slk_value(k, "Ldrt", "nothing"), "its rows once each, in order; nothing read after E; a column it hasn't: none");
+            slk_free(k);
+        }
+        Slk *bad = NULL;
+        check(slk_read((const unsigned char *)"C;X1;Y1;K\"a\"\n", 13, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "ID;"), "no ID; head: corrupt");
+        check(slk_read((const unsigned char *)"ID;P\nC;X0;Y1;K1\n", 16, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "line 2"), "a column 0: corrupt, naming the line");
+        check(slk_read((const unsigned char *)"ID;P\nC;X2;Y1;K1\n", 16, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "column 1"), "no row 1 naming column 1: corrupt");
+    }
+    /* }}} */
+
+    /* {{{ the install's archives (015): found without regard to capitals, newest first */
+    snprintf(wc3, sizeof wc3, "%s/wc3", root);
+    t_mkdirs(wc3);
+    {
+        const char *names[] = { "Textures\\Both.blp", "Textures\\Only.blp", "Textures\\Base.blp" };
+        const char *base[] = { "war3's", "war3's only", "war3's base" };
+        snprintf(path, sizeof path, "%s/WAR3.MPQ", wc3);
+        t_write_mpq(path, names, base, 3);
+        const char *patched[] = { "the patch's" };
+        snprintf(path, sizeof path, "%s/war3patch.mpq", wc3);
+        t_write_mpq(path, names + 1, patched, 1);
+        MpqChain ch;
+        e = mpq_chain_open_wc3(&ch, wc3, &why);
+        check(!e && ch.count == 2, e ? why.text : "WC3's archives open from a folder, found without regard to capitals (WAR3.MPQ, war3patch.mpq)");
+        if (!e) {
+            size_t n = 0;
+            const char *from = NULL;
+            unsigned char *s = mpq_chain_read(&ch, "Textures\\Only.blp", &n, &from);
+            check(s && n == 11 && !memcmp(s, "the patch's", 11) && strstr(from, "war3patch.mpq"), "the patch first: its copy of a file both have");
+            free(s);
+            s = mpq_chain_read(&ch, "textures/base.BLP", &n, &from);
+            check(s && n == 11 && strstr(from, "WAR3.MPQ"), "the base game for the rest");
+            free(s);
+            mpq_chain_close(&ch);
+        }
+        snprintf(path, sizeof path, "%s/empty", root);
+        t_mkdirs(path);
+        check(mpq_chain_open_wc3(&ch, path, &why) == W_ERR_NOT_FOUND && strstr(why.text, "war3.mpq"), "a folder with none of them: not found, naming them");
+        snprintf(path, sizeof path, "%s/nowhere", root);
+        check(mpq_chain_open_wc3(&ch, path, &why) == W_ERR_NOT_FOUND && strstr(why.text, "isn't there"), "no folder: not found");
+    }
+    /* }}} */
+
+    /* {{{ the install as a place (060): after the game's archives, before the placeholder */
+    {
+        char data[520];
+        snprintf(data, sizeof data, "%s/Data", root);
+        t_mkdirs(data);
+        const char *names[] = { "Textures\\Both.blp" };
+        const char *wow[] = { "the game's" };
+        snprintf(path, sizeof path, "%s/common.MPQ", data);
+        t_write_mpq(path, names, wow, 1);
+        MpqChain game;
+        e = mpq_chain_open(&game, data, "enUS", &why);
+        check(!e, e ? why.text : "a made archive of the game's opens");
+        Settings *st = settings_new();
+        ResolverPlace place;
+        e = resolver_place_from_settings(st, root, e ? NULL : &game, &place, &why);
+        snprintf(line, sizeof line, "%s/wc3", root);
+        check(!e && !strcmp(place.wc3, line) && !strcmp(settings_text(st, "assetWc3"), "wc3"), "the setting assetWc3 names assets/wc3 by default");
+        ResolverPlace bare;
+        check(!resolver_place_from_settings(st, "", NULL, &bare, &why) && !bare.wc3[0], "with no assets folder given, no install");
+        check(settings_set(st, "assetWc3", "a,b", &why) == W_ERR_REFUSED && settings_set(st, "assetWc3", "..", &why) == W_ERR_REFUSED
+              && settings_set(st, "assetWc3", "", &why) == W_OK && !resolver_place_from_settings(st, root, NULL, &bare, &why) && !bare.wc3[0],
+              "one folder name, never a list or a way out; empty: none");
+        settings_free(st);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        fflush(place.log);
+        check(!e && resolver_wc3(r) && !strcmp(resolver_wc3(r), line) && log && strstr(log, "Warcraft III's own archives from"), e ? why.text : "the resolver opens the install itself, and says so");
+        if (!e) {
+            AssetAnswer a;
+            e = asset_resolve(r, "Textures\\Both.blp", ASSET_TEXTURE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BLIZZARD && a.len == 10 && strstr(a.from, "common.MPQ"), "a name both have: the game's own archives first");
+            asset_answer_free(&a);
+            e = asset_resolve(r, "Textures\\Only.blp", ASSET_TEXTURE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BLIZZARD && a.len == 11 && strstr(a.from, "war3patch.mpq"), "a name only WC3 has: from its archives, its patch first");
+            asset_answer_free(&a);
+            AssetAnswer all[4];
+            int n = 0;
+            check(!asset_resolve_all(r, "Textures\\Both.blp", ASSET_TEXTURE, all, 4, &n, &why) && n == 2 && strstr(all[1].from, "WAR3.MPQ"), "every copy: the game's, then WC3's");
+            for (int i = 0; i < n; ++i) asset_answer_free(&all[i]);
+            e = asset_resolve(r, "Textures\\Neither.blp", ASSET_TEXTURE, &a, &why);
+            fflush(place.log);
+            check(!e && a.source == ASSET_FROM_PLACEHOLDER && strstr(log, "the archives or Warcraft III's"), "a name neither has: the checker, the warning naming both");
+            asset_answer_free(&a);
+            resolver_free(r);
+        }
+        fclose(place.log); free(log);
+        /* a folder named but not there: said, not a failure */
+        snprintf(place.wc3, sizeof place.wc3, "%s/nowhere", root);
+        log = NULL;
+        place.log = open_memstream(&log, &log_len);
+        e = resolver_open(&place, &r, &why);
+        fflush(place.log);
+        check(!e && !resolver_wc3(r) && strstr(log, "no Warcraft III install at"), e ? why.text : "an install folder that isn't there: said in the log, and left out");
+        if (!e) resolver_free(r);
+        fclose(place.log); free(log);
+        /* an archive there that isn't one: the start stops, naming it */
+        snprintf(folder, sizeof folder, "%s/broken", root);
+        t_write_text(folder, "war3.mpq", "not an archive");
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        place.log = open_memstream(&log, &log_len);
+        check(resolver_open(&place, &r, &why) != W_OK && strstr(why.text, "assetWc3"), "an archive that can't be read: refused, naming the setting");
+        fclose(place.log); free(log);
+        if (game.count) mpq_chain_close(&game);
+    }
+    /* }}} */
+
+    /* {{{ a made map's WC3 ground painted with a made install's tilesets (078) */
+    {
+        /* the install: the sheet and five tileset pictures (Agrs extended),
+         * Zzzz in the map's list but not in the sheet */
+        static const char *IDS = "AdrtAgrsArckAvinAlshZzzz";
+        char sheet[2000] = "ID;PWXL;N;E\nC;X1;Y1;K\"tileID\"\nC;X2;K\"dir\"\nC;X3;K\"file\"\n";
+        const char *names[7];
+        const char *bytes[7];
+        size_t lens[7];
+        char pnames[5][64];
+        for (int k = 0; k < 5; ++k) {
+            char row[200];
+            snprintf(row, sizeof row, "C;X1;Y%d;K\"%.4s\"\nC;X2;K\"TerrainArt\\Made\"\nC;X3;K\"%.4s_pic\"\n", k + 2, IDS + 4 * k, IDS + 4 * k);
+            strncat(sheet, row, sizeof sheet - strlen(sheet) - 1);
+            snprintf(pnames[k], sizeof pnames[k], "TerrainArt\\Made\\%.4s_pic.blp", IDS + 4 * k);
+            names[k] = pnames[k];
+            bytes[k] = (const char *)t_tileset(k, k == 1, &lens[k]);
+        }
+        strncat(sheet, "E\n", sizeof sheet - strlen(sheet) - 1);
+        names[5] = "TerrainArt\\Terrain.slk"; bytes[5] = sheet; lens[5] = strlen(sheet);
+        snprintf(folder, sizeof folder, "%s/install", root);
+        t_mkdirs(folder);
+        snprintf(path, sizeof path, "%s/war3.mpq", folder);
+        t_write_mpq_n(path, names, bytes, lens, 6);
+        for (int k = 0; k < 5; ++k) free((void *)bytes[k]);
+        /* the map: 17 x 9 tile points (16 x 8 cells), its south-west corner
+         * at WC3 (0, 0); points west of x 9 use tilesets 0 to 3, the rest 0
+         * to 4; point (2, 2) blighted, point (5, 5) a cliff level up */
+        W3eOut o = { 0 };
+        w3e_head(&o, 11, 'A', IDS, "CAdi", 17, 9, 0.0f, 0.0f);
+        for (int y = 0; y < 9; ++y)
+            for (int x = 0; x < 17; ++x) {
+                int tex = x <= 8 ? (x * 3 + y * 5 + x * y) % 4 : (x + 2 * y) % 5;
+                w3e_pt(&o, 8192, 8192, tex, x == 2 && y == 2 ? 0x20 : 0, (x + y) % 16, 0, x == 5 && y == 5 ? 3 : 2, 15);
+            }
+        char map[520];
+        snprintf(map, sizeof map, "%s/map", root);
+        t_write(map, "war3map.w3e", o.b, o.n);
+        ResolverPlace place = { .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", map);
+        place.noverlays = 1;
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        check(!e, e ? why.text : "a resolver with the map's folder and the made install opens");
+        /* the rule: chunk 0 of the tile below holds WC3 cells 0-7 west to
+         * east and 0-7 south to north, chunk 1 cells 8-15 */
+        const double s = 1 / 30.72, X0 = 1000, Y0 = 2000, step = ADT_CHUNK_SIZE / 8;
+        Wc3Ground *w = NULL;
+        if (!e) e = wc3_ground_open(r, NULL, s, X0 - 8 * step, Y0, &w, &why);
+        check(!e && wc3_ground_tilesets(w) == 6, e ? why.text : "the map's WC3 ground opens: its war3map.w3e from its folder, the sheet and the pictures from the install");
+        if (!e) {
+            const Wc3Tileset *t1 = wc3_ground_tileset(w, 1), *t5 = wc3_ground_tileset(w, 5);
+            check(!strcmp(t1->id, "Agrs") && !strcmp(t1->path, "TerrainArt\\Made\\Agrs_pic.blp") && t1->source == ASSET_FROM_BLIZZARD && t1->extended
+                  && !wc3_ground_tileset(w, 0)->extended && t1->width == 512 && !strcmp(t1->layer, "TerrainArt\\Made\\Agrs_pic.blp" WC3_LAYER_MARK),
+                  "each tileset: its id, its picture's path from the sheet, from the install, extended when twice as wide");
+            check(!strcmp(t5->id, "Zzzz") && !t5->path[0] && t5->source == ASSET_FROM_PLACEHOLDER, "a tileset the sheet has no row for: the checker");
+            unsigned char *px = NULL;
+            int side = 0;
+            e = wc3_ground_layer(w, t1->layer, &px, &side, &why);
+            check(!e && side == 64 && px[0] == T_COLOURS[1][0] && px[1] == T_COLOURS[1][1] && px[3] == 255 && px[(64 * 64 - 1) * 4 + 3] == 255,
+                  "a layer's picture: its tileset's whole tile (subtile 15), 64 x 64, opaque");
+            free(px);
+            check(wc3_ground_layer(w, "Textures\\Other.blp|wc3", &px, &side, &why) == W_ERR_NOT_FOUND, "a layer no tileset has: not found");
+            int i, j;
+            double fx, fy;
+            check(wc3_ground_cell_at(w, X0 - 0.5 * step, Y0 - 0.5 * step, &i, &j, &fx, &fy) && i == 0 && j == 7 && near(fx, 0.5, 1e-6) && near(fy, 0.5, 1e-6)
+                  && wc3_ground_cell_at(w, X0 - 7.5 * step, Y0 - 15.5 * step, &i, &j, NULL, NULL) && i == 15 && j == 0
+                  && !wc3_ground_cell_at(w, X0 + 1, Y0 - 1, &i, &j, NULL, NULL) && !wc3_ground_cell_at(w, X0 - 1, Y0 - 16 * 8 * step - 1, &i, &j, NULL, NULL),
+                  "a world place's WC3 cell by the map's rule: the chunk's north-west cell is WC3's (0, 7), its centre in the middle; past the grid, none");
+            /* the tile: chunks laid out as a ground file's, two pictures of its own */
+            AdtTile *adt = calloc(1, sizeof *adt);
+            adt->textures = calloc(2, sizeof *adt->textures);
+            snprintf(adt->textures[0], sizeof adt->textures[0], "Tileset\\Made\\Own0.blp");
+            snprintf(adt->textures[1], sizeof adt->textures[1], "Tileset\\Made\\Own1.blp");
+            adt->ntextures = 2;
+            int tex[256][4];
+            for (int k = 0; k < 256; ++k) {
+                adt->chunks[k].x = (float)(X0 - (k / 16) * 8 * step);
+                adt->chunks[k].y = (float)(Y0 - (k % 16) * 8 * step);
+                for (int l = 0; l < 4; ++l) tex[k][l] = l % 2;
+            }
+            unsigned char *rgb = calloc((size_t)1024 * 1024, 3), painted[256];
+            Wc3Paint pc = { 0 };
+            e = wc3_ground_paint_tile(w, adt, tex, rgb, painted, &pc, &why);
+            int others = 0;
+            for (int k = 2; k < 256; ++k) others += painted[k] || tex[k][0] != 0 || tex[k][1] != 1;
+            snprintf(line, sizeof line, "the two chunks on the WC3 grid painted (%d cells, %d bare, %d folded), the other 254 left with the ground file's pictures", pc.cells, pc.bare, pc.folded);
+            check(!e && painted[0] && painted[1] && !others && pc.painted == 2 && pc.cells == 128 && pc.outside == 0 && pc.bare == 8 && pc.folded > 0, e ? why.text : line);
+            int tex_set[256];
+            for (int t = 0; t < 256; ++t) tex_set[t] = -1;
+            for (int t = 2; t < adt->ntextures; ++t)
+                for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(adt->textures[t], wc3_ground_tileset(w, k)->layer)) tex_set[t] = k;
+            int chunk0_lowest = tex_set[tex[0][0]] < tex_set[tex[0][1]] && tex_set[tex[0][1]] < tex_set[tex[0][2]] && tex_set[tex[0][2]] < tex_set[tex[0][3]];
+            int kept[6] = { 0 }, nkept = 0, once = 1;
+            for (int k = 0; k < 2; ++k) for (int l = 0; l < 4; ++l) { int ts = tex_set[tex[k][l]]; if (ts >= 0 && !kept[ts]) { kept[ts] = 1; ++nkept; } }
+            for (int t = 2; t < adt->ntextures; ++t) for (int u = t + 1; u < adt->ntextures; ++u) once &= strcmp(adt->textures[t], adt->textures[u]) != 0;
+            check(adt->ntextures == 2 + nkept && nkept >= 4 && once && chunk0_lowest && tex_set[tex[0][0]] == 0,
+                  "the tile's list gains a layer for each tileset its chunks keep, once each; a chunk's four drawn lowest tileset first");
+            /* 063's preparation, for which cells are bare */
+            uint8_t ext[6] = { 0, 1, 0, 0, 0, 0 };
+            W3eGround *g2 = NULL;
+            W3ePrep *prep = NULL;
+            if (!w3e_read(o.b, o.n, &g2, &why)) w3e_prep(g2, ext, 6, &prep, &why);
+            TPaintCheck chk = { 0 };
+            if (prep) t_paint_check(w, prep, adt, tex, rgb, 3, painted, tex_set, NULL, &chk);
+            snprintf(line, sizeof line, "chunk 0 (four tilesets) as WC3 lays it: each quarter of each cell its corner's tileset, a bare cell its south-west one's (%ld of %ld points)",
+                     chk.exact_same, chk.exact_points);
+            check(prep && chk.exact_points == 4096 && chk.exact_same == chk.exact_points, line);
+            snprintf(line, sizeof line, "chunk 1 (five tilesets) folded to four: %ld of its %ld points as WC3 lays them", chk.same - chk.exact_same, chk.points - chk.exact_points);
+            check(chk.points == 8192 && chk.same - chk.exact_same > (chk.points - chk.exact_points) / 2 && chk.same < chk.points, line);
+            w3e_prep_free(prep); w3e_free(g2);
+            /* through the ground's preparation (033): a WC3 layer's name is its whole tile */
+            GroundPlace gp = { .assets = r, .wc3 = w };
+            GroundPixels gpx = { 0 };
+            e = ground_prep_pixels(&gp, t1->layer, &gpx, &why);
+            check(!e && gpx.width == 64 && gpx.height == 64 && gpx.smaller && gpx.rgba[2] == T_COLOURS[1][2], e ? why.text : "033 gives a WC3 layer's name its whole tile, with its smaller copies");
+            free(gpx.rgba); free(gpx.smaller);
+            gp.wc3 = NULL;
+            check(ground_prep_pixels(&gp, t1->layer, &gpx, &why) == W_ERR_NOT_FOUND, "a WC3 layer with no WC3 ground: not found");
+            free(rgb);
+            adt_free(adt); free(adt);
+            wc3_ground_free(w);
+        }
+        if (r) resolver_free(r);
+        fclose(place.log); free(log);
+        /* no install (no sheet anywhere), and no war3map.w3e: nothing painted, said */
+        place.wc3[0] = '\0';
+        log = NULL;
+        place.log = open_memstream(&log, &log_len);
+        if (!resolver_open(&place, &r, &why)) {
+            check(wc3_ground_open(r, NULL, s, 0, 0, &w, &why) == W_ERR_NOT_FOUND && strstr(why.text, "assetWc3") && !w,
+                  "no Warcraft III install: not found (no Terrain.slk), so the converter's pictures stay");
+            resolver_free(r);
+        }
+        fclose(place.log); free(log);
+        place.noverlays = 0;
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        log = NULL;
+        place.log = open_memstream(&log, &log_len);
+        if (!resolver_open(&place, &r, &why)) {
+            check(wc3_ground_open(r, NULL, s, 0, 0, &w, &why) == W_ERR_NOT_FOUND && strstr(why.text, "war3map.w3e") && strstr(why.text, "converter"),
+                  "a build with no war3map.w3e: not found, saying the converter doesn't copy it yet");
+            check(wc3_ground_open(NULL, NULL, s, 0, 0, &w, &why) == W_ERR_NOT_FOUND, "no resolver (not a test-map run): not found");
+            resolver_free(r);
+        }
+        fclose(place.log); free(log);
+        free(o.b);
+    }
+    /* }}} */
+
+    /* {{{ the converter's real output, when its build carries the map's war3map.w3e */
+    {
+        snprintf(path, sizeof path, "%s/war3map.w3e", build);
+        FILE *f = fopen(path, "rb");
+        ConvertedMap m;
+        if (!f || converted_map_read(build, &m, &why)) {
+            if (f) fclose(f);
+            printf("  (no war3map.w3e in %s: world-edit-to-execute's converter doesn't copy the map's own ground into its build yet; its WC3 tileset checks are skipped)\n", build);
+            return;
+        }
+        fclose(f);
+        printf("  the converted build folder %s, with its map's war3map.w3e\n", build);
+        /* an install made for its own tilesets: the sheet, one picture each
+         * in this test's colours (the pictures in two archives) */
+        ResolverPlace place = { .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+        place.noverlays = 1;
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        Wc3Ground *w = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            check(wc3_ground_open(r, NULL, m.wc3_scale, m.wc3_x0, m.wc3_y0, &w, &why) == W_ERR_NOT_FOUND && strstr(why.text, "Terrain.slk"),
+                  "with no Warcraft III install, its ground keeps the converter's pictures (said)");
+            resolver_free(r);
+            r = NULL;
+        }
+        AssetAnswer a;
+        W3eGround *g = NULL;
+        unsigned char *wb = NULL;
+        size_t wl = 0;
+        f = fopen(path, "rb");
+        if (f) { fseek(f, 0, SEEK_END); wl = (size_t)ftell(f); fseek(f, 0, SEEK_SET); wb = malloc(wl); if (fread(wb, 1, wl, f) != wl) wl = 0; fclose(f); }
+        e = w3e_read(wb, wl, &g, &why);
+        check(!e, e ? why.text : "its war3map.w3e reads (063)");
+        if (e) { fclose(place.log); free(log); free(wb); return; }
+        int nset = g->nground < 16 ? g->nground : 16;
+        char sheet[4000] = "ID;PWXL;N;E\nC;X1;Y1;K\"tileID\"\nC;X2;K\"dir\"\nC;X3;K\"file\"\n";
+        const char *n1[16], *b1[16], *n2[16], *b2[16];
+        size_t l1[16], l2[16];
+        int c1 = 0, c2 = 0;
+        static char pn[16][64];
+        for (int k = 0; k < nset; ++k) {
+            char row[200];
+            snprintf(row, sizeof row, "C;X1;Y%d;K\"%.4s\"\nC;X2;K\"TerrainArt\\Made\"\nC;X3;K\"T%02d\"\n", k + 2, g->ground_ids + 4 * k, k);
+            strncat(sheet, row, sizeof sheet - strlen(sheet) - 1);
+            snprintf(pn[k], sizeof pn[k], "TerrainArt\\Made\\T%02d.blp", k);
+            if (k < 8) { n1[c1] = pn[k]; b1[c1] = (const char *)t_tileset(k, k % 3 == 1, &l1[c1]); ++c1; }
+            else { n2[c2] = pn[k]; b2[c2] = (const char *)t_tileset(k, k % 3 == 1, &l2[c2]); ++c2; }
+        }
+        strncat(sheet, "E\n", sizeof sheet - strlen(sheet) - 1);
+        n1[c1] = "TerrainArt\\Terrain.slk"; b1[c1] = sheet; l1[c1] = strlen(sheet); ++c1;
+        snprintf(folder, sizeof folder, "%s/install-real", root);
+        t_mkdirs(folder);
+        snprintf(path, sizeof path, "%s/war3.mpq", folder);
+        t_write_mpq_n(path, n1, b1, l1, c1);
+        snprintf(path, sizeof path, "%s/War3x.mpq", folder);
+        if (c2) t_write_mpq_n(path, n2, b2, l2, c2);
+        for (int k = 0; k < c1 - 1; ++k) free((void *)b1[k]);
+        for (int k = 0; k < c2; ++k) free((void *)b2[k]);
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        e = resolver_open(&place, &r, &why);
+        if (!e) e = wc3_ground_open(r, NULL, m.wc3_scale, m.wc3_x0, m.wc3_y0, &w, &why);
+        snprintf(line, sizeof line, "with an install made for its %d tilesets (main tileset %c), its WC3 ground opens: %d x %d tile points", nset, g->tileset_code, g->width, g->height);
+        check(!e, e ? why.text : line);
+        if (!e) {
+            /* every ground tile of the build, prepared as 033 does with the WC3 ground set */
+            GroundPlace gp;
+            MapWorld *mw = calloc(1, sizeof *mw);
+            maps_world_init(mw, root, m.id);                 /* no server tiles: every point lit as level ground */
+            e = ground_place_init(&gp, NULL, r, m.directory, mw, 0, 0, &why);
+            gp.wc3 = w;
+            const W3eGround *wg = wc3_ground_w3e(w);
+            unsigned char *hit = calloc((size_t)(wg->width - 1) * (wg->height - 1), 1);
+            uint8_t ext[16];
+            for (int k = 0; k < 16; ++k) ext[k] = k < wc3_ground_tilesets(w) && wc3_ground_tileset(w, k)->extended;
+            W3ePrep *prep = NULL;
+            w3e_prep(wg, ext, wc3_ground_tilesets(w), &prep, &why);
+            TPaintCheck chk = { 0 };
+            int tiles = 0, own = 0, layers = 0, whole = 0;
+            for (int a1 = 0; !e && a1 < 64; ++a1)
+                for (int b1x = 0; !e && b1x < 64; ++b1x) {
+                    snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, a1, b1x);
+                    if (asset_read(r, NULL, path, ASSET_GROUND, &a, &why)) continue;
+                    asset_answer_free(&a);
+                    GroundPrep *gpr = NULL;
+                    e = ground_prep_tile(&gp, b1x, a1, NULL, NULL, &gpr, &why);
+                    if (e) break;
+                    ++tiles;
+                    unsigned char painted[256];
+                    int tex_set[256];
+                    for (int t = 0; t < 256; ++t) tex_set[t] = -1;
+                    for (int t = 0; t < gpr->adt->ntextures; ++t)
+                        for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(gpr->adt->textures[t], wc3_ground_tileset(w, k)->layer)) tex_set[t] = k;
+                    for (int k = 0; k < 256; ++k) {
+                        painted[k] = tex_set[gpr->chunk_tex[k][0]] >= 0;
+                        own += !painted[k];
+                    }
+                    for (int t = 0; t < gpr->adt->ntextures; ++t)
+                        if (gpr->needed[t] && tex_set[t] >= 0) { ++layers; whole += gpr->pixels[t].width == 64 && gpr->pixels[t].rgba[3] == 255; }
+                    t_paint_check(w, prep, gpr->adt, gpr->chunk_tex, gpr->blend, 4, painted, tex_set, hit, &chk);
+                    ground_prep_free(gpr, 0);
+                }
+            long cells = 0;
+            for (size_t c = 0; c < (size_t)(wg->width - 1) * (wg->height - 1); ++c) cells += hit[c];
+            snprintf(line, sizeof line, "its %d ground tiles prepared with WC3's tilesets: %d chunks painted, %d keep the converter's pictures (off the WC3 grid)", tiles, chk.chunks, own);
+            check(!e && tiles > 0 && chk.chunks > 0, e ? why.text : line);
+            snprintf(line, sizeof line, "every WC3 cell (%ld of %d x %d) lies in exactly one cell of the ground's chunks, its centre on WC3's (%d twice; the farthest %.4f of a cell off)",
+                     cells, wg->width - 1, wg->height - 1, chk.hit_twice, chk.worst_centre);
+            check(cells == (long)(wg->width - 1) * (wg->height - 1) && chk.hit_twice == 0 && chk.worst_centre < 0.01, line);
+            snprintf(line, sizeof line, "in chunks of four tilesets or fewer, every blend point as WC3 lays it (%ld of %ld)", chk.exact_same, chk.exact_points);
+            check(chk.exact_points > 0 && chk.exact_same == chk.exact_points, line);
+            snprintf(line, sizeof line, "over all its chunks %ld of %ld blend points (%.1f%%) as WC3 lays them; the rest in chunks of more than four tilesets, folded",
+                     chk.same, chk.points, chk.points ? 100.0 * chk.same / chk.points : 0.0);
+            check(chk.points > 0 && chk.same * 10 > chk.points * 8, line);
+            snprintf(line, sizeof line, "each WC3 layer a tile needs unpacked as its tileset's whole tile, 64 x 64 (%d of %d)", whole, layers);
+            check(layers > 0 && whole == layers, line);
+            free(hit);
+            w3e_prep_free(prep);
+            maps_world_free(mw); free(mw);
+            wc3_ground_free(w);
+        }
+        if (r) resolver_free(r);
+        fclose(place.log); free(log);
+        w3e_free(g);
+        free(wb);
+    }
+    /* }}} */
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -2065,6 +2885,19 @@ int main(int argc, char **argv)
     placed_tests(dir);
     /* }}} */
 
+    /* {{{ Warcraft III's own install as a place, and a converted map's
+     * ground painted with its tilesets (1109 step 1d): folders and
+     * archives made here, and the converter's output when it carries the
+     * map's war3map.w3e; no game data, so before the archives */
+    printf("Warcraft III's own install, and a converted map's ground with WC3's tilesets\n");
+    {
+        char build[700];
+        if (argc > 3) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        wc3_place_tests(dir, build);
+    }
+    /* }}} */
+
     /* {{{ WC3's models (MDX, issue 401 step 2): one written here. It needs
      * none of the game's files, so it comes before the archives, which
      * end the program when the client's files aren't there. Every WC3
@@ -2132,6 +2965,10 @@ int main(int argc, char **argv)
         if (nr) memcpy(nr, "NRMX", 4);
         check(nr && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "NRMS"), "a geoset whose normals are misnamed: corrupt, saying what was expected");
     }
+    /* }}} */
+
+    /* {{{ WC3's ground (302a): files written here, so it runs with no game data */
+    check_wc3_ground();
     /* }}} */
 
     /* {{{ the archives */

@@ -103,7 +103,12 @@ Not built yet:
   wrong), and two calls: `asset_resolve_all` (every place's copy, for a
   table read per row) and `asset_read` (the first copy, never a
   placeholder, through the resolver when one is open, else the
-  archives). Since 1109's step 1c (2026-11-05) the ground's pictures
+  archives). Since 1109's step 1d (2026-11-05) the player's own
+  Warcraft III install (setting `assetWc3`, a folder under `assets`
+  holding or linking to war3.mpq, War3x.mpq, War3Patch.mpq) is read as
+  the second half of the Blizzard place, after the game's own archives:
+  stock WC3 pictures, models and tables a converted map names come from
+  there before the checker or box. Since 1109's step 1c (2026-11-05) the ground's pictures
   (033, 038) and the doodads' and buildings' models, pictures and
   `.anim` files (042, through `src/076-placed-models.c`) ask it too,
   with two more calls: `asset_get` (the placeholder when there is a

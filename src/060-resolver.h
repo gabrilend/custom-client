@@ -14,7 +14,10 @@
  *      fetched before logging in into a folder on disk; none yet);
  *   3. overlays: loose folders such as a Warcraft III map converted by
  *      world-edit-to-execute (its terrain and placements);
- *   4. the original game's archives, the player's own copy (015-mpq.h);
+ *   4. the player's own Blizzard install: the original game's archives
+ *      (015-mpq.h), then, when they plugged it in, their Warcraft III
+ *      archives (war3.mpq, War3x.mpq, War3Patch.mpq: the `assetWc3`
+ *      setting), for the WC3 pictures and models a converted map names;
  *   5. a placeholder built into the client, chosen by kind: a magenta
  *      and black checker picture, a box model, a short beep. Each time
  *      one stands in, a warning names it. With strict mode on it is an
@@ -71,6 +74,10 @@ const char *asset_source_name(AssetSource source);
  *   packs, server, overlays  folders, highest priority first in each list
  *   chain       the original game's archives; NULL for none (a test, or a
  *               player with no copy: everything then comes from the folders)
+ *   wc3         a folder holding the player's Warcraft III archives (or a
+ *               link to their install), asked after `chain`; "" for none.
+ *               The resolver opens them itself (mpq_chain_open_wc3); a
+ *               folder with none of them is said and left out
  *   strict      1: a placeholder is an error (the `assetsStrict` setting)
  *   distinctness  a pack asset counts as replaced from this score up
  *               (0 to 1; the `assetsDistinctness` setting)
@@ -81,6 +88,7 @@ typedef struct {
     char      server[RESOLVER_FOLDERS_MAX][600];   int nserver;
     char      overlays[RESOLVER_FOLDERS_MAX][600]; int noverlays;
     MpqChain *chain;
+    char      wc3[600];
     int       strict;
     double    distinctness;
     FILE     *log;
@@ -90,8 +98,10 @@ typedef struct {
 /* The place from the settings store: `assetPacks` and `assetOverlays`
  * name folders under `assets_dir`/packs and `assets_dir`/overlays
  * (commas between names, highest priority first), `assetsStrict` and
- * `assetsDistinctness` as above; `chain` as given; no server folders yet,
- * log stderr, trace off. W_OK (folders are checked when opened). */
+ * `assetsDistinctness` as above, `wc3` the folder `assetWc3` names under
+ * `assets_dir` (none when either is empty); `chain` as given; no server
+ * folders yet, log stderr, trace off. W_OK (folders are checked when
+ * opened). */
 WErr resolver_place_from_settings(const Settings *st, const char *assets_dir, MpqChain *chain, ResolverPlace *out, WWhy *why);
 
 /* The resolver (the handle: docs/001, "Handles"). Indexes every folder
@@ -100,7 +110,9 @@ WErr resolver_place_from_settings(const Settings *st, const char *assets_dir, Mp
  * W_OK with `*out`; otherwise the code of what failed, with the folder:
  * W_ERR_NOT_FOUND for a folder missing, a pack with no manifest.lua, or an
  * entry whose file isn't in its pack; the manifest's own codes (059); a
- * folder's own (two names differing by capitals: W_ERR_REFUSED). The
+ * folder's own (two names differing by capitals: W_ERR_REFUSED); a
+ * Warcraft III archive's own code when one is there but can't be read
+ * (no folder, or none of its archives, is only said in the log). The
  * chain must outlive it. Safe to ask from more than one thread. */
 typedef struct Resolver Resolver;
 WErr resolver_open(const ResolverPlace *place, Resolver **out, WWhy *why);
@@ -174,6 +186,10 @@ void asset_counts(Resolver *r, AssetCounts *out);
 /* Prints the counts as a table, one row a kind and a total, with the
  * threshold and strict mode, to `to`. */
 void resolver_report(Resolver *r, FILE *to);
+
+/* The folder Warcraft III's archives were opened from, or NULL when the
+ * resolver has none (no folder given, or none of its archives there). */
+const char *resolver_wc3(const Resolver *r);
 
 /* What the program should exit with for its assets: 1 when strict mode
  * is on and any placeholder was asked for, else 0. */

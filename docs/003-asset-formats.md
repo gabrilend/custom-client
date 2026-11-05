@@ -111,6 +111,22 @@ in `src/`.
 - Per-chunk: textures (up to 4 blended via alpha maps), doodad refs (M2),
   WMO refs, liquid layer, shadow map, vertex colors.
 
+## W3E — Warcraft III's ground
+
+- A map's `war3map.w3e` (read since 2026-11-04, issue 302a,
+  `src/063-w3e.c`): a head (version 11, the main tileset's letter, the
+  map's ground and cliff tilesets as four-letter ids, the size in tile
+  points, the south-west corner), then a grid of 7-byte tile points 128
+  units apart, rows from the south: height, water level with two
+  boundary bits, the ground tileset and four marks (ramp, blight, water,
+  boundary), the picture's and the cliff's variations, the cliff level and
+  the cliff tileset. `063-w3e.h` lays out every bit.
+- Painted from tileset pictures of 4 x 4 corner-shaped pieces (8 x 4 when
+  extended): each cell lays its lowest tileset whole and each higher one
+  as the piece covering its own corners. Cliffs are models, not ground.
+- Held field by field to world-edit-to-execute's Lua reader by
+  `tests/064-w3e-matches-lua.lua`.
+
 ## WDT — world tile index
 
 - 64×64 bitmap of which ADTs exist for a map.
@@ -139,6 +155,7 @@ in `src/`.
 | ADT    | world geometry         | 3     |
 | WDT    | world geometry         | 3     |
 | WMO    | world geometry         | 3     |
+| W3E    | WC3 map mode, the editor | 3 (read), 11 |
 | M2     | characters & animation | 4     |
 | Sounds | audio & polish         | 10    |
 

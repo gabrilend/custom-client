@@ -12,6 +12,7 @@ camera with proper frustum culling.
 |-----|-------------------------------------------------------------|---------|-------------------------|
 | 301 | [ADT parser](./301-adt-parser.md)                           | partly built | 105                     |
 | 302 | [Terrain renderer](./302-terrain-renderer.md)               | partly built | 301, 203, 204, 207      |
+| 302a | [WC3's ground, read and prepared](./302a-wc3-ground-read-and-prepared.md) | reading built; drawn on the ADT mesh by 1109's step 1d (2026-11-05) | — |
 | 303 | [WDT + streaming](./303-wdt-and-streaming.md)               | partly built | 301, 302                |
 | 304 | [WMO parser](./304-wmo-parser.md)                           | partly built | 105, 301 (shared iter)  |
 | 305 | [WMO renderer + portals](./305-wmo-renderer.md)             | partly built | 304, 203, 204, 207      |
@@ -53,3 +54,9 @@ _(append entries here as issues complete, newest at the bottom)_
 2026-10-07: the code from wow-chat-2026's custom client arrived (its issue
 173v). "Partly built" marks an issue whose Current behavior now describes
 built code; each says what is left. Counts: `lua /home/ritz/programming/ai-stuff/scripts/progress-dashboard.lua /mnt/kaun/custom-client -m`.
+
+2026-11-04: 302a (WC3's ground read and made ready to draw in C,
+`src/063-w3e.c`) built on branch `claude/wc3-ground-reader`, matching
+world-edit-to-execute's Lua on every ground its check makes and on the
+19 maps in that project's `assets/`. The stock game's own maps wait for
+the owner's machine; drawing it is 302's.

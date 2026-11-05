@@ -89,6 +89,7 @@
 #include "073-converted-map.h"
 #include "074-tables.h"
 #include "075-adt-heights.h"
+#include "078-wc3-ground.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -226,6 +227,7 @@ typedef struct {
     Resolver *assets;                                 /* a test map's resolver, its folder first of the overlays (060-resolver.h) */
     Tables   *tables;                                 /* the client's tables, per row, through the resolver in a test-map run (074-tables.h) */
     ConvertedMap conv;                                /* a test map's map.lua: which map, where she starts (073-converted-map.h) */
+    Wc3Ground   *wc3_ground;                          /* a test map's own WC3 ground and tilesets, when found (078-wc3-ground.h) */
     AdtHeights *adt_heights;                          /* a test map's heights from its own ground files, while the server has none (075) */
     char   world_in_map[700];                         /* a test map's default --world: <folder>/world */
 } App;
@@ -667,7 +669,22 @@ int main(int argc, char **argv)
         ++app->nothers;
     }
     /* the ground, its files through the resolver in a test-map run (its folder first) */
-    if (ground_place_init(&app->ground_place, &app->chain, app->assets, app->map_name, &app->world, app->ox, app->oy, &why) || !(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
+    if (ground_place_init(&app->ground_place, &app->chain, app->assets, app->map_name, &app->world, app->ox, app->oy, &why))
+        return start_failed(app, 1, "%s", why.text);
+    /* a test map's ground painted with WC3's own tilesets, when its own
+     * ground and the tilesets' pictures are found (a player with WC3:
+     * 078); otherwise said, and the converter's pictures stay */
+    if (app->test_map) {
+        WErr w = wc3_ground_open(app->assets, &app->chain, app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_ground, &why);
+        if (w == W_OK) {
+            int real = 0, n = wc3_ground_tilesets(app->wc3_ground);
+            for (int k = 0; k < n; ++k) real += wc3_ground_tileset(app->wc3_ground, k)->source != ASSET_FROM_PLACEHOLDER;
+            app->ground_place.wc3 = app->wc3_ground;
+            printf("test map: its ground painted with WC3's own tilesets (%d of %d pictures found, the checker for the rest)\n", real, n);
+        } else if (w == W_ERR_NOT_FOUND) printf("test map: its ground keeps the converter's pictures: %s\n", why.text);
+        else return start_failed(app, 1, "%s", why.text);
+    }
+    if (!(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
         return start_failed(app, 1, "%s", why.text);
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
     app->pf = prefetch_start(&app->chain, app->assets, app->map_name, app->read_ahead);
@@ -1047,6 +1064,7 @@ int main(int argc, char **argv)
     if (app->assets) resolver_report(app->assets, stdout);
     if (app->test_map) tables_report(app->tables, stdout);
     if (app->adt_heights) printf("ground: %d tiles' heights made from the map's own ground files\n", adt_heights_made(app->adt_heights));
+    wc3_ground_free(app->wc3_ground);                         /* after the ground and the reading-ahead thread that painted with it */
     maps_world_free(&app->world);                             /* before the heights' source it may ask */
     adt_heights_free(app->adt_heights);
     tables_free(app->tables);                                 /* before the resolver and archives it reads from */
