@@ -55,7 +55,6 @@
 #define BASELINE_FIGURE_MODEL     "Baseline\\StandInFigure.m2"      /* the stand-in figure, under the set's own names (1109 step 1l) */
 #define BASELINE_FIGURE_SKIN      "Baseline\\StandInFigure00.skin"
 #define BASELINE_FIGURE_PICTURE   "Baseline\\StandInFigure.blp"
-#define BASELINE_LIQUID_FIELDS    45                                 /* LiquidType's width in 3.3.5a */
 
 /* The tables the set holds, by name (DBFilesClient\NAME.dbc), NULL-ended:
  * LiquidType (one row, water, naming BASELINE_WATER_PATTERN) and the five

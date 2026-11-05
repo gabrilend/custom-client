@@ -50,7 +50,8 @@ CORE=(014-settings "${READERS[@]}" 018-maps 019-navmesh-slope 025-character 026-
       028-collide 029-mover 030-moves 031-camera 032-sight 033-ground-prep 034-prefetch 035-creatures
       060-resolver 067-test-map 068-goodbye 073-converted-map 074-tables 075-adt-heights 076-placed-models 078-wc3-ground 079-wc3-cliffs
       080-ground-shader 081-wc3-water 082-water-prep 084-map-fog
-      085-baseline-set 087-world-start 088-figure-model 089-headless-run 091-model-solids 094-wc3-pathing)
+      085-baseline-set 087-world-start 088-figure-model 089-headless-run 091-model-solids 094-wc3-pathing
+      097-table-layouts)
 # DRAWING: the parts that send things to the graphics card
 DRAWING=(036-texture 037-sky 038-ground 039-horizon 040-water 041-figure 042-doodads)
 sources() { for p in "$@"; do printf '%s\n' "${SRC}/${p}.c"; done; }

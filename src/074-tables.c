@@ -9,6 +9,7 @@
  * covers the tables, since the reading-ahead thread may ask too.
  */
 #include "074-tables.h"
+#include "097-table-layouts.h"
 #include "013-errors.h"
 
 #include <pthread.h>
@@ -32,6 +33,7 @@ typedef struct {
     uint32_t    answered[TABLES_COPIES_MAX];  /* lookups each copy answered */
     TableAt    *scan;   uint32_t nscan;       /* the rows for a search, made when first asked (tables_scan) */
     int         scanned;
+    int         absent;                       /* failed because no place has it (a layout may still make a placeholder row) */
     Placeholder **made;  int nmade, made_cap; /* placeholder rows, each made once */
     uint32_t    refused;                      /* placeholder rows strict mode refused */
 } Table;
@@ -94,7 +96,11 @@ static WErr load(Tables *ts, Table *t, WWhy *why)
         if (rc == W_ERR_NOT_FOUND) rc = W_OK;            /* said below, as with the resolver */
     }
     if (rc) return rc;
-    if (!t->ncopies) return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the places asked (%s)", path, ts->assets ? "packs, server folders, overlays, the archives" : "the client's archives");
+    if (!t->ncopies) {
+        t->absent = 1;
+        return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the places asked (%s)", path, ts->assets ? "packs, server folders, overlays, the archives" : "the client's archives");
+    }
+    const TableLayout *lay = table_layout(t->name);
     size_t total = 0;
     for (int c = 0; c < t->ncopies; ++c) {
         snprintf(t->from[c], sizeof t->from[c], "%s", t->copy[c].from ? t->copy[c].from : "");
@@ -120,6 +126,15 @@ static WErr load(Tables *ts, Table *t, WWhy *why)
             return w_fail(why, W_ERR_REFUSED, "%s from %s (%s) has %u fields a row, and from %s (%s) %u: one was written for another client build, so its rows can't be read as this one's",
                           path, asset_source_name(t->copy[0].source), t->from[0], t->dbc[0].fields,
                           asset_source_name(t->copy[c].source), t->from[c], t->dbc[c].fields);
+        /* its layout (097): too narrow for the columns this client reads,
+         * refused; another width than the layout's, said once (the layout's
+         * widths are unchecked against a 3.3.5a file: 1109 step 1r) */
+        char where[700];
+        snprintf(where, sizeof where, "%s (%s)", asset_source_name(t->copy[c].source), t->from[c]);
+        WWhy fit;
+        if (table_layout_fits(lay, t->dbc[c].fields, where, &fit)) return w_fail(why, fit.code, "%s", fit.text);
+        if (lay && t->dbc[c].fields != lay->fields && !c)
+            fprintf(stderr, "tables: %s from %s has %u fields a row, and its layout (097, unchecked) %u: read as it is\n", path, where, t->dbc[c].fields, lay->fields);
         total += t->dbc[c].rows;
     }
     t->index = malloc(sizeof *t->index * (total ? total : 1));
@@ -171,8 +186,11 @@ static const TableIndex *find(const Table *t, uint32_t id)
 static WErr row_of(Tables *ts, const char *name, uint32_t id, int stand_in, TableRow *out, WWhy *why)
 {
     Table *t = table(ts, name);
-    if (t->state < 0) return w_fail(why, t->fail.code, "%s", t->fail.text);
-    const TableIndex *hit = find(t, id);
+    const TableLayout *lay = table_layout(name);
+    /* a table no place has can still take a placeholder row when its layout gives the width (1109 step 1r) */
+    int absent = t->state < 0 && t->absent && lay && stand_in && ts->assets;
+    if (t->state < 0 && !absent) return w_fail(why, t->fail.code, "%s", t->fail.text);
+    const TableIndex *hit = absent ? NULL : find(t, id);
     if (hit) {
         ++t->answered[hit->copy];
         out->dbc = &t->dbc[hit->copy];
@@ -181,9 +199,14 @@ static WErr row_of(Tables *ts, const char *name, uint32_t id, int stand_in, Tabl
         out->from = t->from[hit->copy];
         return W_OK;
     }
-    WErr rc = w_fail(why, W_ERR_NOT_FOUND, "no row %u in %s (%d cop%s: %u row%s)", id, name, t->ncopies, t->ncopies == 1 ? "y" : "ies",
-                     t->nindex, t->nindex == 1 ? "" : "s");
+    WErr rc = absent ? w_fail(why, t->fail.code, "%s", t->fail.text)
+                     : w_fail(why, W_ERR_NOT_FOUND, "no row %u in %s (%d cop%s: %u row%s)", id, name, t->ncopies, t->ncopies == 1 ? "y" : "ies",
+                              t->nindex, t->nindex == 1 ? "" : "s");
     if (!stand_in || !ts->assets) return rc;
+    if (lay && !lay->has_id) {
+        WWhy was = *why;
+        return w_fail(why, W_ERR_NOT_FOUND, "%s; its first column isn't a row number (097), so it has no placeholder row", was.text);
+    }
     Placeholder *p = NULL;
     for (int k = 0; k < t->nmade && !p; ++k) if (t->made[k]->id == id) p = t->made[k];
     if (!p) {
@@ -192,20 +215,29 @@ static WErr row_of(Tables *ts, const char *name, uint32_t id, int stand_in, Tabl
         snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", name);
         WWhy inner;
         if (asset_row_stand_in(ts->assets, path, id, &inner)) { ++t->refused; return w_fail(why, inner.code, "%s", inner.text); }
-        uint32_t fields = t->dbc[0].fields, row_len = fields * 4;
-        size_t len = 20 + (size_t)row_len + 1;           /* the header, the row, a text block of one empty string */
-        p = calloc(1, sizeof *p);
-        unsigned char *b = p ? calloc(1, len) : NULL;
-        if (t->nmade == t->made_cap) {
+        /* its layout's values (097), as wide as its copies (they agree) or,
+         * with none, the layout; with no layout, its number and zeros */
+        uint32_t fields = t->ncopies ? t->dbc[0].fields : lay->fields;
+        size_t len = 0;
+        unsigned char *b = NULL;
+        if (lay) b = table_layout_placeholder(lay, fields, id, &len);
+        else {
+            len = 20 + (size_t)fields * 4 + 1;           /* the header, the row, a text block of one empty string */
+            b = calloc(1, len);
+            if (b) {
+                memcpy(b, "WDBC", 4);
+                uint32_t head[4] = { 1, fields, fields * 4, 1 };
+                for (int k = 0; k < 4; ++k) for (int q = 0; q < 4; ++q) b[4 + 4 * k + q] = (unsigned char)(head[k] >> (8 * q));
+                for (int q = 0; q < 4; ++q) b[20 + q] = (unsigned char)(id >> (8 * q));
+            }
+        }
+        p = b ? calloc(1, sizeof *p) : NULL;
+        if (p && t->nmade == t->made_cap) {
             int cap = t->made_cap ? t->made_cap * 2 : 8;
-            Placeholder **m = b ? realloc(t->made, sizeof *m * (size_t)cap) : NULL;
+            Placeholder **m = realloc(t->made, sizeof *m * (size_t)cap);
             if (m) { t->made = m; t->made_cap = cap; }
         }
-        if (!p || !b || t->nmade == t->made_cap) { free(b); free(p); return w_fail(why, W_ERR_FULL, "no memory for a placeholder row %u of %s", id, name); }
-        memcpy(b, "WDBC", 4);
-        uint32_t head[4] = { 1, fields, row_len, 1 };
-        for (int k = 0; k < 4; ++k) for (int q = 0; q < 4; ++q) b[4 + 4 * k + q] = (unsigned char)(head[k] >> (8 * q));
-        for (int q = 0; q < 4; ++q) b[20 + q] = (unsigned char)(id >> (8 * q));
+        if (!p || t->nmade == t->made_cap) { free(b); free(p); return w_fail(why, W_ERR_FULL, "no memory for a placeholder row %u of %s", id, name); }
         p->id = id;
         p->bytes = b;
         WWhy inner2;

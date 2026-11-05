@@ -36,7 +36,10 @@
  * (1109 step 1l; which model a display means is 088-figure-model.h's).
  * A creature whose model no place has, or a humanoid that can't be made
  * (no install), is the baseline set's stand-in figure when the set is
- * there, said; else left out, as before.
+ * there, said; else left out, as before. In a run with a resolver, a
+ * display or look row no place has is a placeholder row (074, filled
+ * from 097's layout), so the creature is that stand-in too, said (1109
+ * step 1r, decision 137).
  */
 #ifndef EG_FIGURE_H
 #define EG_FIGURE_H

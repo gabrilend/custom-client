@@ -72,6 +72,7 @@
 #include "../src/089-headless-run.h"
 #include "../src/091-model-solids.h"
 #include "../src/094-wc3-pathing.h"
+#include "../src/097-table-layouts.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -1548,6 +1549,71 @@ static void converted_tests(const char *dir, const char *build)
     }
     /* }}} */
 
+    /* {{{ the tables' layouts (097; issue 106, 1109 step 1r) */
+    {
+        int nlay = 0, whole = 1, unique = 1, kinds = 1;
+        for (const TableLayout *l; (l = table_layout_at(nlay)); ++nlay) {
+            TableColumn c, c2;
+            uint32_t k = 1;
+            for (; table_layout_column(l, k, &c); ++k) {
+                if (!strncmp(c.name, "Column", 6)) whole = 0;    /* a column past its runs: the runs don't fill its width */
+                if (c.type == TABLE_LOC) kinds = 0;
+                for (uint32_t q = 1; q < k && unique; ++q) if (table_layout_column(l, q, &c2) && !strcmp(c.name, c2.name)) unique = 0;
+            }
+            if (k - 1 != l->fields || !l->width_from || !l->width_from[0] || table_layout_read_to(l) > l->fields || table_layout_checked(l) > table_layout_read_to(l)) whole = 0;
+            if (table_layout(l->name) != l) unique = 0;
+        }
+        check(nlay == 20 && whole && unique && kinds,
+              "twenty tables' layouts: each one's runs fill its width exactly, each column named once, a localised text as 16 texts and a mask, and none read past its width");
+        const TableLayout *map = table_layout("map"), *cdi = table_layout("CreatureDisplayInfo"), *liq = table_layout("LiquidType"),
+                          *lp = table_layout("LightParams"), *ex = table_layout("CreatureDisplayInfoExtra"), *fh = table_layout("CharacterFacialHairStyles");
+        check(map && !strcmp(map->name, "Map") && map->fields == 66 && cdi && cdi->fields == 16 && liq && liq->fields == 45 && lp && lp->fields == 9 && ex && ex->fields == 21
+              && fh && !fh->has_id && map->has_id && !table_layout("Spell") && !table_layout(NULL) && !table_layout_at(-1),
+              "found by name, any capitals: Map 66 wide, CreatureDisplayInfo 16, LiquidType 45, LightParams 9, CreatureDisplayInfoExtra 21; CharacterFacialHairStyles has no row number; Spell has no layout");
+        check(table_layout_read_to(map) == 2 && table_layout_read_to(cdi) == 9 && table_layout_read_to(liq) == 16 && table_layout_read_to(lp) == 9
+              && table_layout_read_to(ex) == 21 && table_layout_read_to(table_layout("CharStartOutfit")) == 74 && table_layout_read_to(table_layout("Faction")) == 1
+              && table_layout_checked(cdi) == 7 && table_layout_checked(ex) == 20 && table_layout_checked(map) == 2,
+              "the columns this client reads, from its readers: Map to 2 (087), CreatureDisplayInfo to 9 (7 of them: 041, 088), LiquidType to 16 (040), LightParams to 9 (026), CreatureDisplayInfoExtra to 21 (all but its flags: 041)");
+        TableColumn c;
+        int named = table_layout_column(map, 6, &c) && !strcmp(c.name, "MapName_enUS") && c.type == TABLE_STR && c.unknown && !c.read_by;
+        named = named && table_layout_column(map, 7, &c) && !strcmp(c.name, "MapName_koKR") && !c.unknown;
+        named = named && table_layout_column(map, 22, &c) && !strcmp(c.name, "MapName_mask") && c.type == TABLE_U32 && c.def == TABLE_LOC_MASK;
+        named = named && table_layout_column(map, 59, &c) && !strcmp(c.name, "MinimapIconScale") && c.type == TABLE_F32 && c.def == 1;
+        named = named && table_layout_column(map, 2, &c) && !strcmp(c.name, "Directory") && c.read_by && strstr(c.read_by, "087");
+        named = named && table_layout_column(cdi, 8, &c) && !strcmp(c.name, "TextureVariation2") && c.read_by && !table_layout_column(cdi, 17, &c) && !table_layout_column(cdi, 0, &c);
+        check(named, "its columns by number: Map's 6th MapName_enUS (its visible name), 7th MapName_koKR, 22nd its mask; 59th MinimapIconScale (1); CreatureDisplayInfo's 8th TextureVariation2; none at 0 or past the width");
+
+        WWhy fw;
+        WErr fe = table_layout_fits(cdi, 8, "here", &fw);
+        check(fe == W_ERR_CORRUPT && strstr(fw.text, "CreatureDisplayInfo.dbc from here has 8 fields") && strstr(fw.text, "field 9") && strstr(fw.text, "says 16")
+              && !table_layout_fits(cdi, 9, "here", &fw) && !table_layout_fits(cdi, 40, "here", &fw) && !table_layout_fits(NULL, 1, "here", &fw),
+              fe ? fw.text : "a copy narrower than the columns read: refused, naming both; as wide as them or wider (another width than the layout's): fits; a table with no layout: fits");
+
+        size_t plen;
+        unsigned char *pb = table_layout_placeholder(cdi, cdi->fields, 1234, &plen);
+        Dbc pd;
+        float sc = 0;
+        int ok = pb && !dbc_open(&pd, pb, plen, &fw) && pd.rows == 1 && pd.fields == 16;
+        if (ok) { uint32_t u = dbc_u32(&pd, 0, 5); memcpy(&sc, &u, 4); }
+        check(ok && dbc_u32(&pd, 0, 1) == 1234 && sc == 1.0f && dbc_u32(&pd, 0, 6) == 255 && dbc_u32(&pd, 0, 2) == 0 && !strcmp(dbc_text(&pd, 0, 7), ""),
+              "a placeholder CreatureDisplayInfo row: its number, a size of 1 (not 0), an opaque alpha (255), no model, no pictures");
+        free(pb);
+        pb = table_layout_placeholder(map, 70, 77, &plen);
+        ok = pb && !dbc_open(&pd, pb, plen, &fw) && pd.fields == 70;
+        check(ok && dbc_u32(&pd, 0, 1) == 77 && !strcmp(dbc_text(&pd, 0, 6), "unknown Map 77") && !strcmp(dbc_text(&pd, 0, 7), "") && dbc_u32(&pd, 0, 22) == TABLE_LOC_MASK
+              && !strcmp(dbc_text(&pd, 0, 2), "") && dbc_u32(&pd, 0, 70) == 0,
+              "a placeholder Map row as wide as a copy that is wider: its visible name \"unknown Map 77\" (106), its mask, its folder \"\", the columns past the layout 0");
+        free(pb);
+        pb = table_layout_placeholder(lp, lp->fields, 3, &plen);
+        float wa = 0;
+        ok = pb && !dbc_open(&pd, pb, plen, &fw);
+        if (ok) { uint32_t u = dbc_u32(&pd, 0, 9); memcpy(&wa, &u, 4); }
+        check(ok && wa == 0.75f && dbc_u32(&pd, 0, 3) == 0 && !table_layout_placeholder(lp, 0, 3, &plen) && plen == 0 && !table_layout_placeholder(NULL, 9, 3, &plen),
+              "a placeholder LightParams row: water three-quarters opaque, as 026 takes a missing set; none 0 wide or with no layout");
+        free(pb);
+    }
+    /* }}} */
+
     /* {{{ the tables, per row, through the resolver (074; issue 106) */
     {
         char data[520], overlay[520];
@@ -1574,6 +1640,11 @@ static void converted_tests(const char *dir, const char *build)
         size_t oarea_n = t_dbc(oarea, 1, 2, oarea_cells, "", 1);
         t_write(overlay, "DBFILESCLIENT/map.DBC", omap, omap_n);
         t_write(overlay, "DBFilesClient/AreaTable.dbc", oarea, oarea_n);
+        /* and a CreatureDisplayInfo 3 fields wide: narrower than the columns read (097) */
+        static unsigned char odisp[100];
+        const uint32_t odisp_cells[] = { 5, 6, 0 };
+        size_t odisp_n = t_dbc(odisp, 1, 3, odisp_cells, "", 1);
+        t_write(overlay, "DBFilesClient/CreatureDisplayInfo.dbc", odisp, odisp_n);
 
         MpqChain chain;
         e = mpq_chain_open(&chain, data, "enUS", &why);
@@ -1635,6 +1706,10 @@ static void converted_tests(const char *dir, const char *build)
             WWhy again;
             check(tables_row(ts, "AreaTable", 14, &row, &again) == W_ERR_REFUSED && !strcmp(again.text, why.text) && tables_copies(ts, "AreaTable", NULL, NULL) == -1,
                   "and refused the same way each time it is asked");
+            e = tables_row(ts, "CreatureDisplayInfo", 5, &row, &why);
+            check(e == W_ERR_CORRUPT && strstr(why.text, "CreatureDisplayInfo.dbc from overlay") && strstr(why.text, "has 3 fields") && strstr(why.text, "its field 9")
+                  && strstr(why.text, "too narrow") && strstr(why.text, "says 16") && tables_row_or_placeholder(ts, "CreatureDisplayInfo", 77, &row, &why) == W_ERR_CORRUPT,
+                  e ? why.text : "a copy narrower than the columns this client reads: refused, naming its place, its width and the last column read (097, decision 135), and no placeholder for it");
             e = tables_row(ts, "Faction", 1, &row, &why);
             check(e == W_ERR_NOT_FOUND && strstr(why.text, "Faction.dbc is in none"), e ? why.text : "a table no place has: not found, named");
             e = tables_row(ts, "", 1, &row, &why);
@@ -1667,8 +1742,8 @@ static void converted_tests(const char *dir, const char *build)
                   e ? why.text : "a row no copy has, where its reader takes a placeholder: one made (its number, every field else 0 or \"\", the table's width), once, said and counted by the resolver");
             WErr real = tables_row_or_placeholder(ts, "Map", 530, &row, &why);
             check(!real && !row.placeholder && row.source == ASSET_FROM_BLIZZARD && tables_row(ts, "Map", 77, &row2, &why) == W_ERR_NOT_FOUND
-                  && tables_row_or_placeholder(ts, "Faction", 1, &row2, &why) == W_ERR_NOT_FOUND,
-                  "a row a copy has is that row; a plain lookup still says no row; a table no place has gets none (no width to make one by)");
+                  && tables_row_or_placeholder(ts, "Spell", 1, &row2, &why) == W_ERR_NOT_FOUND,
+                  "a row a copy has is that row; a plain lookup still says no row; a table no place has and no layout gives gets none (no width to make one by)");
             char *rep = NULL;
             size_t rep_len = 0;
             FILE *to = open_memstream(&rep, &rep_len);
@@ -1677,6 +1752,16 @@ static void converted_tests(const char *dir, const char *build)
             check(rep && strstr(rep, "Map") && strstr(rep, "overlay") && strstr(rep, "blizzard") && strstr(rep, "not read") && strstr(rep, "1 placeholder row"),
                   "the report: each table's copies and places, the one not read, and the placeholder rows");
             free(rep);
+            /* a table no place has, but a layout gives (097, 1109 step 1r): its placeholder row as wide as the layout, its fields the layout's */
+            e = tables_row_or_placeholder(ts, "Faction", 3, &row, &why);
+            TableColumn nm;
+            check(!e && row.placeholder && row.dbc->fields == 57 && dbc_u32(row.dbc, row.row, 1) == 3 && table_layout_column(table_layout("Faction"), 24, &nm)
+                  && !strcmp(nm.name, "Name_enUS") && !strcmp(dbc_text(row.dbc, row.row, 24), "unknown Faction 3") && dbc_u32(row.dbc, row.row, 40) == TABLE_LOC_MASK
+                  && !strcmp(dbc_text(row.dbc, row.row, 41), "") && dbc_u32(row.dbc, row.row, 2) == 0 && tables_placeholders(ts) == 2
+                  && tables_row(ts, "Faction", 3, &row2, &why) == W_ERR_NOT_FOUND,
+                  e ? why.text : "a table no place has, which a layout gives: a placeholder row 57 wide, its number, its name \"unknown Faction 3\" (106), its mask, the rest 0 or \"\"");
+            e = tables_row_or_placeholder(ts, "CharacterFacialHairStyles", 1, &row, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "isn't a row number"), e ? why.text : "a table whose first column isn't a row number: no placeholder row (decision 139)");
             tables_free(ts);
 
             ts = tables_new(NULL, &chain);
@@ -1796,20 +1881,19 @@ static void converted_tests(const char *dir, const char *build)
     e = tables_row(ts, "Map", (uint32_t)m.id, &row, &why);
     snprintf(line, sizeof line, "its Map row %d is in its folder's Map.dbc and names its folder %s", m.id, m.directory);
     check(!e && row.source == ASSET_FROM_OVERLAY && !strcasecmp(dbc_text(row.dbc, row.row, 2), m.directory), e ? why.text : line);
-    static const struct { const char *name; uint32_t fields; } WIDTH[] = {
-        { "Map", 66 }, { "AreaTable", 36 }, { "CreatureDisplayInfo", 16 }, { "CreatureModelData", 28 }, { "Faction", 57 }, { "FactionTemplate", 14 }, { "LoadingScreens", 4 },
-    };
+    static const char *const WIDTH[] = { "Map", "AreaTable", "CreatureDisplayInfo", "CreatureModelData", "Faction", "FactionTemplate", "LoadingScreens" };
     int wide = 0, nwidth = (int)(sizeof WIDTH / sizeof WIDTH[0]);
     for (int i = 0; i < nwidth; ++i) {
         AssetAnswer a;
         Dbc d;
-        snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", WIDTH[i].name);
-        if (asset_read(r, NULL, path, ASSET_TABLE, &a, &why)) { printf("  (%s: %s)\n", WIDTH[i].name, why.text); continue; }
-        if (!dbc_open(&d, a.data, a.len, &why) && d.fields == WIDTH[i].fields) ++wide;
-        else printf("  (%s: %u fields, 3.3.5a's has %u)\n", WIDTH[i].name, d.fields, WIDTH[i].fields);
+        const TableLayout *lay = table_layout(WIDTH[i]);
+        snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", WIDTH[i]);
+        if (asset_read(r, NULL, path, ASSET_TABLE, &a, &why)) { printf("  (%s: %s)\n", WIDTH[i], why.text); continue; }
+        if (lay && !dbc_open(&d, a.data, a.len, &why) && d.fields == lay->fields) ++wide;
+        else printf("  (%s: %u fields, its layout (097) %u)\n", WIDTH[i], d.fields, lay ? lay->fields : 0);
         asset_answer_free(&a);
     }
-    snprintf(line, sizeof line, "%d of its %d tables are as wide as 3.3.5a's own, so its rows sit beside the archives' (074 refuses another width)", wide, nwidth);
+    snprintf(line, sizeof line, "%d of its %d tables are as wide as their layouts (097, the converter's own widths), so its rows sit beside the archives' (074 refuses another width)", wide, nwidth);
     check(wide == nwidth, line);
 
     LuaData *d = NULL;

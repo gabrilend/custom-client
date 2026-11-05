@@ -39,15 +39,22 @@
  *
  * A row no copy has is an error naming the table and the row, except
  * where a reader asks for a placeholder (tables_row_or_placeholder:
- * 088's creature looks) in a run with a resolver: then a row made here
- * stands in, its number in its first field and every other field 0
- * (text fields ""), as wide as the table's first copy; the resolver says
- * it (a warning, counted with its other placeholders) and strict mode
- * refuses it (106: "a missing row is resolved like a missing asset: a
- * placeholder and a warning; an error in strict mode"). It lives in
- * memory only, until tables_free, and is made once a row: short-lived,
- * until layouts (106) can say what each field of a real placeholder
- * should hold (1109 step 1q, decisions 130 and 131).
+ * 041's and 088's creature looks) in a run with a resolver: then a row
+ * made here stands in, its number in its first field and every other
+ * field its layout's placeholder value (097: a size of 1, an opaque
+ * alpha, a visible "unknown Map 900" name, else 0 or ""; with no layout
+ * 0 and ""), as wide as the table's copies or, when no place has the
+ * table, its layout; the resolver says it (a warning, counted with its
+ * other placeholders) and strict mode refuses it (106: "a missing row is
+ * resolved like a missing asset: a placeholder and a warning; an error
+ * in strict mode"). It lives in memory only, until tables_free, and is
+ * made once a row (1109 step 1q, decisions 130 and 131; step 1r,
+ * decisions 136, 137 and 139).
+ *
+ * Each copy is checked against its table's layout (097): one narrower
+ * than the last column this client reads is refused (W_ERR_CORRUPT);
+ * one of another width than the layout's is said on the standard error
+ * and read (the widths are unchecked: 1109 step 1r, decision 135).
  *
  * Window-free: in the test program and the executable.
  */
@@ -88,16 +95,19 @@ typedef struct {
  *   W_OK with `*out`
  *   W_ERR_NOT_FOUND  no copy has that row, or no place has the table
  *                    (`why` says which, naming the table and the id)
- *   W_ERR_CORRUPT    a copy that isn't a table (dbc_open's sentence, with its place)
+ *   W_ERR_CORRUPT    a copy that isn't a table (dbc_open's sentence, with its place),
+ *                    or narrower than the columns this client reads (097)
  *   W_ERR_REFUSED    copies of different widths (the baseline set's aside), or a name too long
  * A table that failed fails the same way each time it is asked. */
 WErr tables_row(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *why);
 
 /* As tables_row, but a row no copy has is answered by a placeholder row
- * (as above: its number, every other field 0) when the tables have a
- * resolver, said and counted by it (060's asset_row_stand_in); W_OK with
- * `out->placeholder` 1. Strict mode, no resolver, or no place with the
- * table at all (no width to make it by): tables_row's W_ERR_NOT_FOUND. */
+ * (as above: its number, every other field its layout's value) when the
+ * tables have a resolver, said and counted by it (060's
+ * asset_row_stand_in); W_OK with `out->placeholder` 1. Strict mode, no
+ * resolver, a table whose first column isn't a row number (097), or no
+ * place with a table that has no layout (no width to make it by):
+ * tables_row's W_ERR_NOT_FOUND. */
 WErr tables_row_or_placeholder(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *why);
 
 /* How many placeholder rows were made this session, all tables. */

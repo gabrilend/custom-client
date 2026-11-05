@@ -48,9 +48,33 @@ Short-lived: without layouts nothing says what each field of a real
 placeholder should hold, so other readers still get the error naming
 the table and row.
 
+**Layouts: built 2026-11-05** (1109's step 1r, decisions 134 to 139,
+`src/097-table-layouts.c`, window-free). For twenty tables, each
+column's name, kind (`u32`, `i32`, `f32`, `str`, `loc` as 16 texts and
+a mask), placeholder value, and the readers that read it: the seven
+world-edit-to-execute's W02c writes (Map, AreaTable, LoadingScreens,
+CreatureDisplayInfo, CreatureModelData, FactionTemplate, Faction: its
+`dbc.lua` LAYOUTS, all 221 columns checked equal to it), and the
+thirteen this client reads (CreatureDisplayInfoExtra, her character's
+six, LiquidType and the five light tables). A column a reader reads is
+checked from that reader's code; the rest, and every width, are
+unchecked, since neither project has a 3.3.5a file to measure. So 074
+refuses a copy narrower than the last column read (naming the table,
+its place, its width and that column) and only says a copy of another
+width than the layout's, rather than the hard error asked for below
+(decision 135). Placeholder rows take the layout's values (a size of
+1, an opaque alpha, a visible "unknown Map 900" name, the rest 0 or
+""), a table no place has can take one at its layout's width, and
+041's window asks for its creature rows as 088 does. 026 checks the
+light tables' widths by their layouts; 085's set takes its widths from
+them. Checked in `tests/044-test-client.c` ("the tables' layouts").
+
 Not built: layouts as data files and the generator of C and Lua
-layouts from them; a missing row as a placeholder for every table (only
-088's creature rows take one, above); the light tables (Light*) through
+layouts from them (097 is C; the converter keeps its own Lua copy, the
+two checked equal by hand once); ChrRaces, AnimationData, ItemSet and
+GameObjectDisplayInfo (no reader or converter needs them yet); typed
+row structs; a missing row as a placeholder for every table (only 041
+and 088's creature rows take one); the light tables (Light*) through
 074 (026 still opens the first place's copy whole); WC3 map mode's tables
 built from map files (world-edit-to-execute's W02c builds the first:
 Map, AreaTable, LoadingScreens, CreatureDisplayInfo, CreatureModelData,
