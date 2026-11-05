@@ -34,8 +34,19 @@ Layouts (3.3.5a):
     starts, as a share of that.
 
 Inside a sphere's inner radius its light is used whole; between inner
-and outer it blends into whatever lies beyond (the default, or a
-larger sphere), by distance.
+and outer it blends into whatever lies beyond, by distance: the
+default first, then the spheres reaching here farthest first (their
+centres from here; two within a third of a yard of each other, the
+larger inner radius first), so the nearest is laid on top (306's
+notes on the original; 1109 step 1t, decision 146). A map with no
+default of its own takes Light's row 1 (306's notes: the original's),
+and with no row 1 either, the plain grey day, said once at light_open (decision 147).
+
+Read through the client's tables (074, 1109 step 1t): a converted
+map's own Light rows are met before the archives', and a band, set or
+skybox row no place has is a placeholder row in a test-map run. With
+any of the four tables in no place, the plain grey day everywhere,
+said once.
 
 A LightNow, field by field (colours are red, green, blue, 0 to 1):
   sun[3], shade[3]     the sun's light and the light in shadow
@@ -53,13 +64,25 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1):
 ## What it offers
 
 - `type LightNow`
+- `type LightSphere`
+  One of Light's rows, read once: its id and map, where it stands in
+  world axes (yards), its inner and outer radius (yards), and its five
+  parameter sets (Light's fields 8-12).
 - `type LightTables`
-- `WErr light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why);`
-  Reads the five light tables, each the first copy a place has (060's
-  asset_read: through `assets` when a resolver is open, else `chain`; the
-  baseline set's are empty, so with no install there is no light anywhere
-  and light_at gives its plain grey day). W_ERR_NOT_FOUND naming one no
-  place has; W_ERR_CORRUPT for tables narrower than 3.3.5a's.
+  The light tables, read through the client's tables (074): Light's rows
+  from every place that has it, a map's own first (a search: a converted
+  map's lights beside the archives'), the bands, parameter sets and
+  skyboxes looked up by number as each light needs them, a row no place
+  has a placeholder row where the tables have a resolver (074: said and
+  counted; strict mode refuses it), its band then the plain grey day's.
+  `none` 1: Light, LightParams, LightIntBand or LightFloatBand is in no
+  place, so every place has the plain grey day (said once, at open).
+- `WErr light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why);`
+  Reads Light's rows through `tables` and checks the other four are in
+  some place. W_OK, saying on `log` (may be NULL) when one is missing:
+  then `none` is 1 and light_at gives the plain grey day. A table that is
+  there but can't be read (074: not a table, narrower than the columns
+  read here, copies of different widths) is its error, naming it.
 - `void light_close(LightTables *t);`
 - `int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out);`
   The light at world (x, y, z) on map `map` at `hours` since midnight

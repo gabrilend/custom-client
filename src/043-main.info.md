@@ -25,7 +25,7 @@ Usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--
   --turn DEG        (pictures) the camera turned DEG degrees round her, held there
   --pitch DEG       (pictures) the camera raised DEG degrees (up to 83)
   --clock MS        (pictures) start the world's animations MS milliseconds in
-  --hour H          the time of day, 0 to 24 (default: this machine's clock)
+  --hour H          the time of day, 0 to 24 (default: this machine's clock; a --test-map run with no window: noon)
   --face DEG        her start facing turned DEG degrees (left)
   --walk S          (pictures) hold forward for S world-seconds
   --walking         walk toggled on from the start (173i), as the keypad's / does

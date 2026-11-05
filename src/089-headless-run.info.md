@@ -68,7 +68,13 @@ ending in a closed cell: none, unless she started in one); rows no
 place has (074, step 1q: looks_placeholder, the creature looks whose
 display or model row was a placeholder row, the stand-in standing in
 and counted in looks_stand_in too; table_placeholders, the placeholder
-rows made).
+rows made); the light where she ends (026 through 074, step 1t: light,
+the Light row whose colours weigh most there, -1 for the fixed grey day;
+light_tables 1 when the four light tables are in some place; light_hours,
+the time of day it was taken at, noon unless 043's --hour; fog_from_map 1
+when a test map's own war3map.w3i fog is laid over it, as the window
+does; fog_start and fog_end in yards, fog_red/green/blue the window's
+clear colour, sky_red/green/blue the sky overhead, each 0-1).
 
 Window-free (CORE: the test program and the executable).
 
@@ -98,7 +104,11 @@ Window-free (CORE: the test program and the executable).
   folder of the creature list (creatures-<map>.tsv; NULL or "" for
   none: the run counts no creatures).
 - `type HeadlessResult`
-  What it found: the receipt's counts, also given back here.
+  the light where she ends, at `hours` (026, through the tables; a
+  test map's own fog over it as the window draws it, 084): the light
+  whose colours weigh most (-1 none: the grey day), whether the light
+  tables are there, the fog's start and end (yards), its colour (the
+  window's clear colour) and the sky overhead, 0-1
 - `WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy *why);`
   Runs it: the start (world_start_open), her figure (her character from
   025, else the baseline set's stand-in, 088), each creature's look
