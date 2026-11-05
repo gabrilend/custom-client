@@ -91,7 +91,10 @@ step 1d (2026-11-05) a stock WC3 model or picture a converted map names
 without bringing it (`Doodads\...`, `Units\...`) is looked for in the
 player's own Warcraft III install (`assetWc3`) after the game's
 archives, before the box; unchecked here (no install on the machine it
-was written on).
+was written on). Since step 1e (2026-11-05) WC3's own cliff models
+(`Doodads\Terrain\Cliffs\...`, 079) are placed the same way, each with
+its replaceable picture 11 (the cliff's) named after a `|` in its
+placed name and drawn with its cliff tileset's picture (076).
 
 Not yet: choosing among the detail files by the bone limit (step 1;
 this client always takes `00.skin`), ribbons (403), the model's own

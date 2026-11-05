@@ -9,6 +9,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* {{{ the handle */
 typedef struct { int x, y, order; char *value; } SlkCell;
@@ -145,15 +146,15 @@ WErr slk_read(const unsigned char *s, size_t len, Slk **out, WWhy *why)
 }
 /* }}} */
 
-/* {{{ slk_value, slk_rows, slk_row_id
+/* {{{ slk_value, slk_value_any_case, slk_rows, slk_row_id
  * As the Lua: a column's name is row 1's (the last column of that name
  * wins), and of the rows named `id` the last one holding that column's
  * cell answers. */
-const char *slk_value(const Slk *k, const char *id, const char *column)
+static const char *value_in(const Slk *k, const char *id, const char *column, int any_case)
 {
     int x = -1;
     for (int i = 0; i < k->ncells && k->cells[i].y == 1; ++i)
-        if (!strcmp(k->cells[i].value, column)) x = k->cells[i].x;
+        if (!(any_case ? strcasecmp : strcmp)(k->cells[i].value, column)) x = k->cells[i].x;
     if (x < 0) return NULL;
     const char *got = NULL;
     for (int i = 0; i < k->ncells; ++i) {
@@ -164,6 +165,8 @@ const char *slk_value(const Slk *k, const char *id, const char *column)
     }
     return got;
 }
+const char *slk_value(const Slk *k, const char *id, const char *column) { return value_in(k, id, column, 0); }
+const char *slk_value_any_case(const Slk *k, const char *id, const char *column) { return value_in(k, id, column, 1); }
 int slk_rows(const Slk *k) { return k->nids; }
 const char *slk_row_id(const Slk *k, int i) { return i >= 0 && i < k->nids ? k->cells[k->ids[i]].value : NULL; }
 /* }}} */

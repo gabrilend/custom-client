@@ -69,9 +69,33 @@ static WErr from_m2(const char *name, AssetAnswer *m2, AssetAnswer *skin, Placed
 /* }}} */
 
 /* {{{ placed_model_read */
-WErr placed_model_read(Resolver *r, MpqChain *chain, const char *name, double wc3_yards, PlacedModel *out, WWhy *why)
+/* a name's model and, after PLACED_REPLACE_MARK, which replaceable
+ * picture is drawn with which file ("<model>|11=<picture>"); the whole
+ * name when it has no mark */
+static WErr split_name(const char *name, char *model, size_t n, uint32_t *replace, char *picture, size_t pn, WWhy *why)
+{
+    *replace = 0; picture[0] = '\0';
+    const char *bar = strchr(name, PLACED_REPLACE_MARK[0]);
+    size_t len = bar ? (size_t)(bar - name) : strlen(name);
+    if (len >= n) return w_fail(why, W_ERR_REFUSED, "a placed name of %zu characters, past %zu", len, n - 1);
+    memcpy(model, name, len);
+    model[len] = '\0';
+    if (!bar) return W_OK;
+    char *end;
+    unsigned long id = strtoul(bar + 1, &end, 10);
+    if (end == bar + 1 || *end != '=' || !end[1] || id < 1 || id > 255 || strlen(end + 1) >= pn)
+        return w_fail(why, W_ERR_REFUSED, "%s: after \"%s\" a replaceable picture's number (1 to 255), \"=\" and its file are expected", name, PLACED_REPLACE_MARK);
+    *replace = (uint32_t)id;
+    snprintf(picture, pn, "%s", end + 1);
+    return W_OK;
+}
+
+WErr placed_model_read(Resolver *r, MpqChain *chain, const char *whole_name, double wc3_yards, PlacedModel *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
+    char name[260], picture[260];
+    uint32_t replace;
+    if (split_name(whole_name, name, sizeof name, &replace, picture, sizeof picture, why)) return why->code;
     if (base_of(name, out->base, sizeof out->base, why)) return why->code;
     WWhy inner;
 
@@ -93,6 +117,10 @@ WErr placed_model_read(Resolver *r, MpqChain *chain, const char *name, double wc
             float yards = (float)(wc3_yards > 0 ? wc3_yards : WC3_YARDS_DEFAULT);
             M2Model *d = &out->mdx.model;
             for (uint32_t i = 0; i < d->nvertices; ++i) { d->vertices[i].x *= yards; d->vertices[i].y *= yards; d->vertices[i].z *= yards; }
+            /* the replaceable picture the name says, drawn with its file (a cliff's: 079) */
+            if (replace)
+                for (uint32_t i = 0; i < d->ntextures; ++i)
+                    if (d->textures[i].kind == M2_TEXTURE_WC3 + replace) { d->textures[i].kind = 0; snprintf(d->textures[i].file, sizeof d->textures[i].file, "%s", picture); }
             return W_OK;
         }
         if (!rc) asset_answer_free(&a);                  /* something else under that name: the .m2 beside it, as for any name */

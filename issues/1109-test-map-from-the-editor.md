@@ -340,9 +340,91 @@ clang against stand-in headers. Not checked here: a real WC3 install
 (none on this machine: its archives, its `Terrain.slk` and its tileset
 pictures are made in the test), and a window.
 
-Not built yet: WC3's cliffs (models seated on the mesh, 302) and blight
-(cliff and blighted cells are laid whole with their south-west
-tileset); a tileset's variations (one whole tile each); more than four
+**Step 1e is built** (2026-11-05, the same background work): a
+converted map's cliffs stand as Warcraft III's own cliff models, with
+the cliff's own ground under them, when the player has WC3. Decisions
+42 to 50.
+
+- **`src/079-wc3-cliffs.c`** reads `TerrainArt\CliffTypes.slk` (077,
+  its columns by any capitals: decision 44) and finds every cliff cell
+  of the map's `war3map.w3e`: corners on different cliff levels, none
+  on a ramp (063's rule for a bare cell). Its model, as the published
+  map viewers build it, is `Doodads\Terrain\<dir>\<dir><letters>
+  <variation>.mdx`: the cliff tileset's `cliffModelDir`, each corner's
+  level over the lowest as A, B or C (north-west, north-east,
+  south-east, south-west; more than two up cut to C), and the
+  south-west point's cliff variation, or the highest below it some
+  place has (each asked of the resolver once), else 0 (decision 43).
+  The cliff tileset is the south-west point's, else another corner's
+  (decision 45). Each stands one cell east of its cell's south-west
+  corner (WC3's cliff models lie west of their origin), at its lowest
+  level plus its corners' mean height, unbent (decision 46).
+- **078** adds each cliff tileset's `groundTile` to its tilesets (when
+  the map's list lacks it) and lays a cliff cell with a model whole
+  with that ground (decision 47; decision 39 kept for blight, and for
+  a cliff cell with no cliff tileset or no ground). Its new
+  `wc3_ground_place_cliffs` adds a tile's cliffs to its doodads: each
+  model's name once, each cliff a placement with its own id (from
+  `WC3_CLIFF_UID`, past the converter's) on the tile its cell's centre
+  is on, turned as the converter turns a WC3 doodad facing 0 (decision
+  42). 033 calls it beside the painting, so the reading-ahead thread
+  places cliffs too.
+- **076**: a placed name may carry `|11=<picture>` after its model, and
+  a WC3 model's replaceable picture 11 (the cliff's) is drawn with that
+  file; so 042 draws a cliff as any WC3 doodad, from the install, with
+  its tileset's cliff picture (decision 49). 043 says how many cliffs
+  stand, how many models were found, and how many cells are left (no
+  cliff tileset, ramps).
+- **Ramps are next** (decision 48): their cells have no model yet; the
+  converted ground's slope shows there, laid with 063's pictures.
+
+Checked (`tests/044-test-client.c`, "a converted map's cliffs as
+Warcraft III's own cliff models", before the archives): letters, cut to
+C; the sheet's columns by any capitals; a made map (9 x 9 points: a
+plateau, a two-level point, a steep one, a ramp, corners with no cliff
+tileset, a cliff tileset the sheet lacks, variations asked) with a made
+install (both sheets, three tileset pictures, three cliff models made
+with a replaceable 11): every count, cell (2, 2)'s model name and
+origin, cell (5, 5)'s variation falling back to 0, a corner's tileset
+taken when the south-west names none, the ground under the cliffs
+added as a tileset and laid whole (all 4096 blend points as expected),
+every cliff placed in its tile once with its own id and turn, none in
+another tile, and 076 reading a placed name with the cliff picture put
+in for replaceable 11 (a bad mark refused). An install with no
+`CliffTypes.slk` keeps decision 39. With the real conversions'
+`war3map.w3e` (copied in by hand; world-edit-to-execute's draft PR #246
+makes `convert` copy it) and an install made for their tilesets and
+cliff tilesets, with every cliff model they need in variation 0 as
+loose files:
+
+- **War in the Plaguelands**: 498 cliff cells, all placed (cliff
+  tilesets CYdi, CYsq), 47 models, all found; 331 asked for a later
+  variation take 0. Over its 4 tiles each cliff placed once, on its
+  tile, its origin within 0.05 units of one cell east of its cell's
+  south-west corner, its name by its letters, folder and picture. Its
+  foot is on its own level: at most 2.56 yards below its cell's lowest
+  converted corner (less than a level's 4.17), never above its highest.
+  The ground with cliff cells on their ground: 950272 of 950272 blend
+  points as expected in chunks of four tilesets or fewer, 90.4% of all.
+- **Master Crafters Final Conquest**: 2123 cliff cells (CAgr, CAdi),
+  2002 placed, 121 with no cliff tileset on any corner (kept as
+  before), 980 ramp cells left for later; 73 models, all found; each
+  placed once, named and placed right, at most 2.36 yards below its
+  lowest corner; 4001792 of 4001792 points as expected, 99.8% of all.
+
+No memory errors under the address and undefined-behaviour checkers;
+every drawing part, 043 and 058 compile with `-Werror` under gcc and
+clang against stand-in headers. Not checked here: real WC3 cliff models
+(their size, that they lie west of their origin, which variations
+exist), a real `CliffTypes.slk` (its column names), and a window.
+
+The tests' arguments: the build folder is the third and Warcraft III's
+`war3.mpq` (for the archives' WC3 checks) now the fourth; both were the
+third before (decision 50).
+
+Not built yet: WC3's ramps (decision 48), cliffs bent to the ground
+under each point (decision 46), and blight (blighted cells are laid
+whole with their south-west tileset); a tileset's variations (one whole tile each); more than four
 tilesets in a chunk (folded: a shader taking a chunk's own tileset
 list, or a fifth layer, would lift it: decision 37); WC3's water; a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
@@ -483,8 +565,12 @@ return {
    31).
 1d. ~~The player's own WC3 install as a place, and the map's ground in
    WC3's tilesets.~~ Done (2026-11-05): `assetWc3`, 015's WC3 chain,
-   077, 078, PR #3's 063 merged (decisions 32 to 41). Cliffs, blight,
-   variations and more than four tilesets a chunk are next (302).
+   077, 078, PR #3's 063 merged (decisions 32 to 41).
+1e. ~~The map's cliffs as WC3's own cliff models, on their ground.~~
+   Done (2026-11-05): 079, 078's cliff ground and placements, 076's
+   replaceable-picture mark (decisions 42 to 50). Ramps, cliffs bent to
+   the ground, blight, variations and more than four tilesets a chunk
+   are next (302).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -690,7 +776,8 @@ return {
     folder's root (and, if it wants to say so, a `wc3 = { ground =
     "war3map.w3e" }` field in `map.lua`, which this reader would then
     follow). Until then the tests copy it in, and a real run keeps the
-    converter's pictures, saying why.
+    converter's pictures, saying why. (2026-11-05: world-edit-to-
+    execute's draft PR #246 makes `convert` copy it there.)
 36. **No ground shader.** One WC3 cell is one cell of a chunk and the
     ground's pictures already repeat once a cell, so WC3's laying fits
     038's four layers and blend picture: 033 hands it different picture
@@ -706,7 +793,8 @@ return {
     points a cell side.
 39. **Cliffs and blight are laid whole** with the cell's south-west
     point's tileset (063 leaves them bare for the renderer) until
-    cliff models are seated (302) and blight is drawn.
+    cliff models are seated (302) and blight is drawn. (Since step 1e,
+    a cliff cell with a model takes its cliff's ground: decision 47.)
 40. **WC3's tilesets only when the player has them.** With no
     `Terrain.slk` in any place, the converter's own pictures (the game's
     tilesets it picked) stay: a player without WC3 sees what they saw
@@ -715,6 +803,68 @@ return {
 41. **077 is a reader library part** (the C twin of `slk.lua`), so
     world-edit-to-execute can call it through the FFI once it is held to
     the Lua's results over the stock sheets (on the owner's machine).
+
+## Decisions (2026-11-05, step 1e, answered here; the owner may overturn any)
+
+42. **Cliffs are doodads.** Each cliff is a placement added to its
+    tile's doodad list (078's `wc3_ground_place_cliffs`, called by 033
+    beside the painting), so 042 loads, instances and draws it as any
+    WC3 model and 076 finds it through the resolver: no cliff drawer of
+    its own. Its id is `WC3_CLIFF_UID` (0xC0000000) plus its cell, past
+    any id the converter gives, and it is placed by the one tile its
+    cell's centre is on. Turned as the converter turns a WC3 doodad
+    facing 0 (rot 0, 90, 0), size 1 (076 sizes a WC3 model by the
+    map's rule), z by `map.lua`'s `wow_z = scale * wc3_z`.
+43. **The model's name as the published map viewers build it**:
+    `Doodads\Terrain\<cliffModelDir>\<cliffModelDir><letters><v>.mdx`,
+    letters north-west, north-east, south-east, south-west, each A, B
+    or C over the lowest corner; a corner more than two levels up cut
+    to C (counted as steep; neither real map has one). The variation is
+    the south-west point's, or the highest below it that some place has,
+    else 0 (a model no place has at any variation is the box, as any
+    missing model). Each path is asked of the resolver once, at the
+    start. From memory of the viewers' rule, not checked against WC3's
+    archives here (open question 9).
+44. **CliffTypes.slk's columns by any capitals** (077's new
+    `slk_value_any_case`: `cliffModelDir`, `texDir`, `texFile`,
+    `groundTile`), since their exact capitals are known here only as
+    the published tools spell them; Terrain.slk's `dir` and `file` are
+    still read exactly, as before.
+45. **A cell's cliff tileset is its south-west point's**, as the
+    viewers take it, else the first of its south-east, north-west and
+    north-east points' that the map lists (Master Crafters has 123
+    cliff cells whose south-west point names none); with none on any
+    corner, no model and its ground as before (121 cells there). A
+    cliff tileset the sheet has no row for: models from `Cliffs`, its
+    picture `TerrainArt\<id>.blp`, which no place has: the checker.
+46. **A cliff stands unbent, one cell east of its cell's south-west
+    corner, at its lowest level plus its corners' mean height.** WC3
+    bends each of a cliff's points to the ground height under it; 042
+    draws one mesh for every copy of a model, so a cliff is placed
+    whole instead. On the real maps its foot sits at most 2.6 yards
+    below its lowest corner (the editor lowers raised corners' own
+    heights), less than a level. Bending is a next step: a model per
+    cliff, or a shader reading the ground's heights. The cell east is
+    the viewers' rule for WC3's cliff models, which lie west of their
+    origin: unchecked here (open question 9).
+47. **The ground under a cliff is its cliff tileset's `groundTile`**,
+    laid whole (added to the map's tilesets when its list lacks it, as
+    the viewers do); a cliff tileset with no ground, or a cliff cell
+    with no model, keeps decision 39.
+48. **Ramps wait.** A cell on different levels with a ramp corner gets
+    no model (980 in Master Crafters, none in War in the Plaguelands);
+    the converted ground's slope shows there, laid with 063's pictures.
+    WC3's ramp models (`rampModelDir`, their own letters) are the next
+    step, with the bending of decision 46.
+49. **A placed name may name its replaceable picture**:
+    `<model>|<n>=<picture>` (076's `PLACED_REPLACE_MARK`), so one cliff
+    model in two cliff tilesets is two models to 042, each with its own
+    picture, and the drawer needs no knowledge of cliffs.
+50. **The tests' build folder and war3.mpq are separate arguments**:
+    the build folder stays the third ("-" for the default), war3.mpq
+    becomes the fourth, as the usage line in `tests/044-test-client.c`
+    says (both were the third, so a build folder given broke the
+    archives' WC3 checks).
 
 ## Open questions
 
@@ -795,6 +945,13 @@ return {
    the top of the picture. Checked only on made pictures drawn by the
    same rule: on the owner's machine with WC3, a converted map's
    blends mirrored would mean that one table changes.
+9. **WC3's cliff models, unseen here.** Their names (decision 43),
+   that they lie one cell west of their origin (decision 46), which
+   variations exist, and `CliffTypes.slk`'s columns are from the
+   published map viewers' reading, checked only against models and
+   sheets made in the test. On the owner's machine with WC3: a Test Map
+   run of War in the Plaguelands showing its cliffs a cell off, or
+   boxes where cliffs should be, says which rule to change.
 
 ## Related
 
@@ -812,6 +969,8 @@ return {
   For step 1d: `src/077-slk.info.md` (WC3's sheets),
   `src/078-wc3-ground.info.md` (the ground in WC3's tilesets),
   `src/063-w3e.info.md` ([302a](./302a-wc3-ground-read-and-prepared.md)).
+  For step 1e: `src/079-wc3-cliffs.info.md` (the cliffs), with 078,
+  076 and 077.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

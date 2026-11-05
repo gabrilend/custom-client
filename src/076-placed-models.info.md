@@ -32,7 +32,14 @@ the one model structure the drawer takes (022-m2.h):
     (asset_stand_in), so no model is drawn with another's view;
   - with none (every run but a test map's for now, issue 1109's
     decision 4) the archives alone, as the drawer read before: a model
-    they lack is W_ERR_NOT_FOUND, and left out.
+    they lack is W_ERR_NOT_FOUND, and left out;
+  - a name may end in PLACED_REPLACE_MARK, a replaceable picture's
+    number, "=" and a picture's file ("Doodads\Terrain\Cliffs\
+    CliffsAABA0.mdx|11=ReplaceableTextures\Cliff\Cliff0.blp"): the
+    model is the part before the mark, and in a WC3 model that
+    replaceable picture (11, a cliff's) is drawn with that file. The
+    drawer keeps models by their whole names, so one model with two
+    pictures is two (a WC3 cliff in two cliff tilesets: 079).
 
 A building (021-wmo.h) is its root file and one file per part
 (<name>_000.wmo ...), read the same way but never as a placeholder:
@@ -65,7 +72,9 @@ the resolver, which isn't in the reader library).
   W_OK with `*out` (freed with placed_model_free); W_ERR_NOT_FOUND
   (no resolver, the archives lacking a file; or strict mode refusing a
   placeholder); W_ERR_REFUSED for an empty or too long name; a reader's
-  code (W_ERR_CORRUPT ...) with the name; the resolver's W_ERR_IO.
+  code (W_ERR_CORRUPT ...) with the name; the resolver's W_ERR_IO; and
+  W_ERR_REFUSED for a mark not followed by a number from 1 to 255, "="
+  and a file.
 - `void placed_model_free(PlacedModel *m);`
 - `const M2Model *placed_model_drawn(const PlacedModel *m);`
   What is drawn: the WC3 model's drawable part, or the M2's.
