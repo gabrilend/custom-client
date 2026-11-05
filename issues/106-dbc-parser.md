@@ -34,10 +34,24 @@ Checked in `tests/044-test-client.c` ("a converted map's folder") on a
 made-up archive and folder, and on the converter's real output (all
 seven of its tables as wide as 3.3.5a's).
 
+**A search across copies, and placeholder rows: built 2026-11-05**
+(1109's step 1q, decisions 128 to 133). A reader that searches a table
+by something other than its number (025, her character's tables) reads
+it through 074 as one list: the first place's rows, then each later
+place's rows whose numbers no earlier place has. A row no copy has may
+be answered by a placeholder row where the reader asks for one
+(`tables_row_or_placeholder`; 088's creature display and model rows,
+whose look the stand-in figure then takes): its number, every other
+field 0, as wide as the table's first copy, made once and kept in
+memory, a warning and a count in the resolver, an error in strict mode.
+Short-lived: without layouts nothing says what each field of a real
+placeholder should hold, so other readers still get the error naming
+the table and row.
+
 Not built: layouts as data files and the generator of C and Lua
-layouts from them; a missing row as a placeholder; the other readers'
-tables (Light*, LiquidType, CharSections, ItemDisplayInfo ...) through
-074 (they still open the archives' copy whole); WC3 map mode's tables
+layouts from them; a missing row as a placeholder for every table (only
+088's creature rows take one, above); the light tables (Light*) through
+074 (026 still opens the first place's copy whole); WC3 map mode's tables
 built from map files (world-edit-to-execute's W02c builds the first:
 Map, AreaTable, LoadingScreens, CreatureDisplayInfo, CreatureModelData,
 Faction, FactionTemplate).

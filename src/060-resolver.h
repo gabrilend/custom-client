@@ -31,7 +31,8 @@
  *      one stands in, a warning names it. With strict mode on it is an
  *      error instead, and the program's exit status says so. A table or
  *      a map's ground file has none: no place having it is the answer
- *      (W_ERR_NOT_FOUND, no warning).
+ *      (W_ERR_NOT_FOUND, no warning). A table's row may have one, where
+ *      its reader takes it (asset_row_stand_in; 074 makes the row).
  *
  * A table is read per row (issue 106): every place's copy is asked for
  * (asset_resolve_all), and a row in an earlier place wins over the same
@@ -189,6 +190,13 @@ WErr asset_get(Resolver *r, MpqChain *chain, const char *logical, AssetKind kind
  * placeholder stands in whole, rather than one file of it beside another
  * model's. */
 WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why);
+
+/* A table's row no copy has, where a reader takes a placeholder row
+ * (074's tables_row_or_placeholder makes it): said in a warning naming
+ * the table and the row, counted with the placeholders, W_OK; in strict
+ * mode said as an error and W_ERR_NOT_FOUND, the exit status turning to
+ * 1. `table` is the table's path ("DBFilesClient\\Map.dbc"). */
+WErr asset_row_stand_in(Resolver *r, const char *table, uint32_t id, WWhy *why);
 
 /* The session's counts: different assets asked for, per kind and place
  * (an asset asked for again isn't counted again); per kind, how many of

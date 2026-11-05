@@ -1077,6 +1077,8 @@ int main(int argc, char **argv)
     creatures_free(&app->spawns);
     if (app->ws.assets) resolver_report(app->ws.assets, stdout);
     if (app->test_map) tables_report(app->ws.tables, stdout);
+    if (app->test_map && app->bye && goodbye_count(app->bye, "table_placeholders", tables_placeholders(app->ws.tables), &why))   /* rows no place has (1109 step 1q) */
+        fprintf(stderr, "%s\n", why.text);
     if (app->ws.adt_heights) printf("ground: %d tiles' heights made from the map's own ground files\n", adt_heights_made(app->ws.adt_heights));
     wc3_ground_free(app->wc3_ground);                         /* after the ground and the reading-ahead thread that painted with it */
     world_start_close(&app->ws);                              /* the heights, tables, resolver and archives, in that order */

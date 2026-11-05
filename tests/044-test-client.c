@@ -1639,12 +1639,43 @@ static void converted_tests(const char *dir, const char *build)
             check(e == W_ERR_NOT_FOUND && strstr(why.text, "Faction.dbc is in none"), e ? why.text : "a table no place has: not found, named");
             e = tables_row(ts, "", 1, &row, &why);
             check(e == W_ERR_REFUSED, "an empty table name: refused");
+            /* a search's rows (1109 step 1q, decision 128): the map's two,
+             * then the archives' of numbers the map hasn't */
+            TableScan sc;
+            e = tables_scan(ts, "Map", &sc, &why);
+            int order = !e && sc.n == 4 && sc.ncopies == 2;
+            static const uint32_t WANT[4] = { 900, 1, 0, 530 };
+            static const int FROM[4] = { 0, 0, 1, 1 };
+            for (uint32_t k = 0; order && k < 4; ++k) order = dbc_u32(sc.at[k].dbc, sc.at[k].row, 1) == WANT[k] && sc.at[k].copy == FROM[k];
+            check(order && !strcmp(dbc_text(sc.at[1].dbc, sc.at[1].row, 2), "Override"),
+                  e ? why.text : "a search's rows: the map's (900, its own 1), then the archives' it doesn't replace (0, 530), each once (decision 98's first-copy limit lifted)");
+            TableScan sc2;
+            check(tables_scan(ts, "Map", &sc2, &why) == W_OK && sc2.at == sc.at && tables_scan(ts, "AreaTable", &sc2, &why) == W_ERR_REFUSED
+                  && tables_scan(ts, "Faction", &sc2, &why) == W_ERR_NOT_FOUND,
+                  "made once and kept; a table refused or in no place is refused or not found for a search too");
+            /* a placeholder row (1109 step 1q, decisions 130 and 131) */
+            AssetCounts pc0, pc1;
+            asset_counts(r, &pc0);
+            e = tables_row_or_placeholder(ts, "Map", 77, &row, &why);
+            TableRow row2;
+            WErr pe2 = tables_row_or_placeholder(ts, "Map", 77, &row2, &why);
+            asset_counts(r, &pc1);
+            fflush(place.log);
+            check(!e && !pe2 && row.placeholder && row.source == ASSET_FROM_PLACEHOLDER && row.dbc->fields == 3 && dbc_u32(row.dbc, row.row, 1) == 77
+                  && dbc_u32(row.dbc, row.row, 3) == 0 && !strcmp(dbc_text(row.dbc, row.row, 2), "") && row2.dbc == row.dbc
+                  && tables_placeholders(ts) == 1 && pc1.placeholder_answers == pc0.placeholder_answers + 1 && log && strstr(log, "has row 77; a placeholder row stands in"),
+                  e ? why.text : "a row no copy has, where its reader takes a placeholder: one made (its number, every field else 0 or \"\", the table's width), once, said and counted by the resolver");
+            WErr real = tables_row_or_placeholder(ts, "Map", 530, &row, &why);
+            check(!real && !row.placeholder && row.source == ASSET_FROM_BLIZZARD && tables_row(ts, "Map", 77, &row2, &why) == W_ERR_NOT_FOUND
+                  && tables_row_or_placeholder(ts, "Faction", 1, &row2, &why) == W_ERR_NOT_FOUND,
+                  "a row a copy has is that row; a plain lookup still says no row; a table no place has gets none (no width to make one by)");
             char *rep = NULL;
             size_t rep_len = 0;
             FILE *to = open_memstream(&rep, &rep_len);
             tables_report(ts, to);
             fclose(to);
-            check(rep && strstr(rep, "Map") && strstr(rep, "overlay") && strstr(rep, "blizzard") && strstr(rep, "not read"), "the report: each table's copies and places, and the one not read");
+            check(rep && strstr(rep, "Map") && strstr(rep, "overlay") && strstr(rep, "blizzard") && strstr(rep, "not read") && strstr(rep, "1 placeholder row"),
+                  "the report: each table's copies and places, the one not read, and the placeholder rows");
             free(rep);
             tables_free(ts);
 
@@ -1654,8 +1685,27 @@ static void converted_tests(const char *dir, const char *build)
                   e ? why.text : "with no resolver (every run but a test map's): the archives' rows, one copy");
             e = tables_row(ts, "Map", 900, &row, &why);
             check(e == W_ERR_NOT_FOUND, "and the map's rows aren't there");
+            check(tables_row_or_placeholder(ts, "Map", 900, &row, &why) == W_ERR_NOT_FOUND && tables_placeholders(ts) == 0,
+                  "with no resolver no placeholder row: not found, as before");
             tables_free(ts);
             resolver_free(r);
+            /* strict mode: the placeholder row refused, an error, and the exit status says so */
+            ResolverPlace strict = place;
+            strict.strict = 1;
+            char *slog = NULL;
+            size_t slog_len = 0;
+            strict.log = open_memstream(&slog, &slog_len);
+            Resolver *sr = NULL;
+            if (!resolver_open(&strict, &sr, &why)) {
+                ts = tables_new(sr, &chain);
+                e = tables_row_or_placeholder(ts, "Map", 77, &row, &why);
+                check(e == W_ERR_NOT_FOUND && strstr(why.text, "strict mode refuses a placeholder row") && tables_placeholders(ts) == 0 && resolver_exit_status(sr) == 1,
+                      e ? why.text : "in strict mode a missing row is an error, and the exit status turns to 1 (106)");
+                tables_free(ts);
+                resolver_free(sr);
+            } else check(0, why.text);
+            fclose(strict.log);
+            free(slog);
         }
         fclose(place.log);
         free(log);
@@ -1849,9 +1899,13 @@ static void converted_tests(const char *dir, const char *build)
             }
         asset_answer_free(&info);
     }
-    snprintf(line, sizeof line, "%d creature looks name a WC3 model the map brought (first %s); %d read as MDX by 061, %d with something to draw", named, first[0] ? first : "none", read, kept);
+    /* a look may be an effect with no shape of its own (Master Crafters'
+     * WaterMagic.mdx: particle emitters alone, 403's), so some, not all,
+     * have something 061 draws (1109 step 1q, decision 133) */
+    snprintf(line, sizeof line, "%d creature looks name a WC3 model the map brought (first %s); %d read as MDX by 061, %d with something to draw (the rest particles alone, 403's)",
+             named, first[0] ? first : "none", read, kept);
     if (looks == 0) printf("  (its CreatureDisplayInfo has no rows: a map with no units; this check is skipped)\n");
-    else check(named > 0 && read == named && kept == named, line);
+    else check(named > 0 && read == named && kept > 0, line);
     /* {{{ its doodads and buildings (1109 step 1c): every placement the
      * converter wrote, read back from its ADTs where placements.lua says
      * it stands, and every model placed found: its own WC3 models (and
@@ -4942,11 +4996,13 @@ static void baseline_tests(const char *dir, const char *build, const char *table
             char over[520];
             snprintf(over, sizeof over, "%s/creature-rows", root);
             unsigned char dbc[20 + 28 * 4 + 64];
-            uint32_t info[16] = { 7, 3 };
+            uint32_t info[32] = { 7, 3 };                                  /* display 7, model 3; display 9, model 99 (no place has it) */
             float one = 1;
             memcpy(&info[4], &one, 4);
+            info[16] = 9; info[17] = 99;
+            memcpy(&info[20], &one, 4);
             const char lamp[] = "\0World\\Generic\\Human\\Passive Doodads\\Lampposts\\Lamppost.mdx";
-            t_write(over, "DBFilesClient/CreatureDisplayInfo.dbc", dbc, t_dbc(dbc, 1, 16, info, "", 1));
+            t_write(over, "DBFilesClient/CreatureDisplayInfo.dbc", dbc, t_dbc(dbc, 2, 16, info, "", 1));
             uint32_t model[28] = { 3, 0, 1 };
             t_write(over, "DBFilesClient/CreatureModelData.dbc", dbc, t_dbc(dbc, 1, 28, model, lamp, sizeof lamp));
             ResolverPlace cp = { .noverlays = 1, .distinctness = 0.5 };
@@ -4963,6 +5019,16 @@ static void baseline_tests(const char *dir, const char *build, const char *table
                 e = figure_model_for_display(cr, NULL, ts, 7, &fm, &why);
                 check(!e && fm.kind == FIGURE_MODEL_STAND_IN && fm.model.source == ASSET_FROM_BASELINE && strstr(fm.stood_in_for, "only the baseline set's post"),
                       e ? why.text : "a creature whose model only the set's post answers (no skeleton to stand with): the stand-in figure instead (088), said");
+                if (!e) figure_model_free(&fm);
+                /* display rows no place has (1109 step 1q, decision 132): a
+                 * placeholder row, and the stand-in figure for it */
+                e = figure_model_for_display(cr, NULL, ts, 8, &fm, &why);
+                check(!e && fm.kind == FIGURE_MODEL_STAND_IN && fm.placeholder && fm.scale == 1 && strstr(fm.stood_in_for, "row 8 of CreatureDisplayInfo") && tables_placeholders(ts) == 1,
+                      e ? why.text : "a creature display no place has: a placeholder row, and the stand-in figure standing for it, said (decision 132)");
+                if (!e) figure_model_free(&fm);
+                e = figure_model_for_display(cr, NULL, ts, 9, &fm, &why);
+                check(!e && fm.kind == FIGURE_MODEL_STAND_IN && fm.placeholder && strstr(fm.stood_in_for, "row 99 of CreatureModelData") && tables_placeholders(ts) == 2,
+                      e ? why.text : "a display whose model row no place has: the same, for CreatureModelData's row");
                 if (!e) figure_model_free(&fm);
                 tables_free(ts);
                 resolver_free(cr);
@@ -5349,6 +5415,48 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             resolver_free(r);
         } else check(0, why.text);
         fclose(place.log); free(log);
+        /* a map's folder before it bringing part of the same tables (1109
+         * step 1q, decision 128): a search meets the map's rows first, and
+         * still finds the place's others */
+        {
+            char mine[520];
+            snprintf(mine, sizeof mine, "%s/character-map", root);
+            uint32_t moutfit[74] = { 2, 4u | 1u << 8 | 1u << 16 };      /* a night-elf woman warrior (class 1): chest look 777 */
+            moutfit[26] = 777; moutfit[50] = 5;
+            t_write(mine, "DBFilesClient/CharStartOutfit.dbc", dbc, t_dbc(dbc, 1, 74, moutfit, "", 1));
+            uint32_t mitem[50] = { 777 };                                 /* look 777, its icon; and 12345 again, with the map's own icon */
+            mitem[5] = 1;
+            mitem[25] = 12345; mitem[30] = 14;
+            const char mitem_text[] = "\0INV_Map_Made\0INV_Map_Chest";      /* 1, 14 */
+            t_write(mine, "DBFilesClient/ItemDisplayInfo.dbc", dbc, t_dbc(dbc, 2, 25, mitem, mitem_text, sizeof mitem_text));
+            ResolverPlace two = { .noverlays = 2, .distinctness = 0.5 };
+            snprintf(two.overlays[0], sizeof two.overlays[0], "%s", mine);
+            snprintf(two.overlays[1], sizeof two.overlays[1], "%s", over);
+            char *log2 = NULL;
+            size_t log2_len = 0;
+            two.log = open_memstream(&log2, &log2_len);
+            Resolver *r2 = NULL;
+            e = resolver_open(&two, &r2, &why);
+            if (!e) {
+                int warrior[SLOT_COUNT] = { 0 }, hunter[SLOT_COUNT] = { 0 };
+                WErr we = character_start_outfit(r2, NULL, 4, 1, 1, warrior, &why);
+                WErr he = we ? we : character_start_outfit(r2, NULL, 4, 3, 1, hunter, &why);
+                char icon_map[300] = "", icon_mine[300] = "";
+                WErr ie1 = he ? he : character_item_icon(r2, NULL, 777, icon_map, sizeof icon_map, &why);
+                WErr ie2 = ie1 ? ie1 : character_item_icon(r2, NULL, 12345, icon_mine, sizeof icon_mine, &why);
+                check(!ie2 && warrior[SLOT_CHEST] == 777 && hunter[SLOT_CHEST] == 12345 && !strcmp(icon_map, "Interface\\Icons\\INV_Map_Made.blp")
+                      && !strcmp(icon_mine, "Interface\\Icons\\INV_Map_Chest.blp"),
+                      ie2 ? why.text : "her tables searched across both places (025 through 074, decision 128): the map's outfit and look found, the other place's outfit still found, and a look both have the map's");
+                CharacterLook look = { .race = 4, .sex = 1 };
+                look.items[SLOT_CHEST] = 777;
+                Character ch;
+                WErr be = character_build(r2, NULL, &look, &ch, &why);
+                check(!be && ch.skin.width == 64, be ? why.text : "a character built from both: the map's look worn, the other place's hair, face and skin rows");
+                if (!be) character_free(&ch);
+                resolver_free(r2);
+            } else check(0, why.text);
+            fclose(two.log); free(log2);
+        }
         int none[SLOT_COUNT] = { 0 };
         check(character_start_outfit(NULL, NULL, 4, 3, 1, none, &why) == W_ERR_NOT_FOUND && strstr(why.text, "CharStartOutfit"),
               "with neither a resolver nor archives: not found, naming the table");
@@ -5754,6 +5862,59 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
                       "the other map's route: refused, naming the map it is for, the receipt saying error with no counts");
                 if (od) lua_data_free(od);
             }
+        }
+        /* a creature whose display row no place has (1109 step 1q, decision
+         * 132): the build's creatures and one more, naming display 3999999;
+         * the run still ends closed, the stand-in standing for it, counted */
+        {
+            char pworld[700], tsv[800], r4[700];
+            snprintf(pworld, sizeof pworld, "%s/world-placeholder", root);
+            t_mkdirs(pworld);
+            snprintf(tsv, sizeof tsv, "%s/creatures-%d.tsv", world, m.id);
+            char *had = NULL;
+            size_t hl = 0;
+            FILE *tf = fopen(tsv, "rb");
+            if (tf) {
+                fseek(tf, 0, SEEK_END);
+                long tl = ftell(tf);
+                rewind(tf);
+                had = tl >= 0 ? calloc(1, (size_t)tl + 1) : NULL;
+                hl = had ? fread(had, 1, (size_t)tl, tf) : 0;
+                fclose(tf);
+            }
+            char *more = malloc(hl + 200);
+            if (more) {
+                snprintf(more, hl + 200, "%s%s1999999\t9999999\t3999999\t1\t0\t0\t0\t0\tnobody\n", had ? had : "# guid\tentry\tdisplay\tsize\tx\ty\tz\tfacing\tname\n",
+                         hl && had[hl - 1] != '\n' ? "\n" : "");
+                snprintf(tsv, sizeof tsv, "creatures-%d.tsv", m.id);
+                t_write_text(pworld, tsv, more);
+            }
+            free(more);
+            free(had);
+            snprintf(r4, sizeof r4, "%s/headless-placeholder", root);
+            const char *still = "return { format = 1, moves = { { hold = \"\", seconds = 0.1 } } }";
+            HeadlessMoves *pm = NULL;
+            Goodbye *g = NULL;
+            HeadlessResult pr;
+            memset(&pr, 0, sizeof pr);
+            WErr pe = headless_moves_parse(still, strlen(still), "made", &pm, &why);
+            if (!pe) pe = goodbye_begin(r4, build, &g, &why);
+            HeadlessIn hin = { .start = in, .moves = pm, .world_dir = pworld };
+            hin.start.log = lf;
+            if (!pe) pe = headless_run(&hin, g, &pr, &why);
+            goodbye_free(g);
+            headless_moves_free(pm);
+            LuaData *pd = NULL;
+            WErr pre = pe ? pe : lua_data_read(r4, 65536, &pd, &why);
+            const LuaValue *pt = pre ? NULL : lua_data_top(pd);
+            snprintf(line, sizeof line, "a creature whose display row no place has: the run ends %s, %d looks (%d stand-in, %d missing), %d by a placeholder row, %d placeholder rows in the receipt",
+                     pt ? lua_value_text(lua_value_field(pt, "reason")) : "badly", pr.creature_looks, pr.looks_stand_in, pr.looks_missing, pr.looks_placeholder,
+                     pt ? (int)lua_value_number(lua_value_field(pt, "table_placeholders")) : -1);
+            check(!pre && !strcmp(lua_value_text(lua_value_field(pt, "reason")), "closed") && pr.creature_looks == h->creature_looks + 1
+                  && pr.looks_placeholder == 1 && pr.looks_missing == h->looks_missing && pr.looks_stand_in == h->looks_stand_in + 1
+                  && pr.table_placeholders >= 1 && (int)lua_value_number(lua_value_field(pt, "table_placeholders")) == pr.table_placeholders
+                  && (int)lua_value_number(lua_value_field(pt, "looks_placeholder")) == 1, pre ? why.text : line);
+            if (pd) lua_data_free(pd);
         }
         /* and the comparison sees a difference: one move changed (a second
          * less of the first run) gives another receipt */

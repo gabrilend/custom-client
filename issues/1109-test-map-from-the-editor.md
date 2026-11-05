@@ -1116,14 +1116,82 @@ cells, named by no parser: not read), and a bridge or other walkable
 model over a closed cell (none in either map; the pathing would hold
 her there).
 
+**The converter's own copy, checked** (2026-11-05, with step 1q): both
+maps converted again with world-edit-to-execute's
+`claude/wete-w02-wpm-copy` (its draft PR #252, commit df86a1365, run
+from an export of that commit into the scratch folder; ai-stuff left as
+it was). Each build's `war3map.wpm` is byte for byte the one copied in
+by hand (War in the Plaguelands sha256 8bc94032…af9e56, Master
+Crafters 58b55404…1c8163a, both the maps' own), as are its
+`war3map.w3e`, `war3map.w3i` and `map.lua`. 044 on the two fresh builds
+passes as on the hand-made ones (the same route and wall counts), but
+for one check the newer converter's Master Crafters met: it brings a
+second WC3 creature model, `WaterMagic.mdx`, an effect with particle
+emitters alone (no geometry: 061 has nothing to draw until 403), so
+that check now asks some, not every, WC3 look to have something to
+draw (decision 133).
+
+**Step 1q is built** (2026-11-05, the same background work): a search
+across a table's copies, and a placeholder row where a creature's
+display row is missing. Decisions 128 to 133 (128 lifts decision 98's
+limit).
+
+- **A search's rows (074):** `tables_scan` gives a table as one list
+  for a reader that searches by something other than the number: the
+  first place's rows in their order, then each later place's rows whose
+  numbers no earlier place has. A converted map's rows are met first
+  and win a search; the archives' others are still found (decision
+  128).
+- **Her character's tables (025):** CharStartOutfit, ItemDisplayInfo,
+  CharHairGeosets, CharacterFacialHairStyles, CharSections and
+  HelmetGeosetVisData are searched through it, no longer the first
+  place's copy whole; where a search kept its last match (hair styles,
+  skin sections) it keeps it within the first place that has one. The
+  copies must agree on their width, as for a row asked by number
+  (decision 129).
+- **Placeholder rows (074, 060):** `tables_row_or_placeholder` answers
+  a row no copy has, in a run with a resolver, with a row made in
+  memory: its number in its first field, every other field 0 (text
+  ""), as wide as the table's first copy; made once a row, kept until
+  the tables are let go, said by the resolver as a warning and counted
+  with its placeholders (`asset_row_stand_in`); strict mode refuses it,
+  an error, the exit status 1 (decisions 130, 131).
+- **Creatures (088, 089, 043):** a display row, or its model's row,
+  that no place has: a placeholder row, and the baseline set's stand-in
+  figure stands where the creature does, said. The receipt counts
+  looks_placeholder (also counted in looks_stand_in) and
+  table_placeholders; the windowed run's receipt carries
+  table_placeholders too (decision 132).
+
+Checked (`tests/044-test-client.c`): on the made archive and folder, a
+search's rows in order (the map's 900 and its own 1, then the
+archives' 0 and 530), kept, and refused or not found as a lookup is; a
+placeholder row's number, zeros, empty text and width, made once,
+warned and counted once, the report naming it; a row a copy has given
+as itself; no placeholder for a plain lookup, a table no place has, or
+with no resolver; strict mode refusing it with the exit status 1. Her
+tables across a map's folder and another place: the map's outfit and
+look found, the other place's outfit still found, a look both have the
+map's, a character built from both. A creature display no place has,
+and one whose model row no place has: the stand-in figure, placeholder
+1. On each real build, its creatures and one more naming display
+3999999: the run ends closed, that look stood in by a placeholder row,
+looks_placeholder 1 and table_placeholders 1 in the receipt.
+
+Not checked: the windowed run's creature built from a placeholder row
+(raylib isn't here; 041 builds the stand-in 088 gives, as for a model
+no place has), and the light tables (026), still read whole from the
+first place (decision 129).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
 its replaceable pictures are left off); the baseline set's buildings, creatures' own looks, her character, WC3
 stock art and the rest of the client's tables (decisions 88, 97), and
 the asset forge's real set;
-a missing table row as a placeholder (106 wants one: still an error
-naming the table and row); logging in, and the `lost-connection` ending
+a placeholder row for tables other than a creature's (step 1q makes one
+only where 088 asks; layouts, 106, would say what each field should
+hold); the light tables searched across places (026); logging in, and the `lost-connection` ending
 (Phase 5's 609).
 
 ## Intended behavior
@@ -1298,6 +1366,12 @@ return {
    (2026-11-05): 094 reading `war3map.wpm`, 091's wall rule asking it
    for 043 and 089, `turn_to` in the moves, `tests/092`, `093`, `095`
    and `096` (decisions 118 to 127).
+1q. ~~A search across a table's copies, and placeholder rows for
+   creatures.~~ Done (2026-11-05): 074's `tables_scan` and
+   `tables_row_or_placeholder`, 025 searching through it, 060's
+   `asset_row_stand_in`, 088 standing the stand-in in, the receipt's
+   counts (decisions 128 to 133); the converter's own `war3map.wpm`
+   checked against the hand-copied one.
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1309,7 +1383,9 @@ return {
    in the test program; step 1o: with the models' floors and walls,
    and each map's route to its water and off its edge, twice; step 1p:
    with WC3's pathing as walls, War in the Plaguelands' route off its
-   edge and Master Crafters' to its closed border, twice); the check
+   edge and Master Crafters' to its closed border, twice; step 1q: on
+   the converter's own builds too, and with a creature whose display
+   row no place has counted, not missing); the check
    through the editor's F5 waits on step 2.
 
 ## Acceptance
@@ -2007,7 +2083,8 @@ return {
     074 merges by number, so each is read whole from the first place
     that has it, as 026 reads the light tables. A converted map that
     brought part of one of them would hide the archives' rows; none
-    does today, and a merged scan is 074's to add when one does. Never
+    does today, and a merged scan is 074's to add when one does
+    (added in step 1q: decision 128, which lifts this limit). Never
     a placeholder: a missing table or model is said by name, a missing
     layer picture left unpainted, as before. Errors now say "no place
     has" with a resolver and "the client's archives hold no" without.
@@ -2211,6 +2288,60 @@ return {
     neither world-edit-to-execute's parser nor its writers name it, so
     it stays unchecked; 0x01 and 0x10 appear in neither test map.
 
+## Decisions (2026-11-05, step 1q, answered here; the owner may overturn any)
+
+128. **A search reads every place's rows, the first place's first.** A
+    table searched by something other than its number is one list: the
+    first copy's rows in their own order, then each later copy's rows
+    whose numbers no earlier copy has, in theirs. With one copy it is
+    that copy, as before; a converted map's row wins a search (it is
+    met first) as it wins a lookup, and a row it doesn't replace is
+    still found. This lifts decision 98's first-copy-whole limit. The
+    list is made the first time it is asked, and kept with the table.
+129. **025 searches through 074; 026 doesn't yet.** Her tables are
+    read through a Tables handle 025 makes for each call and lets go
+    after it, as it read the first copy for each call before, so its
+    functions keep their arguments. Where a search kept its last match
+    (CharHairGeosets, CharSections) it keeps it within the first place
+    that has one, so a later place never overrides an earlier one.
+    Their copies must now agree on their width (074's refusal), as for
+    a row asked by number. The light tables (026) stay the first
+    place's copy whole: their reader hands out the tables themselves,
+    and no converted map brings light rows yet.
+130. **A placeholder row is the row's number and zeros, where a reader
+    asks for one.** Without layouts (106) nothing says what a field
+    should hold, so the row is as wide as the table's first copy, its
+    first field the number asked, every other field 0 and every text
+    "". Only a reader that knows what to make of that asks
+    (`tables_row_or_placeholder`): 088, for a creature's display and
+    model rows. A lookup elsewhere (her map's Map row, LiquidType) is
+    still an error naming the table and the row, since a zero row
+    there would mislead rather than stand in. A table no place has
+    gets none: there is no width to make one by.
+131. **Short-lived: made once, kept in memory, never written.** A
+    placeholder row lives with the tables until they are let go, made
+    the first time its number is asked and given again after; the
+    resolver says it once (a warning naming the table and row) and
+    counts it with its placeholders; strict mode refuses it each time,
+    an error, and the exit status turns to 1 (106). No resolver (every
+    run but a test map's) means no placeholder rows, as before. It is
+    an interim measure until layouts can describe a real placeholder.
+132. **A creature whose display row no place has stands as the
+    stand-in.** 088 gives the baseline set's stand-in figure for a
+    placeholder display or model row (its size 1, its skins none),
+    said, so a converted map whose creatures name rows it didn't bring
+    still shows them standing where they should, in the window and
+    with no window. The headless receipt counts looks_placeholder
+    (those looks; they count in looks_stand_in too) and
+    table_placeholders (the rows made); the windowed receipt carries
+    table_placeholders. Without the stand-in (no baseline set) the look
+    is missing, as before.
+133. **A WC3 creature look may have nothing 061 draws.** The newer
+    converter's Master Crafters brings `WaterMagic.mdx` as a creature
+    look: particle emitters alone (403's), no geometry. The check of a
+    map's WC3 creature models now asks that each is read and that some
+    have something to draw, not all.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -2399,7 +2530,9 @@ return {
   and `tests/093-test-map-moves-master-crafters.lua`. For step 1p:
   `src/094-wc3-pathing.info.md` (the map's WC3 pathing as walls), 091,
   089, 043, 068, and `tests/095-test-map-walls-plaguelands.lua` and
-  `tests/096-test-map-walls-master-crafters.lua`.
+  `tests/096-test-map-walls-master-crafters.lua`. For step 1q:
+  `src/074-tables.info.md` (a search's rows, placeholder rows), 025,
+  060, 088, 089 and 043.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

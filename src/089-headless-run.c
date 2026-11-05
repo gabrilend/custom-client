@@ -314,6 +314,7 @@ static WErr creatures(WorldStart *ws, int map_id, const char *world_dir, FILE *l
         } else if (fm.kind == FIGURE_MODEL_HUMANOID) { ++r->looks_character; readable = 1; }   /* 025 builds it with the window's 041 */
         else {
             if (fm.kind == FIGURE_MODEL_STAND_IN) ++r->looks_stand_in; else ++r->looks_game;
+            r->looks_placeholder += fm.placeholder;
             M2Model m;
             Anim a;
             if (!m2_read(fm.model.data, fm.model.len, fm.skin.data, fm.skin.len, &m, &w)) {
@@ -351,6 +352,7 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "steps_on_models", r->steps_on_models }, { "steps_walled", r->steps_walled },
         { "pathing", r->pathing }, { "pathing_cells", r->pathing_cells }, { "pathing_closed", r->pathing_closed },
         { "steps_walled_pathing", r->steps_walled_pathing }, { "steps_on_closed", r->steps_on_closed },
+        { "looks_placeholder", r->looks_placeholder }, { "table_placeholders", r->table_placeholders },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -506,6 +508,8 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             r.models, r.buildings, r.model_copies, r.models_wc3, r.model_stand_ins, r.models_left_out, r.solid_copies, r.solid_triangles, r.building_pools);
     fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground, %d on models' floors, %d against their walls, %d against the pathing's\n",
             r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground, r.steps_on_models, r.steps_walled, r.steps_walled_pathing);
+    r.table_placeholders = tables_placeholders(ws.tables);
+    if (r.table_placeholders) fprintf(log, "headless: %d placeholder rows stood in for rows no place has (%d looks)\n", r.table_placeholders, r.looks_placeholder);
     wc3_pathing_free(h->pathing);
     model_solids_free(models);
     collide_free(solids);

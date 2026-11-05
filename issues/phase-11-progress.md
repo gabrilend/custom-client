@@ -218,3 +218,15 @@ say `turn_to`, a facing, and the two routes were found again with it:
 War in the Plaguelands' still leaves its edge, and Master Crafters',
 whose pathing is closed all round, ends held at its south border. No
 `war3map.wpm` means no pathing walls. Decisions 118 to 127 in 1109.
+
+2026-11-05: 1109's step 1q. The converter's own `war3map.wpm` (draft PR
+#252 in world-edit-to-execute) was checked: both test maps converted
+with it give, byte for byte, the files step 1p's tests used. The tables
+(074) now give a searching reader one list across every place's copy,
+the first place's rows first and the others' new numbers after, and
+her character's tables (025) are searched that way, lifting decision
+98's first-copy limit. A creature whose display or model row no place
+has gets a placeholder row (its number and zeros, made once, warned
+and counted by the resolver, refused in strict mode), and the stand-in
+figure stands for it, so such a map still shows its creatures; the
+receipt counts them. Decisions 128 to 133 in 1109.

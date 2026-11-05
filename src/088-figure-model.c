@@ -47,12 +47,25 @@ WErr figure_model_stand_in(Resolver *assets, MpqChain *chain, const char *why_te
     return stand_in(assets, chain, out, why);
 }
 
-/* a table's row by number, its failure said naming the display that asked */
+/* a table's row by number, a placeholder row where no place has it (074),
+ * its failure said naming the display that asked */
 static WErr row(Tables *tables, int display, const char *table, uint32_t id, TableRow *r, WWhy *why)
 {
     WWhy inner;
-    WErr rc = tables_row(tables, table, id, r, &inner);
+    WErr rc = tables_row_or_placeholder(tables, table, id, r, &inner);
     return rc ? w_fail(why, rc, "creature display %d: %s", display, inner.text) : W_OK;
+}
+
+/* a placeholder row's look: the stand-in figure, said (1109 step 1q) */
+static WErr placeholder_look(Resolver *assets, MpqChain *chain, FigureModel *out, const char *table, uint32_t id, WWhy *why)
+{
+    out->placeholder = 1;
+    out->kind = FIGURE_MODEL_STAND_IN;
+    if (!(out->scale > 0)) out->scale = 1;                     /* a placeholder display row gives no size */
+    snprintf(out->stood_in_for, sizeof out->stood_in_for, "display %d: no place has row %u of %s (a placeholder row)", out->display, id, table);
+    WWhy none;
+    if (stand_in(assets, chain, out, &none) == W_OK) return W_OK;
+    return w_fail(why, W_ERR_NOT_FOUND, "creature display %d: no place has row %u of %s, and the stand-in figure isn't there: %s", out->display, id, table, none.text);
 }
 
 WErr figure_model_for_display(Resolver *assets, MpqChain *chain, Tables *tables, int display, FigureModel *out, WWhy *why)
@@ -62,6 +75,7 @@ WErr figure_model_for_display(Resolver *assets, MpqChain *chain, Tables *tables,
     TableRow di, md;
     WErr rc;
     if ((rc = row(tables, display, "CreatureDisplayInfo", (uint32_t)display, &di, why))) return rc;
+    if (di.placeholder) return placeholder_look(assets, chain, out, "CreatureDisplayInfo", (uint32_t)display, why);
     uint32_t model_id = dbc_u32(di.dbc, di.row, 2), scale_bits = dbc_u32(di.dbc, di.row, 5);
     memcpy(&out->scale, &scale_bits, 4);
     if (!(out->scale > 0.01f && out->scale < 100)) out->scale = 1;
@@ -69,6 +83,10 @@ WErr figure_model_for_display(Resolver *assets, MpqChain *chain, Tables *tables,
     if (out->extra) { out->kind = FIGURE_MODEL_HUMANOID; return W_OK; }   /* a character look (173t): 025 builds it */
     for (int k = 0; k < 3; ++k) snprintf(out->skins[k], sizeof out->skins[k], "%s", dbc_text(di.dbc, di.row, 7 + (uint32_t)k));
     if ((rc = row(tables, display, "CreatureModelData", model_id, &md, why))) return rc;
+    if (md.placeholder) {
+        for (int k = 0; k < 3; ++k) out->skins[k][0] = '\0';   /* skins of a model that isn't there */
+        return placeholder_look(assets, chain, out, "CreatureModelData", model_id, why);
+    }
     snprintf(out->named, sizeof out->named, "%s", dbc_text(md.dbc, md.row, 3));
     if (!out->named[0]) return w_fail(why, W_ERR_NOT_FOUND, "display %d names model %u, whose CreatureModelData row has no path", display, model_id);
     char base[260];
