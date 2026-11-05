@@ -2214,6 +2214,26 @@ static void converted_tests(const char *dir, const char *build)
     }
     snprintf(line, sizeof line, "%d of its %d tables are as wide as their layouts (097, the converter's own widths), so its rows sit beside the archives' (074 refuses another width)", wide, nwidth);
     check(wide == nwidth, line);
+    /* the light tables a build writes since the converter's #260 (each map's
+       own default light): checked the same way when the build has them, and
+       passed over when it doesn't (an older build) (1109 step 1w) */
+    static const char *const LIGHTS[] = { "Light", "LightParams", "LightIntBand", "LightFloatBand" };
+    int lit = 0, nlit = 0;
+    for (int i = 0; i < (int)(sizeof LIGHTS / sizeof LIGHTS[0]); ++i) {
+        AssetAnswer a;
+        Dbc d;
+        const TableLayout *lay = table_layout(LIGHTS[i]);
+        snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", LIGHTS[i]);
+        if (asset_read(r, NULL, path, ASSET_TABLE, &a, &why)) continue;
+        ++nlit;
+        if (lay && !dbc_open(&d, a.data, a.len, &why) && d.fields == lay->fields) ++lit;
+        else printf("  (%s: %u fields, its layout (097) %u)\n", LIGHTS[i], d.fields, lay ? lay->fields : 0);
+        asset_answer_free(&a);
+    }
+    if (nlit) {
+        snprintf(line, sizeof line, "%d of the %d light tables it writes are as wide as their layouts (097)", lit, nlit);
+        check(lit == nlit, line);
+    }
 
     LuaData *d = NULL;
     e = lua_data_read(conv_file, CONVERTED_MAP_MOST, &d, &why);

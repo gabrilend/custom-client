@@ -288,3 +288,15 @@ not in the notes, so nothing uses that blend yet. A map converted with
 the editor's own light (its draft PR #260) is lit by that light, from
 its own rows, and the checks take it; "no row 1" is now said only for a
 map with no default light of its own. Decisions 157 to 165 in 1109.
+
+2026-11-05: 1109's step 1w, the tables' layouts held to the converter's.
+`tests/100-layouts-match-converter.lua` has world-edit-to-execute's own
+table writer write one row of each of the eleven tables it writes (the
+light tables of its draft PR #260 among them), reads the bytes back
+with this client's own reader and layouts, and compares every width,
+column name, kind and value. All eleven agree once 097 marks Light's
+third to fifth parameter sets as read, which 026 has read since step
+1u (the converter had it right). 097 moved into the reader library so
+the check can ask it from Lua. The nine tables the converter doesn't
+write keep widths nothing on its side checks. With no converter tree
+given, the check says so and passes. Decisions 166 to 171 in 1109.

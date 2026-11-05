@@ -2,7 +2,7 @@
 
 *Written by `scripts/generate-info` from `097-table-layouts.h`; don't edit, re-run it.*
 
-097-table-layouts.h (issue 106: layouts; issue 1109 step 1r) - what
+097-table-layouts.h (issue 106: layouts; issue 1109 steps 1r, 1w) - what
 each column of the client's tables is, for 3.3.5a (build 12340)
 
 For a general audience: a table (016-dbc.h) is rows of 4-byte columns
@@ -35,7 +35,19 @@ last column a reader reads. So a copy of another width is said, not
 refused (1109 step 1r, decision 135); one narrower than the columns
 read is refused, since a reader would read past its row.
 
-Window-free, no state (CORE: the test program and the executable).
+Agreeing with the converter (1109 step 1w): tests/100-layouts-match-
+converter.lua has world-edit-to-execute's own dbc.lua write a row of
+every table it writes (eleven, the light tables since its #260),
+reads it back through 016 by these layouts, and compares each width,
+column name, kind, value and localised mask, and that every column
+the converter says this client reads is marked read here. That makes
+the two copies agree with each other, not with a 3.3.5a file: the
+widths above stay unchecked against the original, and the nine tables
+the converter doesn't write (CreatureDisplayInfoExtra, her character's
+six, LiquidType and LightSkybox) have no converter file to agree with.
+
+Window-free, no state: in the reader library (READERS, so its Lua
+checks can ask it) and so in CORE (the test program and the executable).
 
 ## What it offers
 

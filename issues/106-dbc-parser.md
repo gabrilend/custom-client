@@ -70,8 +70,13 @@ light tables' widths by their layouts; 085's set takes its widths from
 them. Checked in `tests/044-test-client.c` ("the tables' layouts").
 
 Not built: layouts as data files and the generator of C and Lua
-layouts from them (097 is C; the converter keeps its own Lua copy, the
-two checked equal by hand once); ChrRaces, AnimationData, ItemSet and
+layouts from them (097 is C; the converter keeps its own Lua copy; the
+two were checked equal by hand once, and since 1109's step 1w
+`tests/100-layouts-match-converter.lua` checks it each run against an
+exported world-edit-to-execute tree: the converter's eleven tables,
+the light tables of its #260 among them, written by its own code and
+read back by 097, agree in width, names, kinds and values; the nine
+tables it doesn't write keep unchecked widths); ChrRaces, AnimationData, ItemSet and
 GameObjectDisplayInfo (no reader or converter needs them yet); typed
 row structs; a missing row as a placeholder for every table (only 041
 and 088's creature rows take one); the light tables (Light*) through
