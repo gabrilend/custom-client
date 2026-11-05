@@ -69,25 +69,63 @@ static WErr from_m2(const char *name, AssetAnswer *m2, AssetAnswer *skin, Placed
 /* }}} */
 
 /* {{{ placed_model_read */
-/* a name's model and, after PLACED_REPLACE_MARK, which replaceable
- * picture is drawn with which file ("<model>|11=<picture>"); the whole
+/* a name's model; after PLACED_REPLACE_MARK, which replaceable picture
+ * is drawn with which file ("<model>|11=<picture>"); and after
+ * PLACED_BEND_MARK, the ground under it ("|bend=<16 numbers>"): the whole
  * name when it has no mark */
-static WErr split_name(const char *name, char *model, size_t n, uint32_t *replace, char *picture, size_t pn, WWhy *why)
+static WErr split_name(const char *name, char *model, size_t n, uint32_t *replace, char *picture, size_t pn, int bend[16], int *bent, WWhy *why)
 {
-    *replace = 0; picture[0] = '\0';
+    *replace = 0; picture[0] = '\0'; *bent = 0;
     const char *bar = strchr(name, PLACED_REPLACE_MARK[0]);
     size_t len = bar ? (size_t)(bar - name) : strlen(name);
     if (len >= n) return w_fail(why, W_ERR_REFUSED, "a placed name of %zu characters, past %zu", len, n - 1);
     memcpy(model, name, len);
     model[len] = '\0';
-    if (!bar) return W_OK;
-    char *end;
-    unsigned long id = strtoul(bar + 1, &end, 10);
-    if (end == bar + 1 || *end != '=' || !end[1] || id < 1 || id > 255 || strlen(end + 1) >= pn)
-        return w_fail(why, W_ERR_REFUSED, "%s: after \"%s\" a replaceable picture's number (1 to 255), \"=\" and its file are expected", name, PLACED_REPLACE_MARK);
-    *replace = (uint32_t)id;
-    snprintf(picture, pn, "%s", end + 1);
+    while (bar) {
+        const char *next = strchr(bar + 1, PLACED_REPLACE_MARK[0]);
+        size_t seg = next ? (size_t)(next - bar) : strlen(bar);
+        size_t bl = strlen(PLACED_BEND_MARK);
+        if (seg >= bl && !strncmp(bar, PLACED_BEND_MARK, bl)) {
+            const char *p = bar + bl;
+            char *end;
+            int q = 0;
+            for (; q < 16; ++q) {
+                long v = strtol(p, &end, 10);
+                if (end == p || v < -1000000 || v > 1000000) break;
+                bend[q] = (int)v;
+                p = end;
+                if (q < 15) { if (*p != ',') break; ++p; }
+            }
+            if (q < 16 || (next ? p != next : *p != '\0'))
+                return w_fail(why, W_ERR_REFUSED, "%s: after \"%s\" 16 whole numbers, comma between, are expected", name, PLACED_BEND_MARK);
+            *bent = 1;
+        } else {
+            char *end;
+            unsigned long id = strtoul(bar + 1, &end, 10);
+            size_t file = seg - (size_t)(end + 1 - bar);
+            if (end == bar + 1 || *end != '=' || end + 1 >= bar + seg || id < 1 || id > 255 || file >= pn)
+                return w_fail(why, W_ERR_REFUSED, "%s: after \"%s\" a replaceable picture's number (1 to 255), \"=\" and its file are expected", name, PLACED_REPLACE_MARK);
+            *replace = (uint32_t)id;
+            memcpy(picture, end + 1, file);
+            picture[file] = '\0';
+        }
+        bar = next;
+    }
     return W_OK;
+}
+
+/* the height a bend grid gives at WC3 place (x, y) from the model's
+ * origin: blended between its four points round it, in units */
+static double bend_at(const int bend[16], double x, double y)
+{
+    double u = (x + 256.0) / 128.0, v = (y + 128.0) / 128.0;
+    u = u < 0 ? 0 : u > 3 ? 3 : u;
+    v = v < 0 ? 0 : v > 3 ? 3 : v;
+    int a = u >= 3 ? 2 : (int)u, b = v >= 3 ? 2 : (int)v;
+    double fu = u - a, fv = v - b;
+    double s = bend[b * 4 + a] * (1 - fu) * (1 - fv) + bend[b * 4 + a + 1] * fu * (1 - fv)
+             + bend[(b + 1) * 4 + a] * (1 - fu) * fv + bend[(b + 1) * 4 + a + 1] * fu * fv;
+    return s / 16.0;
 }
 
 WErr placed_model_read(Resolver *r, MpqChain *chain, const char *whole_name, double wc3_yards, PlacedModel *out, WWhy *why)
@@ -95,7 +133,8 @@ WErr placed_model_read(Resolver *r, MpqChain *chain, const char *whole_name, dou
     memset(out, 0, sizeof *out);
     char name[260], picture[260];
     uint32_t replace;
-    if (split_name(whole_name, name, sizeof name, &replace, picture, sizeof picture, why)) return why->code;
+    int bend[16], bent;
+    if (split_name(whole_name, name, sizeof name, &replace, picture, sizeof picture, bend, &bent, why)) return why->code;
     if (base_of(name, out->base, sizeof out->base, why)) return why->code;
     WWhy inner;
 
@@ -116,7 +155,11 @@ WErr placed_model_read(Resolver *r, MpqChain *chain, const char *whole_name, dou
             out->from = from;
             float yards = (float)(wc3_yards > 0 ? wc3_yards : WC3_YARDS_DEFAULT);
             M2Model *d = &out->mdx.model;
-            for (uint32_t i = 0; i < d->nvertices; ++i) { d->vertices[i].x *= yards; d->vertices[i].y *= yards; d->vertices[i].z *= yards; }
+            for (uint32_t i = 0; i < d->nvertices; ++i) {
+                M2Vertex *v = &d->vertices[i];
+                if (bent) v->z += (float)bend_at(bend, v->x, v->y);   /* bent to the ground under it, in WC3's units */
+                v->x *= yards; v->y *= yards; v->z *= yards;
+            }
             /* the replaceable picture the name says, drawn with its file (a cliff's: 079) */
             if (replace)
                 for (uint32_t i = 0; i < d->ntextures; ++i)
@@ -125,6 +168,7 @@ WErr placed_model_read(Resolver *r, MpqChain *chain, const char *whole_name, dou
         }
         if (!rc) asset_answer_free(&a);                  /* something else under that name: the .m2 beside it, as for any name */
     }
+    /* (a bend is a WC3 model's: an .m2, or the box standing in, isn't bent) */
 
     /* the game's model: its .m2 and first view, each from the first place
      * that has it; the box, whole, when either is nowhere */

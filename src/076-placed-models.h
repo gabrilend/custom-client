@@ -36,7 +36,18 @@
  *     model is the part before the mark, and in a WC3 model that
  *     replaceable picture (11, a cliff's) is drawn with that file. The
  *     drawer keeps models by their whole names, so one model with two
- *     pictures is two (a WC3 cliff in two cliff tilesets: 079).
+ *     pictures is two (a WC3 cliff in two cliff tilesets: 079);
+ *   - a WC3 model's name may then end in PLACED_BEND_MARK and 16 whole
+ *     numbers, comma between: the ground's height at a 4 x 4 grid of
+ *     WC3 tile points round the model, in sixteenths of a WC3 unit over
+ *     its placement's height, rows from the south and each west to
+ *     east, the grid's south-west point 256 units west and 128 south of
+ *     the model's origin (a cliff's cell, one cell round: 079). Each of
+ *     the model's points is raised by the height there, blended between
+ *     the four grid points round it (past the grid, its edge's), as
+ *     Warcraft III bends a cliff to the ground under it; any other model
+ *     (the box standing in for one no place has) is left as it is. A
+ *     bent cliff is its own model to the drawer.
  *
  * A building (021-wmo.h) is its root file and one file per part
  * (<name>_000.wmo ...), read the same way but never as a placeholder:
@@ -60,6 +71,7 @@
 
 /* No game file's name holds a "|" (078's WC3 layers use it too). */
 #define PLACED_REPLACE_MARK "|"
+#define PLACED_BEND_MARK    "|bend="
 
 /* A placed model, read:
  *   wc3       1: a WC3 model (MDX) a map brought; 0: an M2 (the box included)
@@ -93,7 +105,7 @@ typedef struct {
  * placeholder); W_ERR_REFUSED for an empty or too long name; a reader's
  * code (W_ERR_CORRUPT ...) with the name; the resolver's W_ERR_IO; and
  * W_ERR_REFUSED for a mark not followed by a number from 1 to 255, "="
- * and a file. */
+ * and a file, or a bend mark not followed by 16 whole numbers. */
 WErr placed_model_read(Resolver *r, MpqChain *chain, const char *name, double wc3_yards, PlacedModel *out, WWhy *why);
 void placed_model_free(PlacedModel *m);
 

@@ -358,7 +358,8 @@ the cliff's own ground under them, when the player has WC3. Decisions
   The cliff tileset is the south-west point's, else another corner's
   (decision 45). Each stands one cell east of its cell's south-west
   corner (WC3's cliff models lie west of their origin), at its lowest
-  level plus its corners' mean height, unbent (decision 46).
+  level plus its corners' mean height, unbent (decision 46; bent since
+  step 1h, decision 64).
 - **078** adds each cliff tileset's `groundTile` to its tilesets (when
   the map's list lacks it) and lays a cliff cell with a model whole
   with that ground (decision 47; decision 39 kept for blight, and for
@@ -517,8 +518,64 @@ Not checked here: real WC3 tileset pictures (that subtiles 0 and 15
 are whole tiles, open question 11), Raylib binding the cells as the
 material's second map, and a window.
 
-Not built yet: cliffs and ramps bent to the ground under each point
-(decision 46); WC3's water; a WC3
+**Step 1h is built** (2026-11-05, the same background work): a
+converted map's cliffs and ramps bent to the ground under each of their
+points, as WC3 bends them, and the first step of WC3's own water.
+Decisions 64 to 69.
+
+- **The bend (079, 076, 078):** each cliff and ramp keeps the ground's
+  heights round its cell: the 4 x 4 tile points from one west and one
+  south of its south-west corner to two east and two north (clamped at
+  the grid's edge), each less its corners' mean height, in sixteenths
+  of a WC3 unit (exact: heights are in quarters). 079 hands it out in
+  the model's name (`wc3_cliffs_name`: `<model>|11=<picture>|bend=` and
+  the 16 numbers, rows from the south), and 076 raises each of the
+  model's points by the ground under it, blended between the four grid
+  points round it, before the model is scaled to yards. A cliff on even
+  ground keeps its plain name, so its model is still shared (decisions
+  64, 65; decision 46's "unbent" lifted).
+- **The water (081):** a new window-free reader, `081-wc3-water.c`,
+  reads WC3's water sheet (`TerrainArt\Water.slk`) row for the map's
+  tileset (its letter and `Sha`), every frame of its ripples
+  (`texFile`, two digits, `.blp`) through the resolver, and the
+  colours shallow and deep water go between; it gives each wet tile
+  point its depth and its colour by WC3's rule, and the frame shown at a
+  time. Nothing draws with it yet: 040 still draws the converter's
+  water with the game's lake pictures and the zone's colours. The rest
+  is the water plan (decision 67).
+
+Checked (`tests/044-test-client.c`, in the cliff section and a new
+water section, before the archives): a made cliff model's square bent
+by a made grid, point for point, either order of the name's marks, a
+short or overlong bend refused, a bent name no place has the box
+unbent; the made map's cliff on uneven ground named with its bend, a
+ramp on the grid's east edge with its clamped points. With the real
+conversions, each cliff's and ramp's foot read back through 076 at its
+corners on its lowest level:
+
+- **War in the Plaguelands**: 206 of its 498 cliffs and ramps bent;
+  over 988 corners its foot is at most 0.0000 yards off the converted
+  ground (unbent: up to 4.18).
+- **Master Crafters**: 1011 of 2907 bent; over 5806 corners at most
+  0.0000 yards off (unbent: up to 23.33).
+
+The water with a made install: the row by the tileset's letter, three
+frames (the map's own second frame before the install's), the frame
+shown, each made point's depth and colour, the colour rule at its
+edges, and the refusals (no sheet, no row, a missing frame, numTex 0, a
+colour past 255, no texFile). With the real conversions' `war3map.w3e`
+and a made sheet: War in the Plaguelands' 4627 wet points (768
+shallow, 3859 deep, the deepest 2.52 cells) and Master Crafters' 14313
+(6189 shallow, 8124 deep, the deepest 7.76), each point's depth and
+colour as worked out in the test from its stored numbers. No memory
+errors under the address and undefined-behaviour checkers. Not checked
+here: real cliff and ramp models bent (their points' places, decision
+46's cell east), their normals (left as the model has them, so a bent
+face is lit as if flat), real WC3 water (open question 12), and a
+window.
+
+Not built yet: WC3's water drawn (the plan's steps 2 to 4, decision
+67); a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
 its replaceable pictures are left off); 034's prefetch, 040's water and
@@ -667,7 +724,11 @@ return {
 1g. ~~The ground laid cell by cell: every tileset in a chunk, each
    cell's variation.~~ Done (2026-11-05): the ground's shader (080)
    reading each cell's pieces from 078 through 033 and 038 (decisions
-   57 to 63). Cliffs bent to the ground are next (302).
+   57 to 63).
+1h. ~~Cliffs and ramps bent to the ground, and WC3's water read.~~
+   Done (2026-11-05): 079's bend in the model's name, 076 bending the
+   model, 081 reading WC3's water (decisions 64 to 69). WC3's water
+   drawn is next: the plan in decision 67, from its step 2.
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -947,7 +1008,8 @@ return {
     heights), less than a level. Bending is a next step: a model per
     cliff, or a shader reading the ground's heights. The cell east is
     the viewers' rule for WC3's cliff models, which lie west of their
-    origin: unchecked here (open question 9).
+    origin: unchecked here (open question 9). (Bent since step 1h:
+    decisions 64, 65.)
 47. **The ground under a cliff is its cliff tileset's `groundTile`**,
     laid whole (added to the map's tilesets when its list lacks it, as
     the viewers do); a cliff tileset with no ground, or a cliff cell
@@ -1055,6 +1117,67 @@ return {
     OpenGL, so the drawing check stays a tool run by hand, its result
     recorded here.
 
+## Decisions (2026-11-05, step 1h, answered here; the owner may overturn any)
+
+64. **A cliff bent on the CPU when its model is read, the bend carried
+    in its name** (lifts decision 46's "unbent"). Chosen over a shader
+    reading the ground's heights: 042 draws one mesh for every copy of
+    a model, so a shader would need each copy's ground in a picture or
+    uniforms per draw, and could be checked only with a window. A bent
+    cliff is a model of its own (206 on War in the Plaguelands, 1011
+    on Master Crafters, beside the flat ones' shared models), read once
+    like any other; the name keeps 076's one way in (decision 49's
+    marks), and any place's model is bent the same. Its normals are
+    left as the model has them.
+65. **The bend is WC3's rule as the published viewers read it**: each
+    of a model's points raised by the ground's height under it (the
+    tile points' heights alone, levels left out, blended between the
+    four round it), less the corners' mean the cliff already stands
+    at; read from a 4 x 4 grid round the cell, since a cliff model
+    reaches past its cell (one west: decision 46), clamped at the
+    grid's edge. Kept in sixteenths of a unit, whole numbers, so the
+    name is short and exact. Any other model in a bent name (the box
+    standing in) is left unbent.
+66. **The water's surface stays 063's** (the stored level less 89.6
+    units, as the converter writes it), and a depth is that less the
+    ground (levels counted), in cells. The sheet's `height` (the
+    surface's offset WC3 reads from it) is read and kept, not used: if
+    a real `Water.slk` gives -0.7 (89.6 / 128) the two agree; if not,
+    the plan's step 4 moves the surface.
+67. **WC3's water is a plan of four steps, not one slice**: today's
+    water comes from the converter's ground files and the game's
+    tables through the archives alone, and the map's own tint lives in
+    a file the build lacks.
+    1. Read WC3's water without a window (081). Done in this step.
+    2. Draw it (040, 043): a converted map's water (its ground files'
+       kind 1) with 081's frames as its ripple pictures, `texRate` a
+       second, and each point coloured by 081 at its WC3 point (its
+       colour and alpha in place of the zone's tint and opacity); when
+       081 finds no water, as now. A new shader text, checked on the
+       software renderer as decision 63's was.
+    3. The map's own tint: world-edit-to-execute copies
+       `war3map.w3i` to the build as it copies `war3map.w3e`, a reader
+       for its water tint (its flag and colour), and 081 tints by it.
+    4. The converter's wet cells and WC3's: War in the Plaguelands'
+       ground files mark 8087 wet cells against 4627 wet tile points
+       (the converter's rule for a wet cell unread here; WC3 draws
+       every cell with a water-marked corner, hidden where the ground
+       is higher). Check
+       040's mesh against the points, and draw from 081's points where
+       they differ; the surface by the sheet's `height` if decision 66
+       needs it.
+68. **All of the row's frames or no WC3 water.** A frame no place has
+    (the install's, a pack's or the map's own) means the converter's
+    water stays, never the checker and never a mix with the game's
+    pictures. A row's colours must be whole numbers from 0 to 255, its
+    `numTex` from 1 to 100 (frame numbers are two digits); `texRate` 0
+    or missing reads as one a second.
+69. **The water section of the tests makes its own sheet and frames**
+    (no Warcraft III install here, as for the tilesets: decision 62),
+    each frame its own colour so a wrong frame shows, and checks the
+    real conversions' points against the rule worked out in the test
+    from each point's stored numbers.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -1152,6 +1275,14 @@ return {
     whole variations are the viewers' reading; checked only against
     pictures made in the test. On the owner's machine with WC3: a Test
     Map run showing see-through cells, or every cell alike, says which.
+12. **WC3's water, unseen here.** The sheet's row name (the tileset's
+    letter and `Sha`), its columns (`texFile`, `numTex`, `texRate`,
+    `height`, the `Smin_`, `Smax_`, `Dmin_`, `Dmax_` colours, alpha
+    first), the frames' names (two-digit numbers from 00) and the
+    colour rule's depths (10, 64 and 72 over 128 of a cell) are
+    HiveWE's reading, recalled rather than read here; checked only
+    against a sheet made in the test. On the owner's machine with WC3:
+    081 refusing the install's sheet, or a frame not found, says which.
 
 ## Related
 
@@ -1172,7 +1303,10 @@ return {
   For step 1e: `src/079-wc3-cliffs.info.md` (the cliffs), with 078,
   076 and 077. For step 1f: 079 (ramps) and 078 (blight). For step 1g:
   `src/080-ground-shader.info.md` (the ground's shader), with 078
-  (each cell's pieces), 033 (packed for the card) and 038.
+  (each cell's pieces), 033 (packed for the card) and 038. For step
+  1h: `src/079-wc3-cliffs.info.md` (each cliff's bend),
+  `src/076-placed-models.info.md` (a model bent by its name),
+  `src/081-wc3-water.info.md` (WC3's water read).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

@@ -72,9 +72,15 @@ map's WC3 cells one by one (`src/080-ground-shader.c`, read by 038): a
 small picture a tile names each cell's pieces (a tileset picture's
 layer in the array and the subtile in it), so a chunk shows every
 tileset its cells lay, each cell's own variation, and each piece's
-own colours, as WC3 lays them (decisions 57-63). Still to come:
-cliffs and ramps bent to the ground, where a cliff shader reading the
-ground's heights would earn its place.
+own colours, as WC3 lays them (decisions 57-63). Since step 1h each
+cliff and ramp is bent to the ground under its points, as WC3 bends
+them: the ground's heights round its cell ride in its model's name and
+076 raises each point by them when it reads the model, so a bent cliff
+is a model of its own and a flat one still shared (decisions 64-65; a
+shader reading the ground was passed over: 042 draws one mesh for
+every copy). WC3's own water is read (`src/081-wc3-water.c`: its
+frames and its colour by depth) but not drawn yet: 1109's decision 67
+is the plan.
 
 ## Intended behavior
 

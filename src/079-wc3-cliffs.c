@@ -11,6 +11,7 @@
 #include "076-placed-models.h"
 #include "077-slk.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -186,7 +187,17 @@ WErr wc3_cliffs_open(Resolver *r, MpqChain *chain, const W3eGround *g, Wc3Cliffs
             double mean = (sw->height + se->height + nw->height + ne->height) / 4.0;
             Wc3Cliff cl = { i, j, type, base, m, ramp,
                             g->offset_x + (i + 1) * 128.0, g->offset_y + j * 128.0,
-                            (base - 2) * 128.0 + mean };
+                            (base - 2) * 128.0 + mean, { 0 }, 0 };
+            /* its bend: the ground round it less that mean, in sixteenths */
+            for (int b = 0; b < 4; ++b)
+                for (int a = 0; a < 4; ++a) {
+                    int pi = i - 1 + a, pj = j - 1 + b;
+                    pi = pi < 0 ? 0 : pi > cw ? cw : pi;
+                    pj = pj < 0 ? 0 : pj > g->height - 1 ? g->height - 1 : pj;
+                    double h = w3e_point(g, pi, pj)->height;
+                    cl.bend[b * 4 + a] = (int)lround((h - mean) * 16.0);
+                    cl.bent |= cl.bend[b * 4 + a] != 0;
+                }
             if (c->ncliffs % 256 == 0) c->cliffs = realloc(c->cliffs, sizeof *c->cliffs * (size_t)(c->ncliffs + 256));
             c->at[j * cw + i] = c->ncliffs;
             c->cliffs[c->ncliffs++] = cl;
@@ -205,6 +216,21 @@ int                 wc3_cliffs_count(const Wc3Cliffs *c) { return c->ncliffs; }
 const Wc3Cliff     *wc3_cliffs_get(const Wc3Cliffs *c, int k) { return k >= 0 && k < c->ncliffs ? &c->cliffs[k] : NULL; }
 void                wc3_cliffs_counts(const Wc3Cliffs *c, Wc3CliffCounts *out) { *out = c->counts; }
 const char         *wc3_cliffs_model(const Wc3Cliffs *c, int m) { return m >= 0 && m < c->nmodels ? c->models[m] : NULL; }
+int wc3_cliffs_name(const Wc3Cliffs *c, int k, char *out, size_t n)
+{
+    const Wc3Cliff *cl = wc3_cliffs_get(c, k);
+    if (!cl || !n) return -1;
+    int len = snprintf(out, n, "%s", c->models[cl->model]);
+    if (len < 0 || (size_t)len >= n) return -1;
+    if (!cl->bent) return len;
+    int more = snprintf(out + len, n - (size_t)len, "%s", PLACED_BEND_MARK);
+    if (more < 0 || (size_t)(len += more) >= n) return -1;
+    for (int q = 0; q < 16; ++q) {
+        more = snprintf(out + len, n - (size_t)len, q ? ",%d" : "%d", cl->bend[q]);
+        if (more < 0 || (size_t)(len += more) >= n) return -1;
+    }
+    return len;
+}
 int wc3_cliffs_at(const Wc3Cliffs *c, int i, int j)
 {
     int cw = c->g->width - 1, ch = c->g->height - 1;

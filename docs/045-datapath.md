@@ -51,7 +51,9 @@ ground laid cell by cell with WC3's own tilesets and variations when
 its build carries `war3map.w3e`, `078-wc3-ground.c`, drawn by the
 ground's shader, `080-ground-shader.c`, with WC3's blight on blighted
 ground, and its cliffs and ramps standing as WC3's own models among
-its doodads, `079-wc3-cliffs.c`), with the magenta checker for a missing picture
+its doodads, `079-wc3-cliffs.c`, each bent to the ground under it by
+`076-placed-models.c`; WC3's water sheet and ripple frames are read by
+`081-wc3-water.c`, not drawn yet), with the magenta checker for a missing picture
 and a magenta wire-frame box for a missing model; and while the server
 has no map files for the map, her ground's heights are made from its
 ADTs (`075-adt-heights.c`). The prefetch (034), the water (040) and the
@@ -66,7 +68,7 @@ switches with its own issue.
 | `017-blp.c` (with `049-jpeg.c` for WC3's JPEG pictures) | pictures (`.blp`): the game's BLP2, and Warcraft III's BLP1 (from `war3.mpq`, read by `015-mpq.c` too) | RGBA images, at any of their smaller sizes |
 | `020-adt.c` | ground files (`World\Maps\<map>\<map>_<ty>_<tx>.adt`) | chunks (heights, layers, blend maps, shadows, tints), water layers, placements of doodads and buildings |
 | `063-w3e.c` | Warcraft III's ground (a map's `war3map.w3e`) | tile points (heights, water, tileset, cliff level, ramp, blight and boundary marks), then each point's heights in the world and each cell's tileset pictures and subtiles, cliff and blighted cells marked; a stroke's area redone alone (for an editor, through the FFI); drawn on a converted map's ADT ground by `078-wc3-ground.c` (each cell's own pieces, through 033, read per cell by 038's shader) |
-| `077-slk.c` | Warcraft III's spreadsheets (SYLK: `TerrainArt\Terrain.slk`, `TerrainArt\CliffTypes.slk` ...) | each row's cells by row and column name (a tileset's picture folder and file; a cliff tileset's model folder, picture and ground) |
+| `077-slk.c` | Warcraft III's spreadsheets (SYLK: `TerrainArt\Terrain.slk`, `TerrainArt\CliffTypes.slk`, `TerrainArt\Water.slk` ...) | each row's cells by row and column name (a tileset's picture folder and file; a cliff tileset's model folder, picture and ground; a tileset's water frames and colours) |
 | `022-m2.c` | models (`.m2` + `00.skin`) | points, pieces, units (pictures, layers, blends, tints), solid shapes |
 | `061-mdx.c` | Warcraft III's models (`.mdx`, from `war3.mpq`) | the same points, pieces and units as `022-m2.c` gives, and beside them its sequences, skeleton (bones, helpers, pivots) and animated values (for 402); not yet drawn by any part |
 | `023-anim.c` | the same models (and `.anim` files) | skeletons, animations, poses, bent points, picture animations |
