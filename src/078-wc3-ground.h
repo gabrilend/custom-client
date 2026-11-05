@@ -179,12 +179,15 @@ WErr wc3_ground_lay_tile(const Wc3Ground *w, AdtTile *adt, Wc3Lay *lay, int chun
 
 /* Adds the cliff and ramp models standing on tile `adt` (those whose cell's
  * centre is on it, so each is placed by one tile) to its doodads: each
- * model's name (079's wc3_cliffs_model) to its list once, each cliff a
+ * cliff's name (079's wc3_cliffs_name: its model's, and its bend when it
+ * stands on uneven ground, so a bent one is its own) to its list once,
+ * each cliff a
  * placement with id WC3_CLIFF_UID plus its cell, at its origin by the
  * map's rule (z: scale times WC3's), turned as WC3 lays models (rot
  * 0, 90, 0), size 1 (076 sizes a WC3 model by the map's rule). How many
  * into `*placed` (may be NULL). W_OK, nothing done with no cliffs;
- * W_ERR_FULL when memory runs out. */
+ * W_ERR_FULL when memory runs out or a name passes the list's 259
+ * characters. */
 WErr wc3_ground_place_cliffs(const Wc3Ground *w, AdtTile *adt, int *placed, WWhy *why);
 
 #endif

@@ -399,7 +399,8 @@ WErr wc3_ground_place_cliffs(const Wc3Ground *w, AdtTile *adt, int *placed, WWhy
         double cx = w->g->offset_x + (cl->i + 0.5) * 128.0, cy = w->g->offset_y + (cl->j + 0.5) * 128.0;
         double x = w->x0 + w->scale * cy, y = w->y0 - w->scale * cx;
         if (!(x <= north && x > north - side && y <= west && y > west - side)) continue;
-        int m = model_index(adt, wc3_cliffs_model(w->cliffs, cl->model));
+        char name[260];
+        int m = wc3_cliffs_name(w->cliffs, k, name, sizeof name) < 0 ? -1 : model_index(adt, name);   /* bent: its own name (079) */
         AdtPlace *grown = m < 0 ? NULL : realloc(adt->doodads, sizeof *adt->doodads * (size_t)(adt->ndoodads + 1));
         if (!grown) return w_fail(why, W_ERR_FULL, "no room for the tile's cliffs (%d placed)", adt->ndoodads);
         adt->doodads = grown;

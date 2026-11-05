@@ -44,8 +44,14 @@
  * model stands on its cell's south-west corner moved one cell east
  * (WC3's cliff models lie west of their origin, as the viewers place
  * them), at (base level - 2) x 128 units plus its corners' mean height,
- * turned as WC3 lays models, unbent (the game bends each point to the
- * ground under it; issue 1109's decision 46).
+ * turned as WC3 lays models, and bent as the game bends it: each of its
+ * points raised by the ground's height under it (the tile points'
+ * heights, their levels left out, blended between the four round it)
+ * less that mean. The bend rides in the model's name (wc3_cliffs_name:
+ * 076's PLACED_BEND_MARK and the heights of the 4 x 4 tile points round
+ * the cell), so the drawer reads each bent cliff as a model of its own;
+ * a cliff on flat ground keeps its model's plain name (issue 1109's
+ * decisions 46 and 64).
  *
  * The cliffs list holds both: a ramp's has `ramp` set, and the counts
  * keep them apart.
@@ -91,10 +97,17 @@ typedef struct {
  *   model   its model's name (into wc3_cliffs_model)
  *   ramp    1: a ramp's model (its cell keeps its ground: 078)
  *   x, y, z its origin in WC3's world (units): the cell's south-west
- *           corner one cell east, at the height above */
+ *           corner one cell east, at the height above
+ *   bend    the ground's height at the 4 x 4 tile points round its cell
+ *           (from one point west and south of its south-west corner;
+ *           rows from the south, each west to east; points past the
+ *           grid's edge its nearest), less the corners' mean, in
+ *           sixteenths of a unit (exact: heights are quarters)
+ *   bent    1 when any of them isn't 0 */
 typedef struct {
     int    i, j, type, base, model, ramp;
     double x, y, z;
+    int    bend[16], bent;
 } Wc3Cliff;
 
 /* What opening found. */
@@ -135,6 +148,12 @@ int  wc3_cliffs_at(const Wc3Cliffs *c, int i, int j);
 /* Model m's name as the drawer takes it: its path, then 076's
  * PLACED_REPLACE_MARK, "11=" and its cliff picture; NULL past the end. */
 const char *wc3_cliffs_model(const Wc3Cliffs *c, int m);
+
+/* Cliff k's name as the drawer takes it: its model's name
+ * (wc3_cliffs_model), then, when it is bent, PLACED_BEND_MARK and its 16
+ * bend heights, comma between. Its length, or -1 (nothing written past
+ * `n`) when it doesn't fit or k is past the end. */
+int  wc3_cliffs_name(const Wc3Cliffs *c, int k, char *out, size_t n);
 
 /* A cell's letters (see above) from its corners' cliff levels, ended by
  * a zero; returns the lowest level. `steep` (may be NULL) is set to 1

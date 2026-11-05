@@ -58,6 +58,7 @@
 #include "../src/078-wc3-ground.h"
 #include "../src/079-wc3-cliffs.h"
 #include "../src/080-ground-shader.h"
+#include "../src/081-wc3-water.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -2910,12 +2911,21 @@ static void wc3_place_tests(const char *dir, const char *build)
 /* }}} */
 
 /* {{{ 1109 step 1e: a converted map's cliffs as WC3's own cliff models (079) */
-/* made_mdx with its first picture WC3's replaceable 11 (a cliff's) */
+/* made_mdx with its first picture WC3's replaceable 11 (a cliff's), and
+ * its first geoset's square moved to a cliff's cell: its corners where
+ * WC3's cliff models have them, west of the origin (-128 to 0 east, 0
+ * to 128 north), on the model's floor (step 1h: the bend lands them) */
 static void t_cliff_mdx(Bytes *o)
 {
     made_mdx(o);
     for (size_t i = 0; i + 12 <= o->n; ++i)
         if (!memcmp(o->b + i, "TEXS", 4)) { o->b[i + 8] = 11; break; }
+    static const float corners[12] = { -128, 0, 0,   0, 0, 0,   0, 128, 0,   -128, 128, 0 };
+    for (size_t i = 0; i + 8 + 48 <= o->n; ++i)
+        if (!memcmp(o->b + i, "VRTX", 4)) {
+            for (int k = 0; k < 12; ++k) { uint32_t u; memcpy(&u, &corners[k], 4); t_le32(o->b + i + 8 + 4 * k, u); }
+            break;
+        }
 }
 
 /* the model a cliff or ramp cell should get, worked out here from the
@@ -3135,10 +3145,27 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             }
             int names_once = 1;
             for (int m = 0; m < adt->nmodels; ++m) for (int m2 = m + 1; m2 < adt->nmodels; ++m2) names_once &= strcmp(adt->models[m], adt->models[m2]) != 0;
-            snprintf(line, sizeof line, "every cliff and ramp placed in the tile its cell is on (%d), each its own id past the converter's, turned as WC3 lays models, each model named once (%d)", placed, adt->nmodels);
-            check(!e && placed == cc.placed + cc.ramps_placed && adt->ndoodads == placed && all_cliff && uids && names_once && adt->nmodels == cc.models, e ? why.text : line);
-            check(p22 && near(p22->x, x0 + s * 256, 1e-3) && near(p22->y, Y0 - s * 384, 1e-3) && near(p22->z, s * 25, 1e-5) && !strcmp(adt->models[p22->name], n22),
-                  "cell (2, 2)'s placement: its origin by the map's rule, in yards, its model's name");
+            int named = 1;
+            for (int d = 0; d < adt->ndoodads; ++d) {
+                const AdtPlace *p = &adt->doodads[d];
+                int k = wc3_cliffs_at(cl, (int)((p->uid - WC3_CLIFF_UID) % 8), (int)((p->uid - WC3_CLIFF_UID) / 8));
+                char nm[300];
+                named &= k >= 0 && wc3_cliffs_name(cl, k, nm, sizeof nm) > 0 && !strcmp(adt->models[p->name], nm);
+            }
+            snprintf(line, sizeof line, "every cliff and ramp placed in the tile its cell is on (%d), each its own id past the converter's, turned as WC3 lays models, each named by its model and bend, each name once (%d names for %d models)", placed, adt->nmodels, cc.models);
+            check(!e && placed == cc.placed + cc.ramps_placed && adt->ndoodads == placed && all_cliff && uids && names_once && named && adt->nmodels >= cc.models && adt->nmodels <= placed, e ? why.text : line);
+            /* (step 1h) its bend: the made ground rises 10 units a column east, so round cell (2, 2) (corners' mean 25)
+             * each row of the 4 x 4 points is -15, -5, 5, 15 units: -240, -80, 80, 240 sixteenths */
+            char want22[300];
+            snprintf(want22, sizeof want22, "%s%s-240,-80,80,240,-240,-80,80,240,-240,-80,80,240,-240,-80,80,240", n22 ? n22 : "", PLACED_BEND_MARK);
+            check(p22 && near(p22->x, x0 + s * 256, 1e-3) && near(p22->y, Y0 - s * 384, 1e-3) && near(p22->z, s * 25, 1e-5) && !strcmp(adt->models[p22->name], want22),
+                  p22 ? adt->models[p22->name] : "cell (2, 2)'s placement: its origin by the map's rule, in yards, its model's name with its bend");
+            const Wc3Cliff *c00 = NULL;
+            for (int k = 0; k < wc3_cliffs_count(cl); ++k) if (wc3_cliffs_get(cl, k)->i == 7 && wc3_cliffs_get(cl, k)->j == 3) c00 = wc3_cliffs_get(cl, k);
+            char nm[300];
+            int edge = c00 && c00->ramp && c00->bend[3] == c00->bend[2] && c00->bend[7] == c00->bend[6] && c00->bend[2] != c00->bend[1];
+            check(c00 && c00->bent && edge && wc3_cliffs_name(cl, 0, nm, 10) == -1,
+                  "a ramp on the grid's east edge (cell (7, 3)): its bend's points past the edge its nearest's; a name that doesn't fit: -1");
             AdtTile *far = calloc(1, sizeof *far);
             far->chunks[0].x = (float)(X0 + 1000); far->chunks[0].y = (float)Y0;
             check(!wc3_ground_place_cliffs(w, far, &placed, &why) && placed == 0 && far->ndoodads == 0, "a tile none of the cells is on: no cliffs");
@@ -3156,6 +3183,32 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             if (!e) placed_model_free(&pm);
             check(placed_model_read(r, NULL, "Doodads\\X.mdx" PLACED_REPLACE_MARK "11", s, &pm, &why) == W_ERR_REFUSED
                   && placed_model_read(r, NULL, "Doodads\\X.mdx" PLACED_REPLACE_MARK "x=Y.blp", s, &pm, &why) == W_ERR_REFUSED, "a mark with no number and file after it: refused");
+            /* (step 1h) a bend: grid point q at q units over the placement; the square's corners
+             * land on grid points 5, 6, 10, 9; a point 5 units east of the origin blends 6 and 7 */
+            {
+                char bn[400] = "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff0.blp" PLACED_BEND_MARK;
+                for (int q = 0; q < 16; ++q) { char v[16]; snprintf(v, sizeof v, q ? ",%d" : "%d", 16 * q); strncat(bn, v, sizeof bn - strlen(bn) - 1); }
+                e = placed_model_read(r, NULL, bn, s, &pm, &why);
+                const M2Vertex *v = e ? NULL : pm.mdx.model.vertices;
+                double f = 5.0 / 128;
+                int ok = v && pm.mdx.model.nvertices >= 6 && near(v[0].z, s * 5, 1e-5) && near(v[1].z, s * 6, 1e-5) && near(v[2].z, s * 10, 1e-5) && near(v[3].z, s * 9, 1e-5)
+                         && near(v[0].x, -128 * s, 1e-5) && near(v[5].z, s * (5 + 6 * (1 - f) + 7 * f), 1e-5);
+                for (uint32_t t = 0; !e && t < pm.mdx.model.ntextures; ++t) ok &= !(pm.mdx.model.textures[t].kind == 0 && strstr(pm.mdx.model.textures[t].file, "bend"));
+                check(ok, e ? why.text : "076 bends a WC3 model by the name's grid: each point raised by the ground there, blended between the four grid points round it (the picture after the first mark kept whole)");
+                if (!e) placed_model_free(&pm);
+                char bn2[400] = "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx" PLACED_BEND_MARK "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff0.blp";
+                e = placed_model_read(r, NULL, bn2, s, &pm, &why);
+                int replaced2 = 0;
+                for (uint32_t t = 0; !e && t < pm.mdx.model.ntextures; ++t) replaced2 += pm.mdx.model.textures[t].kind == 0 && !strcmp(pm.mdx.model.textures[t].file, "ReplaceableTextures\\Cliff\\Cliff0.blp");
+                check(!e && replaced2 == 1 && near(pm.mdx.model.vertices[0].z, s * 6 / 16.0, 1e-5), e ? why.text : "the two marks in either order");
+                if (!e) placed_model_free(&pm);
+                check(placed_model_read(r, NULL, "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx" PLACED_BEND_MARK "1,2,3", s, &pm, &why) == W_ERR_REFUSED
+                      && placed_model_read(r, NULL, "Doodads\\Terrain\\Cliffs\\CliffsABAA1.mdx" PLACED_BEND_MARK "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16x", s, &pm, &why) == W_ERR_REFUSED,
+                      "a bend of fewer than 16 numbers, or with more after them: refused");
+                e = placed_model_read(r, NULL, "Doodads\\Gone.mdx" PLACED_BEND_MARK "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16", s, &pm, &why);
+                check(!e && !pm.wc3 && pm.source == ASSET_FROM_PLACEHOLDER, e ? why.text : "a bent name no place has: the box, unbent");
+                if (!e) placed_model_free(&pm);
+            }
             w3e_prep_free(prep);
             w3e_free(g);
             adt_free(adt); free(adt);
@@ -3303,6 +3356,8 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             W3ePrep *prep = NULL;
             w3e_prep(g, ext, nset, &prep, &why);
             TLayCheck chk = { 0 };
+            int wrong_bend = 0, n_bent = 0, foot_unread = 0, foot_corners = 0;
+            double foot_bent = 0, foot_flat = 0;
             int tiles = 0, placed = 0, n_ramps = 0, twice = 0, wrong_name = 0, wrong_cell = 0, own_kept = 1;
             double below = 0, above = 0;
             char sample[260] = "";
@@ -3340,8 +3395,29 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                         const char *dirn = kind == 2 ? RDIRS[type % 2] : DIRS[type % 2];
                         n_ramps += kind == 2;
                         snprintf(want, sizeof want, "Doodads\\Terrain\\%s\\%s%s0.mdx" PLACED_REPLACE_MARK "11=ReplaceableTextures\\Cliff\\Cliff%d.blp", dirn, dirn, l, type);
-                        if (strcmp(t->models[p->name], want)) ++wrong_name;
+                        const char *full = t->models[p->name], *bm = strstr(full, PLACED_BEND_MARK);
+                        size_t plen = bm ? (size_t)(bm - full) : strlen(full);
+                        if (plen != strlen(want) || strncmp(full, want, plen)) ++wrong_name;
                         else if (!sample[0]) snprintf(sample, sizeof sample, "%s", want);
+                        /* (step 1h) its bend, worked out here: the 4 x 4 points round its cell less its corners' mean */
+                        {
+                            const W3ePoint *cp[4] = { w3e_point(g, i, j), w3e_point(g, i + 1, j), w3e_point(g, i, j + 1), w3e_point(g, i + 1, j + 1) };
+                            double mean = (cp[0]->height + cp[1]->height + cp[2]->height + cp[3]->height) / 4;
+                            char wb[200] = "";
+                            int any = 0;
+                            for (int q = 0; q < 16; ++q) {
+                                int pi = i - 1 + q % 4, pj = j - 1 + q / 4;
+                                pi = pi < 0 ? 0 : pi > cw ? cw : pi;
+                                pj = pj < 0 ? 0 : pj > ch ? ch : pj;
+                                int v = (int)lround((w3e_point(g, pi, pj)->height - mean) * 16);
+                                any |= v != 0;
+                                char x[16];
+                                snprintf(x, sizeof x, q ? ",%d" : "%d", v);
+                                strncat(wb, x, sizeof wb - strlen(wb) - 1);
+                            }
+                            if (any ? !bm || strcmp(bm + strlen(PLACED_BEND_MARK), wb) : bm != NULL) ++wrong_bend;
+                            n_bent += any;
+                        }
                         /* its height against the converted ground's corners of that cell */
                         double cx = g->offset_x + (i + 0.5) * 128.0, cy = g->offset_y + (j + 0.5) * 128.0;
                         double wx = m.wc3_x0 + m.wc3_scale * cy, wy = m.wc3_y0 - m.wc3_scale * cx;
@@ -3358,6 +3434,23 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                         }
                         if (lo - p->z > below) below = lo - p->z;
                         if (p->z - hi > above) above = p->z - hi;
+                        /* (step 1h) its foot through the drawer's reader (076, the bend in its name): at each corner
+                         * on its lowest level, the made model's floor corner against the converted ground there,
+                         * and how far the unbent model's (its placement's height alone) was */
+                        PlacedModel fm;
+                        if (placed_model_read(r, NULL, full, m.wc3_scale, &fm, &why) || !fm.wc3 || fm.mdx.model.nvertices < 4) { ++foot_unread; continue; }
+                        static const int CE[4] = { 0, 1, 1, 0 }, CN[4] = { 0, 0, 1, 1 };   /* the square's corners: south-west, south-east, north-east, north-west */
+                        int lowest = 99;
+                        for (int q = 0; q < 4; ++q) { int lh = w3e_point(g, i + CE[q], j + CN[q])->layer_height; if (lh < lowest) lowest = lh; }
+                        for (int q = 0; q < 4; ++q) {
+                            if (w3e_point(g, i + CE[q], j + CN[q])->layer_height != lowest) continue;
+                            double ground = ck->z + ck->heights[adt_corner(rr + 1 - CN[q], cc2 + CE[q])];
+                            double bent_off = fabs(p->z + fm.mdx.model.vertices[q].z - ground), flat_off = fabs(p->z - ground);
+                            if (bent_off > foot_bent) foot_bent = bent_off;
+                            if (flat_off > foot_flat) foot_flat = flat_off;
+                            ++foot_corners;
+                        }
+                        placed_model_free(&fm);
                     }
                     placed += n_cliffs;
                     if (own_n >= 0 && t->ndoodads - n_cliffs != own_n) own_kept = 0;
@@ -3371,6 +3464,11 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             check(!e && placed == cc.placed + cc.ramps_placed && n_ramps == cc.ramps_placed && twice == 0 && wrong_cell == 0 && own_kept, e ? why.text : line);
             snprintf(line, sizeof line, "each cliff's model by its corners' letters, its tileset's folder and its cliff picture (%d wrong; e.g. %s)", wrong_name, sample);
             check(wrong_name == 0 && sample[0], line);
+            snprintf(line, sizeof line, "each cliff and ramp on uneven ground (%d of %d) named with its bend, the ground round its cell less its corners' mean; the rest without (%d wrong)", n_bent, placed, wrong_bend);
+            check(wrong_bend == 0 && n_bent > 0, line);
+            snprintf(line, sizeof line, "each bent cliff's and ramp's foot on the converted ground at its corners on its lowest level, read through 076: at most %.4f yards off (unbent: up to %.2f) over %d corners (%d unread)",
+                     foot_bent, foot_flat, foot_corners, foot_unread);
+            check(foot_unread == 0 && foot_corners > 0 && foot_bent < 0.02 && foot_flat > foot_bent, line);
             snprintf(line, sizeof line, "each cliff's foot on its own level: less than a level (%.2f yards) below its cell's lowest converted corner (at most %.2f: unbent, at its corners' mean height), never above its highest (%.2f)",
                      128 * m.wc3_scale, below, above);
             check(below < 128 * m.wc3_scale && above < 0.01, line);
@@ -3391,6 +3489,284 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             maps_world_free(mw); free(mw);
         }
         wc3_ground_free(w);
+        if (r) resolver_free(r);
+        fclose(place.log); free(log);
+        w3e_free(g);
+    }
+    /* }}} */
+}
+/* }}} */
+
+/* {{{ a converted map's water as Warcraft III draws it (081, 1109 step 1h):
+ * WC3's water sheet's row for the map's tileset, its frames, and each
+ * point's colour by its depth. Files and archives made here; the
+ * converter's real output too when the build folder carries war3map.w3e. */
+
+/* the made sheet's head: its columns, the colours alpha first as WC3's are */
+static void t_water_head(char *s, size_t n)
+{
+    static const char *G[4] = { "Smin_", "Smax_", "Dmin_", "Dmax_" }, CH[4] = { 'A', 'R', 'G', 'B' };
+    snprintf(s, n, "ID;PWXL;N;E\nC;X1;Y1;K\"waterID\"\nC;X2;K\"texFile\"\nC;X3;K\"numTex\"\nC;X4;K\"texRate\"\nC;X5;K\"height\"\n");
+    for (int c = 0; c < 16; ++c) {
+        char cell[40];
+        snprintf(cell, sizeof cell, "C;X%d;K\"%s%c\"\n", 6 + c, G[c / 4], CH[c % 4]);
+        strncat(s, cell, n - strlen(s) - 1);
+    }
+}
+/* one row: `file` and `ntex` left out when NULL, Smin_R given as `smin_r`
+ * when not NULL; the colours (RGBA) shallow (10, 20, 30, 100) to (74, 84,
+ * 94, 164), deep (200, 150, 100, 200) to (0, 50, 100, 255) */
+static void t_water_row(char *s, size_t n, int y, const char *id, const char *file, const char *ntex, const char *smin_r)
+{
+    static const int C[16] = { 100, 10, 20, 30, 164, 74, 84, 94, 200, 200, 150, 100, 255, 0, 50, 100 };
+    char row[1200];
+    size_t at = (size_t)snprintf(row, sizeof row, "C;X1;Y%d;K\"%s\"\n", y, id);
+    if (file) at += (size_t)snprintf(row + at, sizeof row - at, "C;X2;K\"%s\"\n", file);
+    if (ntex) at += (size_t)snprintf(row + at, sizeof row - at, "C;X3;K%s\n", ntex);
+    at += (size_t)snprintf(row + at, sizeof row - at, "C;X4;K2\nC;X5;K-0.7\n");
+    for (int c = 0; c < 16; ++c) {
+        if (c == 1 && smin_r) at += (size_t)snprintf(row + at, sizeof row - at, "C;X%d;K%s\n", 6 + c, smin_r);
+        else at += (size_t)snprintf(row + at, sizeof row - at, "C;X%d;K%d\n", 6 + c, C[c]);
+    }
+    strncat(s, row, n - strlen(s) - 1);
+}
+/* a made frame: 4 x 4, red f x 50 */
+static unsigned char *t_water_frame(int f, size_t *len)
+{
+    unsigned char px[64];
+    for (int i = 0; i < 16; ++i) { px[i * 4] = (unsigned char)(f * 50); px[i * 4 + 1] = 0; px[i * 4 + 2] = 0; px[i * 4 + 3] = 255; }
+    return t_blp2(4, 4, px, len);
+}
+static int t_rgba_is(const uint8_t a[4], int r, int g, int b, int al) { return a[0] == r && a[1] == g && a[2] == b && a[3] == al; }
+/* WC3's colour rule worked out here: the RGBA at depth d (cells) */
+static void t_water_rule(double d, int out[4])
+{
+    static const int SMIN[4] = { 10, 20, 30, 100 }, SMAX[4] = { 74, 84, 94, 164 }, DMIN[4] = { 200, 150, 100, 200 }, DMAX[4] = { 0, 50, 100, 255 };
+    const int *lo = SMIN, *hi = SMAX;
+    double f;
+    if (d * 128 <= 64) f = d * 128 < 10 ? 0 : (d * 128 - 10) / 54;
+    else { lo = DMIN; hi = DMAX; f = d * 128 >= 72 ? 1 : (d * 128 - 64) / 8; }
+    for (int c = 0; c < 4; ++c) out[c] = (int)floor(lo[c] + (hi[c] - lo[c]) * f + 0.5);
+}
+
+static void wc3_water_tests(const char *dir, const char *build)
+{
+    char root[400], folder[520], path[900], line[1000];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-wc3-water", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the water's fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the colour rule, from the sheet's colours */
+    {
+        Wc3WaterKind k = { .shallow_min = { 10, 20, 30, 100 }, .shallow_max = { 74, 84, 94, 164 }, .deep_min = { 200, 150, 100, 200 }, .deep_max = { 0, 50, 100, 255 } };
+        uint8_t c[6][4];
+        wc3_water_colour(&k, 0, c[0]);
+        wc3_water_colour(&k, 10.0 / 128, c[1]);
+        wc3_water_colour(&k, 37.0 / 128, c[2]);
+        wc3_water_colour(&k, 64.0 / 128, c[3]);
+        wc3_water_colour(&k, 66.0 / 128, c[4]);
+        wc3_water_colour(&k, 68.0 / 128, c[5]);
+        check(t_rgba_is(c[0], 10, 20, 30, 100) && t_rgba_is(c[1], 10, 20, 30, 100) && t_rgba_is(c[2], 42, 52, 62, 132) && t_rgba_is(c[3], 74, 84, 94, 164),
+              "WC3's water colour: shallow from its least (10/128 of a cell deep and less) to its most at 64/128, halfway at 37/128");
+        uint8_t d[2][4];
+        wc3_water_colour(&k, 72.0 / 128, d[0]);
+        wc3_water_colour(&k, 5, d[1]);
+        check(t_rgba_is(c[4], 150, 125, 100, 214) && t_rgba_is(c[5], 100, 100, 100, 228) && t_rgba_is(d[0], 0, 50, 100, 255) && t_rgba_is(d[1], 0, 50, 100, 255),
+              "past 64/128 deep, from its least to its most at 72/128 (a quarter at 66/128, half at 68/128), its most beyond");
+    }
+    /* }}} */
+
+    /* {{{ a made map's water with a made install */
+    {
+        /* the install: the sheet (L's row good; A's frames past the third
+         * missing; B's numTex 0; C's Smin_R 300; D's texFile missing) and
+         * three frames; the map's folder has its own second frame */
+        char sheet[12000];
+        t_water_head(sheet, sizeof sheet);
+        t_water_row(sheet, sizeof sheet, 2, "LSha", "ReplaceableTextures\\Water\\Water", "3", NULL);
+        t_water_row(sheet, sizeof sheet, 3, "ASha", "ReplaceableTextures\\Water\\Water", "4", NULL);
+        t_water_row(sheet, sizeof sheet, 4, "BSha", "ReplaceableTextures\\Water\\Water", "0", NULL);
+        t_water_row(sheet, sizeof sheet, 5, "CSha", "ReplaceableTextures\\Water\\Water", "3", "300");
+        t_water_row(sheet, sizeof sheet, 6, "DSha", NULL, "3", NULL);
+        strncat(sheet, "E\n", sizeof sheet - strlen(sheet) - 1);
+        const char *names[4] = { "TerrainArt\\Water.slk", "ReplaceableTextures\\Water\\Water00.blp", "ReplaceableTextures\\Water\\Water01.blp", "ReplaceableTextures\\Water\\Water02.blp" };
+        const char *bytes[4] = { sheet };
+        size_t lens[4] = { strlen(sheet) };
+        for (int f = 0; f < 3; ++f) bytes[f + 1] = (const char *)t_water_frame(f, &lens[f + 1]);
+        snprintf(folder, sizeof folder, "%s/install", root);
+        t_mkdirs(folder);
+        snprintf(path, sizeof path, "%s/war3.mpq", folder);
+        t_write_mpq_n(path, names, bytes, lens, 4);
+        for (int f = 1; f < 4; ++f) free((void *)bytes[f]);
+        char map[520];
+        snprintf(map, sizeof map, "%s/map", root);
+        size_t flen;
+        unsigned char *own = t_water_frame(4, &flen);
+        t_write(map, "ReplaceableTextures/Water/Water01.blp", own, flen);
+        free(own);
+        /* the map: 4 x 2 points, its water at 217.5 stored (127.9 drawn);
+         * point 0 dry, 1 marked but its ground above the water, 2 to 7 wet
+         * 7.9, 27.9, 63.9, 67.9, 227.9 and (a level down) 255.9 units deep */
+        static const int H[8] = { 0, 200, 120, 100, 64, 60, -100, 0 };
+        const unsigned water = 9062;
+        W3eOut o = { 0 };
+        W3eGround *g[2] = { NULL, NULL };
+        for (int v = 0; v < 2; ++v) {
+            w3e_head(&o, 11, v ? 'Z' : 'L', "Ldrt", "CLdi", 4, 2, 0.0f, 0.0f);
+            for (int p = 0; p < 8; ++p) w3e_pt(&o, 8192 + 4 * H[p], water, 0, p ? 0x40 : 0, 0, 0, p == 7 ? 1 : 2, 15);
+            e = w3e_read(o.b, o.n, &g[v], &why);
+            check(!e, e ? why.text : "the made map's ground reads");
+        }
+        free(o.b);
+        ResolverPlace place = { .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", map);
+        place.noverlays = 1;
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        if (!g[0] || !g[1]) goto made_done;
+        e = resolver_open(&place, &r, &why);
+        check(!e, e ? why.text : "a resolver with the map's folder and the made install opens");
+        if (e) goto made_done;
+        Wc3Water *w = NULL;
+        e = wc3_water_open(r, NULL, g[0], &w, &why);
+        check(!e, e ? why.text : "the map's WC3 water opens");
+        if (!e) {
+            const Wc3WaterKind *k = wc3_water_kind(w);
+            check(!strcmp(k->row, "LSha") && !strcmp(k->tex_file, "ReplaceableTextures\\Water\\Water") && k->frames == 3 && k->rate == 2 && fabs(k->height + 0.7) < 1e-9
+                  && t_rgba_is(k->shallow_min, 10, 20, 30, 100) && t_rgba_is(k->shallow_max, 74, 84, 94, 164) && t_rgba_is(k->deep_min, 200, 150, 100, 200) && t_rgba_is(k->deep_max, 0, 50, 100, 255),
+                  "its row by its tileset's letter and Sha (LSha): its frames' path, three frames, two a second, its height, the colours read alpha first into RGBA");
+            const Wc3WaterFrame *f0 = wc3_water_frame(w, 0), *f1 = wc3_water_frame(w, 1), *f2 = wc3_water_frame(w, 2);
+            check(f0 && f1 && f2 && !wc3_water_frame(w, 3) && !wc3_water_frame(w, -1)
+                  && !strcmp(f0->path, "ReplaceableTextures\\Water\\Water00.blp") && !strcmp(f2->path, "ReplaceableTextures\\Water\\Water02.blp")
+                  && f0->source == ASSET_FROM_BLIZZARD && f2->source == ASSET_FROM_BLIZZARD && f1->source == ASSET_FROM_OVERLAY
+                  && f0->width == 4 && f0->height == 4 && f0->rgba[0] == 0 && f1->rgba[0] == 200 && f2->rgba[0] == 100,
+                  "its frames Water00 to Water02, through the resolver: the map's own second frame before the install's");
+            check(wc3_water_frame_at(w, 0) == 0 && wc3_water_frame_at(w, 0.49) == 0 && wc3_water_frame_at(w, 0.5) == 1 && wc3_water_frame_at(w, 1) == 2
+                  && wc3_water_frame_at(w, 1.5) == 0 && wc3_water_frame_at(w, -1) == 0 && wc3_water_frame_at(w, 100.2) == 2,
+                  "the frame shown: two a second, round the three, 0 before the start");
+            Wc3WaterCounts n = wc3_water_counts(w);
+            static const double D[8] = { 0, 0, 7.9, 27.9, 63.9, 67.9, 227.9, 255.9 };
+            int points_ok = 1;
+            for (int p = 0; p < 8; ++p) {
+                double d = -1;
+                uint8_t c[4];
+                int wet = wc3_water_point(w, p % 4, p / 4, &d, c), ex[4];
+                if (p < 2) { points_ok &= !wet; continue; }
+                t_water_rule(D[p] / 128, ex);
+                points_ok &= wet && fabs(d - D[p] / 128) < 1e-6 && t_rgba_is(c, ex[0], ex[1], ex[2], ex[3]);
+            }
+            points_ok &= !wc3_water_point(w, 4, 0, NULL, NULL) && !wc3_water_point(w, 0, 2, NULL, NULL) && !wc3_water_point(w, -1, 0, NULL, NULL);
+            check(points_ok, "each point: dry, or its ground above the water, not wet; each wet one its depth (the drawn surface less its ground, a level down counted) and its colour by the rule; outside the grid none");
+            snprintf(line, sizeof line, "the map's points: %d wet, %d shallow, %d deep, the deepest %.4f cells", n.wet, n.shallow, n.deep, n.deepest);
+            check(n.wet == 6 && n.shallow == 3 && n.deep == 3 && fabs(n.deepest - 255.9 / 128) < 1e-6, line);
+            wc3_water_free(w);
+        }
+        /* the refusals: the converter's water stays */
+        e = wc3_water_open(NULL, NULL, g[0], &w, &why);
+        check(e == W_ERR_NOT_FOUND && !w, "no resolver: not found");
+        e = wc3_water_open(r, NULL, g[1], &w, &why);
+        check(e == W_ERR_NOT_FOUND && !w && strstr(why.text, "no row ZSha"), e ? why.text : "a tileset with no row: opened");
+        static const struct { char code; WErr want; const char *says; } BAD[4] = {
+            { 'A', W_ERR_NOT_FOUND, "Water03.blp is in no place" }, { 'B', W_ERR_CORRUPT, "numTex" }, { 'C', W_ERR_CORRUPT, "Smin_R is 300" }, { 'D', W_ERR_CORRUPT, "texFile is empty" } };
+        int bad_ok = 1;
+        for (int b = 0; b < 4; ++b) {
+            g[0]->tileset_code = BAD[b].code;
+            e = wc3_water_open(r, NULL, g[0], &w, &why);
+            bad_ok &= e == BAD[b].want && !w && strstr(why.text, BAD[b].says) != NULL;
+            if (!e) wc3_water_free(w);
+        }
+        check(bad_ok, "a frame no place has: not found, naming it; numTex 0, a colour past 255, no texFile: refused as broken, naming the column");
+        resolver_free(r);
+        r = NULL;
+        /* no install: not found */
+        place.wc3[0] = '\0';
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            e = wc3_water_open(r, NULL, g[0], &w, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "Water.slk"), "no Warcraft III install: not found (no Water.slk), so the converter's water stays");
+            resolver_free(r);
+            r = NULL;
+        }
+    made_done:
+        w3e_free(g[0]); w3e_free(g[1]);
+        fclose(place.log); free(log);
+    }
+    /* }}} */
+
+    /* {{{ the converter's real output, when its build carries war3map.w3e */
+    {
+        snprintf(path, sizeof path, "%s/war3map.w3e", build);
+        FILE *f = fopen(path, "rb");
+        if (!f) { printf("  (no war3map.w3e in %s: its water checks are skipped)\n", build); return; }
+        fseek(f, 0, SEEK_END);
+        size_t wl = (size_t)ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *wb = malloc(wl);
+        if (fread(wb, 1, wl, f) != wl) wl = 0;
+        fclose(f);
+        W3eGround *g = NULL;
+        e = w3e_read(wb, wl, &g, &why);
+        free(wb);
+        check(!e, e ? why.text : "its war3map.w3e reads");
+        if (e) return;
+        /* an install made for it: its tileset's row, three frames */
+        char sheet[4000], id[8];
+        t_water_head(sheet, sizeof sheet);
+        snprintf(id, sizeof id, "%cSha", g->tileset_code);
+        t_water_row(sheet, sizeof sheet, 2, id, "ReplaceableTextures\\Water\\Water", "3", NULL);
+        strncat(sheet, "E\n", sizeof sheet - strlen(sheet) - 1);
+        const char *names[4] = { "TerrainArt\\Water.slk", "ReplaceableTextures\\Water\\Water00.blp", "ReplaceableTextures\\Water\\Water01.blp", "ReplaceableTextures\\Water\\Water02.blp" };
+        const char *bytes[4] = { sheet };
+        size_t lens[4] = { strlen(sheet) };
+        for (int k = 0; k < 3; ++k) bytes[k + 1] = (const char *)t_water_frame(k, &lens[k + 1]);
+        snprintf(folder, sizeof folder, "%s/install-real", root);
+        t_mkdirs(folder);
+        snprintf(path, sizeof path, "%s/war3.mpq", folder);
+        t_write_mpq_n(path, names, bytes, lens, 4);
+        for (int k = 1; k < 4; ++k) free((void *)bytes[k]);
+        ResolverPlace place = { .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+        place.noverlays = 1;
+        snprintf(place.wc3, sizeof place.wc3, "%s", folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        Wc3Water *w = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) e = wc3_water_open(r, NULL, g, &w, &why);
+        check(!e, e ? why.text : "the converted map's WC3 water opens, its row by its tileset");
+        if (!e) {
+            /* each point worked out here from its stored numbers */
+            int wet = 0, shallow = 0, deep = 0, wrong = 0;
+            double deepest = 0;
+            for (int j = 0; j < g->height; ++j)
+                for (int i = 0; i < g->width; ++i) {
+                    const W3ePoint *p = &g->points[(size_t)j * g->width + i];
+                    double wz = p->water_level - 89.6, gz = p->height + (p->layer_height - 2) * 128.0, dd = (wz - gz) / 128;
+                    int is = p->has_water && wz > gz, ex[4];
+                    double d = -1;
+                    uint8_t c[4];
+                    int got = wc3_water_point(w, i, j, &d, c);
+                    if (got != is) { ++wrong; continue; }
+                    if (!is) continue;
+                    ++wet;
+                    if (dd * 128 <= 64) ++shallow; else ++deep;
+                    if (dd > deepest) deepest = dd;
+                    t_water_rule(dd, ex);
+                    wrong += fabs(d - dd) > 1e-9 || abs(c[0] - ex[0]) > 1 || abs(c[1] - ex[1]) > 1 || abs(c[2] - ex[2]) > 1 || abs(c[3] - ex[3]) > 1;
+                }
+            Wc3WaterCounts n = wc3_water_counts(w);
+            snprintf(line, sizeof line, "its %d wet points (%d shallow, %d deep, the deepest %.2f cells) each its depth and colour by WC3's rule, worked out here from the stored numbers (%d wrong)",
+                     wet, shallow, deep, deepest, wrong);
+            check(wet > 0 && !wrong && n.wet == wet && n.shallow == shallow && n.deep == deep && fabs(n.deepest - deepest) < 1e-9, line);
+            wc3_water_free(w);
+        }
         if (r) resolver_free(r);
         fclose(place.log); free(log);
         w3e_free(g);
@@ -3555,6 +3931,18 @@ int main(int argc, char **argv)
         if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
         else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
         wc3_cliff_tests(dir, build);
+    }
+    /* }}} */
+
+    /* {{{ a converted map's water as WC3 draws it (1109 step 1h): folders
+     * and archives made here, and the converter's output when it carries
+     * war3map.w3e; no game data, so before the archives */
+    printf("a converted map's water as Warcraft III draws it\n");
+    {
+        char build[700];
+        if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        wc3_water_tests(dir, build);
     }
     /* }}} */
 
