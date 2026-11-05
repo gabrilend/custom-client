@@ -274,3 +274,15 @@ strength, though nothing reads the weather yet. The second fog mode's
 curve, zone and override lights and the indoor fog blend are left,
 with reasons. The test program's output is line buffered, so a warning
 no longer lands inside a check's line. Decisions 151 to 156 in 1109.
+
+2026-11-05: 1109's step 1v, the weather and a building's fogs.
+`099-weather.c` reads the server's weather message (its layout from
+memory, refused when the length doesn't fit) and eases a storm's
+strength from the old weather to the new over ten seconds, which the
+light lays its storm colours and fog over by. Until the client talks to
+a server, `--weather` and a moves file give it, and the run with no
+window counts it in the receipt. A building's fogs and each part's fog
+numbers are read, and the outdoor fog can blend into a part's own over
+its first 25 yards; which fog applies and whether the eye is inside are
+not in the notes, so nothing uses that blend yet. Decisions 157 to 163
+in 1109.

@@ -157,8 +157,9 @@ int  light_at(const LightTables *t, int map, float x, float y, float z, float ho
 /* light_at in a storm of strength `storm`, 0 (none: light_at's) to 1:
  * each light's storm set (Light's field 10, under water 11) laid over its
  * set by that share, where it names one (306's notes: the original's;
- * 1109 decision 154). Nothing here reads the weather yet: 043 and 089
- * pass 0. */
+ * 1109 decision 154). 043 and 089 pass 099's eased strength (the
+ * weather from --weather or a moves file until there is network code;
+ * 1109 step 1v). */
 int  light_at_weather(const LightTables *t, int map, float x, float y, float z, float hours, int kind, float storm, LightNow *out);
 
 /* Indoors (306's notes: the original's): the outdoor fog in `l` blends

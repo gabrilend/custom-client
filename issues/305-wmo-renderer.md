@@ -11,6 +11,17 @@ models (M2) the same way; copies outside the camera's sight not drawn.
 Not built: portal culling inside buildings; pieces sharing a picture
 merged (docs/047, item 2b).
 
+Fog (1109 step 1v, `src/021-wmo.c`): the root's MFOG fogs (each a
+sphere with two radii and a fog in and under water) and each group's
+four fog numbers (MOGP + 48) and bounding box (MOGP + 12) are read, the
+layout recalled and unchecked (no 3.3.5a building is here, and the
+converter writes none); `wmo_group_depth` says how far a point is
+inside a group's box. 026's `light_indoor_fog` blends the outdoor fog
+into a group's own (306). Not built: which of a group's four fogs
+applies at a point, and whether the eye is inside a group by its own
+shape rather than its box (this issue's portal walk, step 1); until
+then nothing calls the blend (1109 decision 163).
+
 ## Intended behavior
 
 A renderer that draws each WMO as a collection of grouped meshes, with
