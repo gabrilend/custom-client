@@ -157,9 +157,11 @@ round.
   not opened by it yet), and over any map saved by Reforged's editor;
   then mark world-edit-to-execute's `w3e.lua` deprecated there (its
   `docs/wow-client-bridge.md` table could gain a row for this step).
-- **Which tilesets are extended** needs their pictures: the path of each
-  comes from `TerrainArt\Terrain.slk` (the Lua's `ground.path`), and the
-  client has no SLK reader yet. Until then a caller says.
+- ~~**Which tilesets are extended** needs their pictures~~ answered by
+  1109's step 1d (2026-11-05): `src/077-slk.c` reads
+  `TerrainArt\Terrain.slk`, and `src/078-wc3-ground.c` finds each
+  tileset's picture through the resolver and tells `w3e_prep` which are
+  twice as wide as high. Still unchecked against a real install.
 - **The corner bits' orientation** (south-east 1, south-west 2,
   north-east 4, north-west 8) is checked in the Lua only against its own
   stand-ins; if stock tiles show their blends mirrored once drawn (302),

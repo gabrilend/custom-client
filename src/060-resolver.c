@@ -31,6 +31,9 @@ struct Resolver {
     Loose          server[RESOLVER_FOLDERS_MAX];  int nserver;
     Loose          overlays[RESOLVER_FOLDERS_MAX]; int noverlays;
     MpqChain      *chain;
+    MpqChain       wc3;               /* the player's Warcraft III archives, when has_wc3 (the resolver's own) */
+    int            has_wc3;
+    char           wc3_folder[600];
     int            strict;
     double         distinctness;
     FILE          *log;
@@ -213,6 +216,8 @@ WErr resolver_place_from_settings(const Settings *st, const char *assets_dir, Mp
     snprintf(under, sizeof under, "%s/overlays", assets_dir);
     if ((rc = split_names(settings_text(st, "assetOverlays"), under, out->overlays, &out->noverlays, "assetOverlays", why))) return rc;
     out->chain = chain;
+    const char *wc3 = settings_text(st, "assetWc3");
+    if (wc3[0] && assets_dir[0]) snprintf(out->wc3, sizeof out->wc3, "%s/%s", assets_dir, wc3);
     out->strict = (int)settings_num(st, "assetsStrict");
     out->distinctness = settings_num(st, "assetsDistinctness");
     return W_OK;
@@ -231,6 +236,7 @@ void resolver_free(Resolver *r)
     }
     for (int i = 0; i < r->nserver; ++i) fs_index_free(r->server[i].ix);
     for (int i = 0; i < r->noverlays; ++i) fs_index_free(r->overlays[i].ix);
+    if (r->has_wc3) mpq_chain_close(&r->wc3);
     for (size_t i = 0; i < r->seen_cap; ++i) free(r->seen[i]);
     free(r->seen);
     free(r->checker); free(r->box); free(r->box_skin); free(r->beep);
@@ -320,6 +326,19 @@ WErr resolver_open(const ResolverPlace *place, Resolver **out, WWhy *why)
             if (rc == W_ERR_NOT_FOUND) rc = w_fail(why, rc, "the %s folder %s is not there", k ? "overlay" : "server's assets", folder);
         }
     }
+    /* the player's Warcraft III install, if they plugged it in: a folder
+     * with none of its archives is said and left out (most players have
+     * none); an archive there that can't be read stops the start by name */
+    if (!rc && place->wc3[0]) {
+        WWhy inner;
+        WErr w = mpq_chain_open_wc3(&r->wc3, place->wc3, &inner);
+        if (w == W_OK) {
+            r->has_wc3 = 1;
+            snprintf(r->wc3_folder, sizeof r->wc3_folder, "%s", place->wc3);
+            fprintf(r->log, "assets: Warcraft III's own archives from %s (%d), after the game's\n", place->wc3, r->wc3.count);
+        } else if (w == W_ERR_NOT_FOUND) fprintf(r->log, "assets: %s; a converted map's Warcraft III pictures and models stand in\n", inner.text);
+        else rc = w_fail(why, w, "the Warcraft III install (assetWc3): %s", inner.text);
+    }
     if (rc) { resolver_free(r); return rc; }
     r->seen_cap = 256;
     r->seen = calloc(r->seen_cap, sizeof *r->seen);
@@ -403,7 +422,8 @@ static WErr stand_in_for(Resolver *r, const char *logical, const char *key, Asse
     count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
     char where[200];
     snprintf(where, sizeof where, "%d pack%s, %d server folder%s, %d overlay%s%s", r->npacks, r->npacks == 1 ? "" : "s",
-             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s", r->chain ? " or the archives" : ", no archives open");
+             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s",
+             r->chain ? (r->has_wc3 ? ", the archives or Warcraft III's" : " or the archives") : (r->has_wc3 ? " or Warcraft III's archives" : ", no archives open"));
     if (r->strict) {
         fprintf(r->log, "assets: ERROR: the %s %s is in none of %s; strict mode (assetsStrict) refuses a placeholder\n", kname, logical, where);
         return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of %s, and strict mode refuses a placeholder", kname, logical, where);
@@ -476,14 +496,17 @@ static WErr resolve(Resolver *r, const char *logical, AssetKind kind, int stand_
             return W_OK;
         }
     }
-    /* 4. the archives (their names take backslashes; case doesn't matter to them) */
-    if (r->chain) {
+    /* 4. the player's Blizzard install: the game's archives, then Warcraft
+     * III's (their names take backslashes; case doesn't matter to them) */
+    for (int k = 0; k < 2; ++k) {
+        MpqChain *ch = k ? (r->has_wc3 ? &r->wc3 : NULL) : r->chain;
+        if (!ch) continue;
         char name[1024];
         snprintf(name, sizeof name, "%s", key);
         for (char *c = name; *c; ++c) if (*c == '/') *c = '\\';
         const char *from = NULL;
         size_t len = 0;
-        unsigned char *got = mpq_chain_read(r->chain, name, &len, &from);
+        unsigned char *got = mpq_chain_read(ch, name, &len, &from);
         if (got) {
             count(r, kind, key, ASSET_FROM_BLIZZARD, NULL);
             out->data = got;
@@ -510,6 +533,10 @@ WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswe
     if (!logical || fs_normalise(logical, key, sizeof key)) return w_fail(why, W_ERR_REFUSED, "asked for a %s with an empty or too long name", asset_kind_name(kind));
     return stand_in_for(r, logical, key, kind, 1, out, why);
 }
+/* }}} */
+
+/* {{{ resolver_wc3 */
+const char *resolver_wc3(const Resolver *r) { return r && r->has_wc3 ? r->wc3_folder : NULL; }
 /* }}} */
 
 /* {{{ asset_get: the resolver's answer, a placeholder included, when there is one; else the archives alone */
@@ -562,13 +589,15 @@ WErr asset_resolve_all(Resolver *r, const char *logical, AssetKind kind, AssetAn
             ++*n;
         }
     }
-    if (r->chain) {
+    for (int k = 0; k < 2; ++k) {
+        MpqChain *ch = k ? (r->has_wc3 ? &r->wc3 : NULL) : r->chain;
+        if (!ch) continue;
         char name[1024];
         snprintf(name, sizeof name, "%s", key);
         for (char *c = name; *c; ++c) if (*c == '/') *c = '\\';
         const char *from = NULL;
         size_t len = 0;
-        unsigned char *got = mpq_chain_read(r->chain, name, &len, &from);
+        unsigned char *got = mpq_chain_read(ch, name, &len, &from);
         if (got) {
             if (*n == most) { free(got); rc = w_fail(why, W_ERR_FULL, "%s is in more than %d places", logical, most); goto done; }
             memset(&out[*n], 0, sizeof out[*n]);

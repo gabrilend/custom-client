@@ -264,17 +264,95 @@ against stand-in headers. A window has not been opened: what a
 converted map looks like is for `scripts/build --test` and a Test Map
 run on the owner's machine.
 
-Not built yet: the map's ground drawn with WC3's tilesets (302: the
-ADTs are drawn as any ADT, their pictures through the resolver, so the
-checker until a tileset is a place); WC3's own pictures (175 of War in
-the Plaguelands' 269), which need the player's WC3 archives as a place
-(105a); a WC3 model posed and animated (it stands in its rest pose; 402
-step 4, PR #7), with its particles (403) and solid shape, or
-team-coloured (404: its replaceable pictures are left off); 034's
-prefetch, 040's water and 041's game models through the resolver (they
-read the archives alone); a missing table row as a placeholder (106
-wants one: still an error naming the table and row); logging in, and
-the `lost-connection` ending (Phase 5's 609).
+**Step 1d is built** (2026-11-05, the same background work): the
+player's own Warcraft III install is a place the resolver asks, and a
+converted map's ground is painted with WC3's own tilesets when the
+player has them. Decisions 32 to 41.
+
+- **The install** (`015`'s `mpq_chain_open_wc3`, 060): War3Patch.mpq,
+  War3xLocal.mpq, War3x.mpq, War3Local.mpq and war3.mpq, newest first,
+  found in a folder without regard to capitals and read by the client's
+  own archive reader, are asked after the game's own archives and
+  before the placeholder, as world-edit-to-execute's
+  `docs/wow-client-bridge.md` orders it (2026-11-04: "the player's
+  packs, the server's files, the player's own Blizzard install if they
+  plugged it in, the baseline set, and only then the wire-frame"). The
+  folder is the new setting `assetWc3` (014): one folder name under the
+  profile's assets, default `wc3`, so `assets/wc3` holding the archives
+  or linking to the install (decision 33). A folder that isn't there,
+  or holds none of them, is said in the resolver's log and left out; an
+  archive there that can't be read stops the start, naming the setting.
+  So on a machine with WC3, a converted map's own WC3 models can find
+  the stock pictures they name (175 of War in the Plaguelands' 269 are
+  the checker without it) there; not checked here, with no install.
+- **`src/077-slk.c`** (reader library): WC3's SYLK sheets, the C twin of
+  world-edit-to-execute's `slk.lua`, for `TerrainArt\Terrain.slk` (each
+  tileset's folder and file).
+- **PR #3's `063-w3e`** is merged into this branch (decision 34).
+- **`src/078-wc3-ground.c`** reads the map's `war3map.w3e` (from the
+  build folder's root: the converter doesn't copy it there yet,
+  decision 35), the sheet and every tileset picture through the
+  resolver, and prepares the ground with 063. Painting a tile: each
+  chunk's 64 cells found in the WC3 grid by map.lua's rule; the chunk's
+  four most-used tilesets, drawn lowest number first; each higher
+  layer's strength full where it is a cell's lowest kept tileset, its
+  subtile's alpha where it is a higher one; each layer's picture its
+  tileset's whole tile (decisions 36 to 39). 033 asks it for every tile
+  when it is set and unpacks a WC3 layer's picture by its name, and 038
+  draws the chunks as any chunk, with its own shader: no ground shader
+  was needed (decision 36). 043 opens it in a test-map run and says
+  what it did, or why the converter's pictures stay.
+
+Checked (`tests/044-test-client.c`, "Warcraft III's own install, and a
+converted map's ground with WC3's tilesets", before the archives): the
+sheet (cells that leave their row or column out, a row named twice,
+`;;`, refusals); the install's archives found by any capitals, the
+patch first, an empty or missing folder; the install as a place after
+the game's archives (a name both have is the game's, one only WC3 has
+is WC3's patch's, every copy in order, the checker's warning naming
+both), the setting's default, its refusals, a missing folder said, a
+broken archive refused; a made map (17 x 9 tile points, a blighted
+point, a cliff) and a made install: its tilesets, the extended one, one
+missing from the sheet as the checker, a layer's whole tile, world
+places to cells; a made tile painted: the two chunks on the grid only,
+chunk 0 (four tilesets) exactly as WC3 lays it at all 4096 blend points
+(made pictures whose subtiles' alpha covers exactly their corners, so
+WC3's laying gives each quarter of a cell its corner's tileset), chunk
+1 (five) folded; 033 giving a layer's name its whole tile; no install,
+no `war3map.w3e`, no resolver each said. With the converter's real
+output and its map's `war3map.w3e` copied into the build (as the
+converter should: decision 35), and an install made for its tilesets:
+
+- **War in the Plaguelands**: 257 x 193 tile points, 16 tilesets; its 4
+  ADT tiles prepared through 033: 768 chunks painted, 256 off the WC3
+  grid keeping the converter's pictures. Every one of its 49152 WC3
+  cells lies in exactly one chunk cell, centre on centre (within 0.0001
+  of a cell). In chunks of four tilesets or fewer every blend point is
+  as WC3 lays it (962560 of 962560); over all chunks 90.4%, the rest in
+  chunks of more than four, folded.
+- **Master Crafters Final Conquest**: 257 x 257, 10 tilesets; all 1024
+  chunks painted, all 65536 cells one to one, 4046848 of 4046848 blend
+  points in chunks of four or fewer, 99.8% over all.
+
+No memory errors under the address and undefined-behaviour checkers;
+every drawing part, 043 and 058 compile with `-Werror` under gcc and
+clang against stand-in headers. Not checked here: a real WC3 install
+(none on this machine: its archives, its `Terrain.slk` and its tileset
+pictures are made in the test), and a window.
+
+Not built yet: WC3's cliffs (models seated on the mesh, 302) and blight
+(cliff and blighted cells are laid whole with their south-west
+tileset); a tileset's variations (one whole tile each); more than four
+tilesets in a chunk (folded: a shader taking a chunk's own tileset
+list, or a fifth layer, would lift it: decision 37); WC3's water; a WC3
+model posed and animated (it stands in its rest pose; 402 step 4, PR
+#7), with its particles (403) and solid shape, or team-coloured (404:
+its replaceable pictures are left off); 034's prefetch, 040's water and
+041's game models through the resolver (they read the archives alone);
+the baseline model set as a place (it doesn't exist yet: decision 32);
+a missing table row as a placeholder (106 wants one: still an error
+naming the table and row); logging in, and the `lost-connection` ending
+(Phase 5's 609).
 
 ## Intended behavior
 
@@ -403,6 +481,10 @@ return {
    resolver.~~ Done (2026-11-05): 076, the resolver's `asset_get` and
    `asset_stand_in`, 042 and 033 asking through them (decisions 20 to
    31).
+1d. ~~The player's own WC3 install as a place, and the map's ground in
+   WC3's tilesets.~~ Done (2026-11-05): `assetWc3`, 015's WC3 chain,
+   077, 078, PR #3's 063 merged (decisions 32 to 41). Cliffs, blight,
+   variations and more than four tilesets a chunk are next (302).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -578,6 +660,62 @@ return {
     step 1b's did; with no build folder those checks are skipped, and
     the made folder's checks still run.
 
+## Decisions (2026-11-05, step 1d, answered here; the owner may overturn any)
+
+32. **The WC3 install is the Blizzard install's second half**, asked
+    after the game's own archives (a name both hold is the game's: the
+    game this client is), under the same place name ("blizzard"; an
+    answer's `from` names the archive). The bridge's order is kept:
+    packs, the server's files (and overlays, the test map's stand-in for
+    them), the player's Blizzard install, then the placeholder. The
+    baseline set has no place until the asset forge makes it; it goes
+    between the install and the placeholder.
+33. **Where the install is: `assetWc3`**, a setting row beside the
+    resolver's others, holding one folder name under the profile's
+    assets (default `wc3`), not a path: the other rows name folders, not
+    paths, so a profile's settings never point outside its assets, and
+    a value holds 63 characters. The player links `assets/wc3` to their
+    install (as `assets/server-data` links to the server's). Missing:
+    said once and left out, since most players have none. Reforged's
+    CASC storage isn't read (no archive of these names).
+34. **PR #3 merged here with a merge commit**, as decision 19 did for
+    PR #2: this branch needs `w3e_read` and `w3e_prep`. Until #3 lands,
+    this branch's diff shows its files too.
+35. **The map's own ground comes from `war3map.w3e` at the build
+    folder's root.** The converter doesn't copy it there yet, and
+    `map.lua` names no source map (only `conversion-report.lua` does,
+    as a path relative to where the converter ran, which the client
+    can't rely on). What world-edit-to-execute's W02 should add: the map
+    archive's `war3map.w3e`, byte for byte, written to the build
+    folder's root (and, if it wants to say so, a `wc3 = { ground =
+    "war3map.w3e" }` field in `map.lua`, which this reader would then
+    follow). Until then the tests copy it in, and a real run keeps the
+    converter's pictures, saying why.
+36. **No ground shader.** One WC3 cell is one cell of a chunk and the
+    ground's pictures already repeat once a cell, so WC3's laying fits
+    038's four layers and blend picture: 033 hands it different picture
+    names and strengths, and 038 is unchanged.
+37. **Four tilesets a chunk, the four used most.** 038 draws four layers
+    a chunk; where a chunk's cells use more (common in War in the
+    Plaguelands: 90.4% of its points are as WC3 lays them), a cell's
+    dropped lowest lets its next kept tileset lie whole and a dropped
+    higher one is left out. Lifting it is a shader's job (302).
+38. **One picture a tileset: its whole tile**, with the subtiles' alpha
+    for the blends. WC3's 16 variations and its subtiles' own colours
+    wait for that shader. Masks are read at the blend picture's 8
+    points a cell side.
+39. **Cliffs and blight are laid whole** with the cell's south-west
+    point's tileset (063 leaves them bare for the renderer) until
+    cliff models are seated (302) and blight is drawn.
+40. **WC3's tilesets only when the player has them.** With no
+    `Terrain.slk` in any place, the converter's own pictures (the game's
+    tilesets it picked) stay: a player without WC3 sees what they saw
+    before rather than a checkered ground. A tileset the sheet lacks,
+    or whose picture no place has, is the checker (said).
+41. **077 is a reader library part** (the C twin of `slk.lua`), so
+    world-edit-to-execute can call it through the FFI once it is held to
+    the Lua's results over the stock sheets (on the owner's machine).
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -651,6 +789,12 @@ return {
    a building (WMO) yet, so neither real conversion has a MODF entry:
    buildings are checked only with files made in the test. The first
    map that places one is the check.
+8. **The corner bits on real tilesets.** 063 and the Lua read a
+   subtile's number as south-east 1, south-west 2, north-east 4,
+   north-west 8 (302a's open item); 078 lays the subtile with north at
+   the top of the picture. Checked only on made pictures drawn by the
+   same rule: on the owner's machine with WC3, a converted map's
+   blends mirrored would mean that one table changes.
 
 ## Related
 
@@ -665,6 +809,9 @@ return {
   `src/075-adt-heights.info.md` (heights from the ADTs).
   For step 1c: `src/076-placed-models.info.md` (a placed model's
   files), `src/042-doodads.info.md`, `src/060-resolver.info.md`.
+  For step 1d: `src/077-slk.info.md` (WC3's sheets),
+  `src/078-wc3-ground.info.md` (the ground in WC3's tilesets),
+  `src/063-w3e.info.md` ([302a](./302a-wc3-ground-read-and-prepared.md)).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

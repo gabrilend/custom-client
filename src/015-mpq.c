@@ -8,6 +8,8 @@
 #include <string.h>
 #include <zlib.h>
 #include <ctype.h>
+#include <dirent.h>
+#include <strings.h>
 #include <time.h>
 
 /* block flags (the block table's flags field) */
@@ -262,6 +264,38 @@ WErr mpq_chain_open(MpqChain *c, const char *data, const char *locale, WWhy *why
     if (c->count == 0) { w_fail(why, W_ERR_NOT_FOUND, "no MPQ archives found in %s", data); return why->code; }
     return 0;
 }
+
+/* {{{ mpq_chain_open_wc3
+ * Warcraft III's archives in its own search order, newest first: the
+ * patch, the expansion's localised art, the expansion, the base game's
+ * localised art, the base game. An install's names differ in capitals
+ * (war3.mpq beside War3x.mpq), so each is found by name in the folder
+ * without regard to case. */
+static const char *const WC3_ORDER[] = { "War3Patch.mpq", "War3xLocal.mpq", "War3x.mpq", "War3Local.mpq", "war3.mpq" };
+WErr mpq_chain_open_wc3(MpqChain *c, const char *folder, WWhy *why)
+{
+    memset(c, 0, sizeof *c);
+    pthread_mutex_init(&c->lock, NULL);
+    DIR *d = opendir(folder);
+    if (!d) { w_fail(why, W_ERR_NOT_FOUND, "no Warcraft III install at %s (the folder isn't there)", folder); return why->code; }
+    char found[sizeof WC3_ORDER / sizeof WC3_ORDER[0]][256] = { { 0 } };
+    for (struct dirent *e; (e = readdir(d)); )
+        for (size_t i = 0; i < sizeof WC3_ORDER / sizeof WC3_ORDER[0]; ++i)
+            if (!found[i][0] && !strcasecmp(e->d_name, WC3_ORDER[i])) snprintf(found[i], sizeof found[i], "%s", e->d_name);
+    closedir(d);
+    for (size_t i = 0; i < sizeof WC3_ORDER / sizeof WC3_ORDER[0]; ++i) {
+        if (!found[i][0]) continue;
+        char path[600];
+        int n = snprintf(path, sizeof path, "%s/%s", folder, found[i]);
+        if (n < 0 || (size_t)n >= sizeof path) { mpq_chain_close(c); w_fail(why, W_ERR_REFUSED, "the Warcraft III folder's name is too long: %.80s...", folder); return why->code; }
+        MpqArchive *a = malloc(sizeof *a);
+        if (mpq_open(a, path, why)) { free(a); mpq_chain_close(c); return why->code; }
+        c->archives[c->count++] = a;
+    }
+    if (c->count == 0) { w_fail(why, W_ERR_NOT_FOUND, "no Warcraft III archives (war3.mpq, War3x.mpq, War3Patch.mpq ...) in %s", folder); return why->code; }
+    return 0;
+}
+/* }}} */
 /* {{{ static same_name: archive names match without regard to case, and
  * either slash */
 static int same_name(const char *a, const char *b)

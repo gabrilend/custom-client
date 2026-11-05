@@ -86,7 +86,12 @@ Plaguelands' own models read from its folder, sized by the map's rule,
 standing still (no skeleton, particles or solid shape), team colour
 left off and pieces hidden at rest not drawn. One, its `glow.mdx`, is
 refused by 061 (it ends inside its last CLID shape; 1109's open
-question 6). Any other name still loads the `.m2` beside it.
+question 6). Any other name still loads the `.m2` beside it. Since
+step 1d (2026-11-05) a stock WC3 model or picture a converted map names
+without bringing it (`Doodads\...`, `Units\...`) is looked for in the
+player's own Warcraft III install (`assetWc3`) after the game's
+archives, before the box; unchecked here (no install on the machine it
+was written on).
 
 Not yet: choosing among the detail files by the bone limit (step 1;
 this client always takes `00.skin`), ribbons (403), the model's own

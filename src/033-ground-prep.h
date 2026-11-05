@@ -24,6 +24,7 @@
 #include "018-maps.h"
 #include "015-mpq.h"
 #include "060-resolver.h"
+#include "078-wc3-ground.h"
 
 /* Where tiles are prepared: the archives, the resolver (NULL: the
  * archives alone; a test map's folder comes first through it, 1109), the
@@ -32,10 +33,14 @@
  * placed relative to. The map's ground files (WDT, ADTs) and its
  * pictures are read through the resolver (pictures since 1109's step 1c:
  * a picture no place has stands in as the magenta checker, said); with
- * no resolver, the archives alone. */
+ * no resolver, the archives alone. `wc3`, when set (a converted map
+ * whose own WC3 ground and tileset pictures were found: 078), paints
+ * each chunk on the WC3 grid with WC3's tilesets instead of the ground
+ * file's pictures; NULL (every other run) leaves the ground file's. */
 typedef struct {
     MpqChain *chain;
     Resolver *assets;
+    const Wc3Ground *wc3;
     char      map_name[64];
     int       big_alpha;              /* 1: the map's blend maps are the 8-bit form (020-adt.h) */
     MapWorld *world;
@@ -97,9 +102,10 @@ void ground_prep_free(GroundPrep *g, int keep_adt);
 
 /* Unpacks one ground picture by archive name into `px`, with its smaller
  * copies, from the place's resolver (asset_get: the checker for one no
- * place has) or, with none, its archives. W_OK, or a code with `why`
- * (W_ERR_NOT_FOUND: the archives lack it, or strict mode refused the
- * checker). */
+ * place has) or, with none, its archives; a WC3 layer's name (ending in
+ * WC3_LAYER_MARK) is its tileset's whole tile, from the place's `wc3`.
+ * W_OK, or a code with `why` (W_ERR_NOT_FOUND: the archives lack it,
+ * strict mode refused the checker, or a WC3 layer with no `wc3`). */
 WErr  ground_prep_pixels(const GroundPlace *p, const char *name, GroundPixels *px, WWhy *why);
 
 /* Makes a square picture's smaller copies (into px->smaller): each pixel

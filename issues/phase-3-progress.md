@@ -12,7 +12,7 @@ camera with proper frustum culling.
 |-----|-------------------------------------------------------------|---------|-------------------------|
 | 301 | [ADT parser](./301-adt-parser.md)                           | partly built | 105                     |
 | 302 | [Terrain renderer](./302-terrain-renderer.md)               | partly built | 301, 203, 204, 207      |
-| 302a | [WC3's ground, read and prepared](./302a-wc3-ground-read-and-prepared.md) | reading built | — |
+| 302a | [WC3's ground, read and prepared](./302a-wc3-ground-read-and-prepared.md) | reading built; drawn on the ADT mesh by 1109's step 1d (2026-11-05) | — |
 | 303 | [WDT + streaming](./303-wdt-and-streaming.md)               | partly built | 301, 302                |
 | 304 | [WMO parser](./304-wmo-parser.md)                           | partly built | 105, 301 (shared iter)  |
 | 305 | [WMO renderer + portals](./305-wmo-renderer.md)             | partly built | 304, 203, 204, 207      |

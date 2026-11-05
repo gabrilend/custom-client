@@ -61,9 +61,20 @@
  *   until the owner picks one (world-edit-to-execute's open question 10):
  *   a pack asset whose latest similarity score is at or above it counts
  *   as replaced.
+ * assetWc3: the player's own Warcraft III install, for a converted map's
+ *   WC3 pictures, models and ground (1109; world-edit-to-execute's
+ *   docs/wow-client-bridge.md, 2026-11-04: the player's Blizzard install
+ *   is read after the packs and the server's files, "if they plugged it
+ *   in"). One folder name under the profile's assets, as the lists above
+ *   name theirs, so the setting never points outside it: the player puts
+ *   the install's archives there, or makes the folder a link to the
+ *   install (as assets/server-data links to the server's). The default
+ *   "wc3": assets/wc3, used when it is there and quietly left out when
+ *   it isn't.
  */
 static const char *check_resolution(const char *value);
 static const char *check_folder_names(const char *value);
+static const char *check_folder_name(const char *value);
 
 static const SettingChoice CAMERA_STYLES[] = {
     { "Only horizontal when moving", "1" },
@@ -124,6 +135,8 @@ static const SettingDecl DECLS[] = {
       .label = "Strict Assets", .explain = "Treat any asset missing from every pack, folder and archive as an error, instead of drawing a placeholder." },
     { .name = "assetsDistinctness",      .section = "Assets",     .kind = SETTING_SLIDER, .def = "0.5", .min = 0, .max = 1, .step = 0.01, .restart = 1,
       .label = "Distinctness Threshold", .explain = "The similarity score from which a pack's asset counts as replaced: 0 is the original itself, 1 unrelated to it." },
+    { .name = "assetWc3",                .section = "Assets",     .kind = SETTING_TEXT,   .def = "wc3", .check = check_folder_name, .restart = 1,
+      .label = "Warcraft III Install", .explain = "A folder under assets holding your own Warcraft III archives (war3.mpq, War3x.mpq, War3Patch.mpq), or a link to your install: converted maps take its pictures, models and ground from there. Empty for none." },
 };
 #define DECL_COUNT ((int)(sizeof DECLS / sizeof DECLS[0]))
 
@@ -163,6 +176,12 @@ static const char *check_folder_names(const char *value)
         if (!*p) return NULL;
         ++p;
     }
+}
+/* one folder name, or none */
+static const char *check_folder_name(const char *value)
+{
+    if (strchr(value, ',')) return "one folder name (letters, digits, - _ and .), not a list";
+    return check_folder_names(value);
 }
 /* }}} */
 
