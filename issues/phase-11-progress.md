@@ -146,5 +146,23 @@ creatures, WC3's stock art and the client's tables are not in it, so
 a run still needs the game's archives to start; the water frames'
 names are recalled, unchecked. Decisions 81 to 88 in 1109.
 
+2026-11-05: 1109's step 1l. A test-map run starts with no WoW install
+at all. The start before the window is its own part (087), so the
+test program runs it as the client does. The baseline set gains the
+tables a start needs (`LiquidType`'s one row of water and the light
+tables, empty: a grey day) and a stand-in figure, a sand column a
+person's height with a blue face and one animation, Stand, for her
+(her character needs the game's tables and models) and for creatures
+with no model. 041 reads every file through the resolver, 088 saying
+which; 026 and 040 read their tables through it, per row for
+`LiquidType`, a set's table of another width left out. With no
+install and no server files, War in the Plaguelands and Master
+Crafters open from their own rows and ground files, find their water
+and light, prepare her ground with no checker, and Master Crafters'
+19 creature looks are its own WC3 model and the figure. The window
+and drawing are unchecked; buildings, creatures' own looks, her
+character, WC3 stock art, sounds, interface and sky still need an
+install. Decisions 89 to 97 in 1109.
+
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

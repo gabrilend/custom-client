@@ -61,10 +61,20 @@ fi
 source /home/ritz/programming/ai-stuff/scripts/libs/ensure-ram-tiers
 ensure_ram_tiers "${DIR}" || exit 1
 
+# a test map runs without the game's archives or the server's map files
+# (1109 step 1l: its own folder and the baseline set answer); said, not stopped
+TEST_MAP=0
+[[ " $* " == *" --test-map "* ]] && TEST_MAP=1
 MAPS="${DIR}/assets/server-data/maps"
-[[ -d "${MAPS}" ]] || { echo "ERROR: ${MAPS} missing: link assets/server-data to an AzerothCore server's extracted data-files folder"; exit 1; }
+if [[ ! -d "${MAPS}" ]]; then
+    [[ ${TEST_MAP} == 1 ]] || { echo "ERROR: ${MAPS} missing: link assets/server-data to an AzerothCore server's extracted data-files folder"; exit 1; }
+    echo "note: ${MAPS} missing: the test map's heights come from its own ground files"
+fi
 CLIENT="${CLIENT:-/mnt/dile/ritz/games/World of Warcraft 3.3.5a/Data}"
-[[ -f "${CLIENT}/common.MPQ" ]] || { echo "ERROR: ${CLIENT} has no common.MPQ: set CLIENT to the 3.3.5a client's Data folder"; exit 1; }
+if [[ ! -f "${CLIENT}/common.MPQ" ]]; then
+    [[ ${TEST_MAP} == 1 ]] || { echo "ERROR: ${CLIENT} has no common.MPQ: set CLIENT to the 3.3.5a client's Data folder"; exit 1; }
+    echo "note: ${CLIENT} has no common.MPQ: the test map runs from its own folder and the baseline set"
+fi
 SETTINGS="${DIR}/assets/settings/Config.wtf"
 mkdir -p "$(dirname "${SETTINGS}")"
 

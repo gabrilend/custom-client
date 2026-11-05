@@ -49,6 +49,8 @@ Window-free (CORE: the test program, the executable and make-baseline).
     grounds        ground pictures (one a different path)
     models         doodad paths given the stand-in (each its .m2 and 00.skin)
     water_frames   frames of the water's run
+    tables         tables written (BASELINE_TABLES); the stand-in figure's
+                   three files are counted in files and entries alone
     files, entries files written (the manifest left out) and manifest entries
     same_path      rows naming a path an earlier row named (the first's colour kept)
     buildings      .wmo rows left out
@@ -75,5 +77,12 @@ Window-free (CORE: the test program, the executable and make-baseline).
 - `unsigned char *baseline_stand_in_picture(size_t *len);`
 - `unsigned char *baseline_stand_in_model(size_t *len);`
 - `unsigned char *baseline_stand_in_skin(size_t *len);`
+- `unsigned char *baseline_figure_model(size_t *len);`
+  The stand-in figure (BASELINE_FIGURE_MODEL): an M2 of version 264 with
+  one still bone and one animation, Stand, its .skin and its picture; and
+  a table the set holds, by name (NULL for a name it doesn't).
+- `unsigned char *baseline_figure_skin(size_t *len);`
+- `unsigned char *baseline_figure_picture(size_t *len);`
+- `unsigned char *baseline_table(const char *name, size_t *len);`
 - `void baseline_sha256_hex(const void *data, size_t len, char out[65]);`
   SHA-256 of `len` bytes as 64 small hex digits (a manifest entry's id).

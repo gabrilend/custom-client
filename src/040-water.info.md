@@ -20,14 +20,16 @@ shader's text; issue 1109's water plan).
 ## What it offers
 
 - `typedef struct Water Water;`
-  A water drawer (the handle: docs/001, "Handles"), with the liquid
-  table read; the chain must outlive it. Its pictures are asked of
+  A water drawer (the handle: docs/001, "Handles"), its kinds' rows from
+  `tables` (LiquidType per row, 074: a converted map's own, the
+  archives', then the baseline set's, which names the set's frames;
+  1109 step 1l); the chain and tables must outlive it. Its pictures are asked of
   `assets` (a test-map run's resolver, 060: so the baseline set's frames
   answer where no install has them; NULL for the archives alone), never
   as a placeholder: a kind's run ends at its first missing frame. NULL
   with `why` when the table or the shader can't be had. Freed with
   water_free.
-- `Water *water_new(MpqChain *chain, Resolver *assets, const Textures *textures, WWhy *why);`
+- `Water *water_new(MpqChain *chain, Resolver *assets, Tables *tables, const Textures *textures, WWhy *why);`
 - `void water_free(Water *w);`
 - `void water_use_wc3(Water *w, const Wc3Water *wc3);`
   Draws water and sea layers added from now on as `wc3`'s (a converted

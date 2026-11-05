@@ -197,6 +197,133 @@ unsigned char *baseline_stand_in_skin(size_t *len)
 }
 /* }}} */
 
+/* {{{ the stand-in figure: an eight-sided column 0.6 across and 1.8 high
+ * (a person's height), turned so a face looks along +x (the way a model
+ * faces), that face painted with the set's blue so it shows which way the
+ * figure faces; one bone every point hangs from, still, and one
+ * animation, Stand (id 0, its moments in the .m2), so 023 reads a
+ * skeleton and 030 has a pose to hold */
+#define FIG_SIDES 8
+#define FIG_VERTS (FIG_SIDES * 4 + FIG_SIDES + 1)
+#define FIG_TRIS  (FIG_SIDES * 2 + FIG_SIDES)
+unsigned char *baseline_figure_model(size_t *len)
+{
+    const char name[] = "W baseline stand-in figure";
+    const char pic[] = BASELINE_FIGURE_PICTURE;
+    const double PI = 3.14159265358979323846, TURN = -PI / FIG_SIDES;   /* a face, not a corner, along +x */
+    const float R = 0.3f, H = 1.8f;
+    size_t name_at = 304, pic_at = name_at + sizeof name;
+    size_t seq_at = (pic_at + sizeof pic + 15) & ~(size_t)15, look_seq_at = seq_at + 64, bone_at = (look_seq_at + 2 + 15) & ~(size_t)15;
+    size_t key_at = bone_at + 88, verts_at = (key_at + 2 + 15) & ~(size_t)15;
+    size_t tex_at = verts_at + (size_t)FIG_VERTS * 48, mat_at = tex_at + 16, look_at = mat_at + 4, bone_look_at = look_at + 2;
+    *len = (bone_look_at + 2 + 15) & ~(size_t)15;
+    unsigned char *s = calloc(1, *len);
+    memcpy(s, "MD20", 4);
+    put32(s + 4, 264);
+    put32(s + 8, sizeof name); put32(s + 12, (uint32_t)name_at);
+    memcpy(s + name_at, name, sizeof name);
+    memcpy(s + pic_at, pic, sizeof pic);
+    put32(s + 28, 1); put32(s + 32, (uint32_t)seq_at);       /* one animation: Stand */
+    unsigned char *q = s + seq_at;
+    put16(q, 0); put16(q + 2, 0); put32(q + 4, 1000);        /* id 0, variation 0, a second long */
+    put32(q + 12, 0x20);                                      /* its moments in the .m2 (no .anim file) */
+    put16(q + 16, 0x7fff); put32(q + 28, 150);                /* chosen always; blended in over 150 ms */
+    putf(q + 52, 1.0f);                                       /* its bounds' radius (unused here) */
+    put16(q + 60, 0xffff); put16(q + 62, 0);                  /* no next variation; not an alias */
+    put32(s + 36, 1); put32(s + 40, (uint32_t)look_seq_at);  /* animation lookup: Stand is 0 */
+    put32(s + 44, 1); put32(s + 48, (uint32_t)bone_at);      /* one bone */
+    unsigned char *b = s + bone_at;
+    put32(b, 0xffffffffu);                                    /* no key bone */
+    put16(b + 8, 0xffff);                                     /* hangs from nothing */
+    for (int t = 0; t < 3; ++t) put16(b + 16 + t * 20 + 2, 0xffff);   /* its move, turn and stretch: no global sequence, no moments */
+    put32(s + 52, 1); put32(s + 56, (uint32_t)key_at);       /* key bone lookup: none */
+    put16(s + key_at, 0xffff);
+    put32(s + 60, FIG_VERTS); put32(s + 64, (uint32_t)verts_at);
+    put32(s + 68, 1);
+    put32(s + 80, 1); put32(s + 84, (uint32_t)tex_at);
+    put32(s + tex_at + 8, sizeof pic); put32(s + tex_at + 12, (uint32_t)pic_at);
+    put32(s + 112, 1); put32(s + 116, (uint32_t)mat_at);
+    put32(s + 120, 1); put32(s + 124, (uint32_t)bone_look_at);   /* bone lookup: [0] = 0 */
+    put32(s + 128, 1); put32(s + 132, (uint32_t)look_at);
+    unsigned char *v = s + verts_at;
+    for (int k = 0; k < FIG_SIDES; ++k) {
+        double a0 = TURN + 2 * PI * k / FIG_SIDES, a1 = TURN + 2 * PI * (k + 1) / FIG_SIDES, m = (a0 + a1) / 2;
+        float nx = (float)cos(m), ny = (float)sin(m);
+        float u0 = (float)k / FIG_SIDES, u1 = (float)(k + 1) / FIG_SIDES;
+        post_vertex(v,       R * (float)cos(a0), R * (float)sin(a0), 0, nx, ny, 0, u0, 1);
+        post_vertex(v + 48,  R * (float)cos(a1), R * (float)sin(a1), 0, nx, ny, 0, u1, 1);
+        post_vertex(v + 96,  R * (float)cos(a1), R * (float)sin(a1), H, nx, ny, 0, u1, 0);
+        post_vertex(v + 144, R * (float)cos(a0), R * (float)sin(a0), H, nx, ny, 0, u0, 0);
+        v += 4 * 48;
+    }
+    for (int k = 0; k < FIG_SIDES; ++k) {
+        double a = TURN + 2 * PI * k / FIG_SIDES;
+        post_vertex(v, R * (float)cos(a), R * (float)sin(a), H, 0, 0, 1, 0.5f, 0.5f);   /* the top: plain (the middle of the picture) */
+        v += 48;
+    }
+    post_vertex(v, 0, 0, H, 0, 0, 1, 0.5f, 0.5f);
+    return s;
+}
+unsigned char *baseline_figure_skin(size_t *len) { return baseline_stand_in_skin(len); }   /* the same corners, triangles, piece and unit as the post's */
+unsigned char *baseline_figure_picture(size_t *len)
+{
+    enum { S = BASELINE_PICTURE_SIDE };
+    static const uint8_t SAND[3] = { 184, 152, 112 }, BAND[3] = { 60, 90, 140 };
+    unsigned char *rgba = malloc((size_t)S * S * 4);
+    mottle(SAND, 0xf16e7e5u, 0.06, rgba);
+    for (int y = 0; y < S; ++y)                               /* the face along +x: the first eighth across */
+        for (int x = 0; x < S / 8; ++x) memcpy(rgba + ((size_t)y * S + x) * 4, BAND, 3);
+    unsigned char *s = blp(S, rgba, len);
+    free(rgba);
+    return s;
+}
+/* }}} */
+
+/* {{{ the tables a run reads at its start, as 3.3.5a's widths: LiquidType
+ * (one row, water, naming the set's frames), and the light tables empty
+ * (no light anywhere: 026's plain grey day) */
+typedef struct { uint32_t rows, fields; uint32_t *cells; char *text; size_t text_len; } Table;
+static unsigned char *dbc_bytes(const Table *t, size_t *len)
+{
+    size_t row_len = (size_t)t->fields * 4, cells = (size_t)t->rows * t->fields;
+    *len = 20 + cells * 4 + t->text_len;
+    unsigned char *s = calloc(1, *len);
+    memcpy(s, "WDBC", 4);
+    put32(s + 4, t->rows); put32(s + 8, t->fields); put32(s + 12, (uint32_t)row_len); put32(s + 16, (uint32_t)t->text_len);
+    for (size_t i = 0; i < cells; ++i) put32(s + 20 + i * 4, t->cells[i]);
+    if (t->text_len) memcpy(s + 20 + cells * 4, t->text, t->text_len);
+    return s;
+}
+unsigned char *baseline_table(const char *name, size_t *len)
+{
+    static const struct { const char *name; uint32_t fields; } EMPTY[] = {
+        { "Light", 15 }, { "LightIntBand", 34 }, { "LightFloatBand", 34 }, { "LightParams", 9 }, { "LightSkybox", 3 },
+    };
+    for (size_t i = 0; i < sizeof EMPTY / sizeof EMPTY[0]; ++i)
+        if (!strcmp(name, EMPTY[i].name)) {
+            char nul = '\0';
+            Table t = { 0, EMPTY[i].fields, NULL, &nul, 1 };
+            return dbc_bytes(&t, len);
+        }
+    if (!strcmp(name, "LiquidType")) {
+        /* 1 id, 2 name, 3 flags, 4 type (0 water), 16 the first picture
+         * name, %d the frame; the rest 0. Its text: "", "Water", the pattern */
+        char text[200];
+        size_t water = 1, pattern = water + sizeof "Water";
+        memset(text, 0, sizeof text);
+        memcpy(text + water, "Water", sizeof "Water");
+        memcpy(text + pattern, BASELINE_WATER_PATTERN, sizeof BASELINE_WATER_PATTERN);
+        uint32_t cells[BASELINE_LIQUID_FIELDS] = { 0 };
+        cells[0] = 1; cells[1] = (uint32_t)water; cells[15] = (uint32_t)pattern;
+        Table t = { 1, BASELINE_LIQUID_FIELDS, cells, text, pattern + sizeof BASELINE_WATER_PATTERN };
+        return dbc_bytes(&t, len);
+    }
+    *len = 0;
+    return NULL;
+}
+const char *const BASELINE_TABLES[] = { "LiquidType", "Light", "LightIntBand", "LightFloatBand", "LightParams", "LightSkybox", NULL };
+/* }}} */
+
 /* {{{ baseline_sha256_hex (FIPS 180-4) */
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -483,6 +610,25 @@ WErr baseline_set_make(const char *folder, const char *ground_table, const char 
             say_entry(&mk, skin, BASELINE_STAND_IN_SKIN, "model", skin_id);
             ++made->models;
         }
+    }
+    /* the stand-in figure (for her and the creatures, when no place has their model) */
+    if (!rc) {
+        size_t len;
+        char key[1024];
+        fs_normalise(BASELINE_FIGURE_PICTURE, key, sizeof key);
+        unsigned char *s = baseline_figure_picture(&len);
+        rc = put(&mk, folder, BASELINE_FIGURE_PICTURE, key, "texture", s, len, why);
+        if (!rc) { fs_normalise(BASELINE_FIGURE_MODEL, key, sizeof key); s = baseline_figure_model(&len); rc = put(&mk, folder, BASELINE_FIGURE_MODEL, key, "model", s, len, why); }
+        if (!rc) { fs_normalise(BASELINE_FIGURE_SKIN, key, sizeof key); s = baseline_figure_skin(&len); rc = put(&mk, folder, BASELINE_FIGURE_SKIN, key, "model", s, len, why); }
+    }
+    /* the tables a start reads */
+    for (int t = 0; BASELINE_TABLES[t] && !rc; ++t) {
+        char name[200], key[200];
+        snprintf(name, sizeof name, "DBFilesClient\\%s.dbc", BASELINE_TABLES[t]);
+        fs_normalise(name, key, sizeof key);
+        size_t len;
+        unsigned char *s = baseline_table(BASELINE_TABLES[t], &len);
+        if (!(rc = put(&mk, folder, name, key, "table", s, len, why))) ++made->tables;
     }
     /* the water's run */
     for (int f = 1; f <= BASELINE_WATER_FRAMES && !rc; ++f) {

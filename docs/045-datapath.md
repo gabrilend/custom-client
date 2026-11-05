@@ -58,12 +58,20 @@ ripple frames, `081-wc3-water.c`, tinted by the map's `war3map.w3i`,
 `083-w3i.c`, each point laid by `082-water-prep.c`; the water's
 ripple frames, `040-water.c`), then the baseline set when it is there
 (a picture of each ground the converter names, one grey post for each
-doodad, the water's frames; `085-baseline-set.c`), with the magenta checker for a missing picture
+doodad, the water's frames, `LiquidType` and the light tables, and a
+stand-in figure for her and for creatures with no model;
+`085-baseline-set.c`), with the magenta checker for a missing picture
 and a magenta wire-frame box for a missing model; and while the server
 has no map files for the map, her ground's heights are made from its
-ADTs (`075-adt-heights.c`). The prefetch (034) and the game's own
-creatures (041) still ask the archives directly; each part switches
-with its own issue.
+ADTs (`075-adt-heights.c`). The start before the window (the
+archives, the resolver, the tables, the map's row, its heights, her
+height and the steepest slope) is `087-world-start.c`, which lets a
+test map start with no archives at all (1109 step 1l); which files a
+creature's display row means is `088-figure-model.c`, and 041 reads
+them, its pictures and `.anim` files through the resolver. The
+prefetch (034) and her character (025: `CharStartOutfit`,
+`CharSections`, the race models) still ask the archives directly; in a
+test map with none, the set's stand-in figure stands in her place.
 
 ## 2. From the archives to things in memory (no window needed)
 
@@ -82,6 +90,8 @@ with its own issue.
 | `021-wmo.c` | buildings (root + group files) | materials, furniture sets, parts' points and batches, solid flags, pools |
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |
 | `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
+| `087-world-start.c` | the archives (none in a test map), the resolver, the tables, the map's `Map` row, the server's or the map's own heights, the navigation tiles | the start before the window: the map's folder, her height at the start and the steepest walkable slope |
+| `088-figure-model.c` | a creature's display row (`CreatureDisplayInfo`, `CreatureModelData`, through the tables) and the resolver | which files a figure is made from: the map's own WC3 model, the game's `.m2` and view, a character look, or the baseline set's stand-in figure |
 | `084-map-fog.c` | a converted map's `war3map.w3i` (read by `083-w3i.c`, through the resolver) | in a test-map run, the map's own fog (its distances in yards, its colour) put in place of the zone's in that light each frame, out of the water |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
 | `028-collide.c` | models' and buildings' solid shapes, placed | floors, walls and lines of sight (for the mover and camera) |
@@ -190,6 +200,11 @@ with no window and none of the game's files:
   one stand-in post (an M2 of version 264 and its view) with its own
   picture; buildings and creatures counted and left out;
 - **the water**: LiquidType 1's run of 30 frames under its names;
+- **the tables a start needs**: `LiquidType` (one row) and the five
+  light tables (empty), at `DBFilesClient\NAME.dbc`;
+- **the stand-in figure**: `Baseline\StandInFigure.m2`, its view and
+  picture (one still bone, Stand), for her and for creatures with no
+  model;
 - out: the files at their folded names under the folder and a pack's
   `manifest.lua` listing each (its SHA-256, route `hand`, lineage
   `independent`), which the resolver (060) asks after the archives.

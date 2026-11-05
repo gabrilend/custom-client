@@ -92,6 +92,7 @@
 #include "078-wc3-ground.h"
 #include "081-wc3-water.h"
 #include "084-map-fog.h"
+#include "087-world-start.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -180,7 +181,6 @@ static const char *const PHASE_NAME[PH_COUNT] = {
  * frame; one per window */
 typedef struct {
     int    map_id;                               /* Kalimdor */
-    char   map_name[64];
     double start_x, start_y;       /* Astranaar, Ashenvale */
     CharacterLook LOOK;
     int WEAR_OVER[SLOT_COUNT];                        /* --wear's choices, laid over her starting outfit (173p) */
@@ -188,12 +188,11 @@ typedef struct {
     Figure others[NBYSTANDERS];
     int    nothers;
     struct { double x, y, z; float facing; MovesState moves; int cycle; float held; } other_at[NBYSTANDERS];
-    MapWorld world;
+    WorldStart ws;                                    /* the archives, resolver, tables, map folder and heights (087-world-start.h) */
     Doodads *doodads;                                 /* doodads and buildings (042-doodads.h) */
     Ground *ground;                                   /* the painted ground (038-ground.h) */
     Textures textures;                                /* how pictures go to the card (036-texture.h) */
     Figures *figures;                                 /* the figure maker (041-figure.h) */
-    MpqChain chain;                                   /* the original client's archives, open for the whole run */
     GroundPlace ground_place;                         /* where tiles' ground is prepared, on either thread (173u) */
     char   tile_state[64 * 64];                      /* 0 not loaded, 1 painted, 2 no ground file (open sea) */
     int    tiles_loaded, tiles_dropped;               /* for the picture report */
@@ -226,13 +225,10 @@ typedef struct {
     Prefetch *pf;                                     /* the reader-ahead (034-prefetch.h) */
     TestMap *test_map;                                /* a map handed in by the editor (067-test-map.h; 1109), or NULL */
     Goodbye *bye;                                     /* its goodbye receipt (068-goodbye.h), or NULL */
-    Resolver *assets;                                 /* a test map's resolver, its folder first of the overlays (060-resolver.h) */
-    Tables   *tables;                                 /* the client's tables, per row, through the resolver in a test-map run (074-tables.h) */
     ConvertedMap conv;                                /* a test map's map.lua: which map, where she starts (073-converted-map.h) */
     Wc3Ground   *wc3_ground;                          /* a test map's own WC3 ground and tilesets, when found (078-wc3-ground.h) */
     Wc3Water    *wc3_water;                           /* its WC3 water, when found (081-wc3-water.h) */
     MapFog       map_fog;                             /* its own fog, from its war3map.w3i, when it turns one on (084-map-fog.h) */
-    AdtHeights *adt_heights;                          /* a test map's heights from its own ground files, while the server has none (075) */
     char   world_in_map[700];                         /* a test map's default --world: <folder>/world */
 } App;
 /* }}} */
@@ -323,7 +319,7 @@ static float ground_at(void *ctx, float x, float y, float z_top, float *gx, floa
 {
     App *app = ctx;
     float tx, ty, mx, my;
-    float t = maps_world_height(&app->world, x, y, &tx, &ty);
+    float t = maps_world_height(&app->ws.world, x, y, &tx, &ty);
     float m = collide_floor(app->solids, x, y, z_top, &mx, &my);
     /* the model's floor wins when it is higher than a usable map ground,
      * or when the map's ground is above her (she is beneath it) */
@@ -456,7 +452,6 @@ int main(int argc, char **argv)
 {
     App *app = calloc(1, sizeof *app);
     app->map_id = 1;                                     /* Kalimdor */
-    snprintf(app->map_name, sizeof app->map_name, "Kalimdor");
     app->start_x = 2717.0; app->start_y = -400.0;        /* Astranaar, Ashenvale */
     app->LOOK = (CharacterLook){ 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
     app->view = (FollowCam){ .yaw = (float)START_O, .pitch = 0.35f, .dist = 12.0f, .rest_pitch = 0.35f };
@@ -558,73 +553,17 @@ int main(int argc, char **argv)
     int win_w, win_h;
     settings_resolution(settings_text(app->settings, "gxResolution"), &win_w, &win_h);   /* accepted when set, so always a resolution */
 
-    /* {{{ the archives, and in a test-map run the resolver in front of them
-     * (1109): opened before the ground, since a test map's heights may
-     * come from its own ground files. A folder that isn't there stops the
-     * start by name. */
-    if (mpq_chain_open(&app->chain, client, "enUS", &why)) return start_failed(app, 1, "%s", why.text);
-    if (app->test_map) {
-        ResolverPlace place;
-        if (test_map_place(app->test_map, app->settings, assets_dir, &app->chain, &place, &why) || resolver_open(&place, &app->assets, &why))
-            return start_failed(app, 1, "%s", why.text);
-        printf("test map: %s, the first of %d overlay%s\n", test_map_folder(app->test_map), place.noverlays, place.noverlays == 1 ? "" : "s");
-    }
-    app->tables = tables_new(app->assets, &app->chain);          /* a test map's rows first, per row (074-tables.h) */
-    /* }}} */
-    /* {{{ the map's folder (Map.dbc: 1 id, 2 its folder under World\Maps), a converted map's own row first */
-    {
-        TableRow mr;
-        if (tables_row(app->tables, "Map", (uint32_t)app->map_id, &mr, &why)) return start_failed(app, 1, "Map.dbc: %s", why.text);
-        snprintf(app->map_name, sizeof app->map_name, "%s", dbc_text(mr.dbc, mr.row, 2));
-        if (app->test_map && strcasecmp(app->map_name, app->conv.directory))
-            return start_failed(app, 1, "the test map's %s names map %d's folder %s, but its Map.dbc row (from %s, %s) names %s",
-                                CONVERTED_MAP_FILE, app->map_id, app->conv.directory, asset_source_name(mr.source), mr.from, app->map_name);
-        if (app->test_map) printf("test map: map %d's row from %s (%s)\n", app->map_id, asset_source_name(mr.source), mr.from);
-    }
-    /* }}} */
-    /* {{{ the ground's heights: the server's map files; in a test-map run
-     * whose map the server has none for yet (world-edit-to-execute's W02d
-     * writes them), the map's own ground files, made into the server's
-     * tiles as its extractor would (075-adt-heights.h) */
-    int from_adts = 0;
-    if (app->test_map) {
-        int tx0, ty0;
-        WWhy no_tile;
-        maps_tile_of((float)app->start_x, (float)app->start_y, &tx0, &ty0);
-        MapTile *t = maps_load_tile(maps, app->map_id, tx0, ty0, &no_tile);
-        if (t) maps_free_tile(t);
-        else if (no_tile.code == W_ERR_NOT_FOUND) from_adts = 1;
-        else return start_failed(app, 1, "the server's map files for map %d: %s", app->map_id, no_tile.text);
-    }
-    if (from_adts) {
-        if (adt_heights_open(app->assets, &app->chain, app->map_name, &app->adt_heights, &why)) return start_failed(app, 1, "%s", why.text);
-        char what[300];
-        snprintf(what, sizeof what, "map %d's own ground files (World\\Maps\\%s)", app->map_id, app->map_name);
-        maps_world_init_source(&app->world, app->map_id, adt_heights_tile, app->adt_heights, what);
-        printf("ground: the server's map files (%s) have none for map %d yet; her ground's heights come from %s\n", maps, app->map_id, what);
-    } else maps_world_init(&app->world, maps, app->map_id);
+    /* {{{ the world's start, before the window (087-world-start.h): the
+     * archives (a test map may run without them: its folder and the
+     * baseline set answer), in a test-map run the resolver in front of
+     * them, the tables, the map's folder, the ground's heights and the
+     * steepest walkable ground. A failure stops the start by name. */
+    WorldStartIn wsi = { .client = client, .maps = maps, .assets_dir = assets_dir, .settings = app->settings, .test_map = app->test_map,
+                         .conv = &app->conv, .map_id = app->map_id, .start_x = app->start_x, .start_y = app->start_y, .log = stdout };
+    if (world_start_open(&wsi, &app->ws, &why)) return start_failed(app, 1, "%s", why.text);
     float gx, gy;
-    float z = maps_world_height(&app->world, (float)app->start_x, (float)app->start_y, &gx, &gy);
-    if (z < -10000) return start_failed(app, 1, "no ground at the start (%.1f, %.1f) in map %d from %s%s", app->start_x, app->start_y, app->map_id, app->world.dir,
-                                        app->test_map ? "" : ": is the maps folder right?");
+    float z = app->ws.z, max_slope = app->ws.max_slope;
     /* }}} */
-    /* the steepest walkable ground, from the server's navigation tiles
-     * (data-files/mmaps beside data-files/maps) */
-    char mmaps[600];
-    snprintf(mmaps, sizeof mmaps, "%s", maps);
-    char *cut = strstr(mmaps, "/maps");
-    if (!cut) return start_failed(app, 1, "the maps folder %s doesn't end in /maps; can't find mmaps beside it", maps);
-    strcpy(cut, "/mmaps");
-    float max_slope = navmesh_slope_read(mmaps, app->map_id, &why);
-    /* a test map has none until W02d makes them: the server's rule is one
-     * rule for every map it builds, so another map's tiles say it */
-    static const int STOCK_MAPS[] = { 1, 0, 530, 571 };
-    for (int k = 0; max_slope < 0 && app->test_map && k < (int)(sizeof STOCK_MAPS / sizeof STOCK_MAPS[0]); ++k) {
-        WWhy other;
-        max_slope = navmesh_slope_read(mmaps, STOCK_MAPS[k], &other);
-        if (max_slope >= 0) printf("steep ground: map %d has no navigation tiles yet; the server's rule from map %d's: %.1f degrees\n", app->map_id, STOCK_MAPS[k], max_slope);
-    }
-    if (max_slope < 0) return start_failed(app, 1, "%s", why.text);
     mover_init(&app->elf, app->start_x, app->start_y, z, START_O + face_deg * PI / 180, SPEED, max_slope);
     app->view.yaw = (float)app->elf.o + (app->view.yaw - (float)START_O);   /* the camera keeps its place behind her */
     app->ox = floor(app->start_x); app->oy = floor(app->start_y);
@@ -641,11 +580,22 @@ int main(int argc, char **argv)
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
     Shader model_sh  = figure_shader();                  /* the figures' bending and lighting (041-figure.h) */
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
-    app->figures = figures_new(&app->chain, app->assets, app->tables, &app->textures);   /* makes her, the bystanders and the creatures (041-figure.h) */
+    app->figures = figures_new(&app->ws.chain, app->ws.assets, app->ws.tables, &app->textures);   /* makes her, the bystanders and the creatures (041-figure.h) */
     if (app->test_map) figures_wc3_scale(app->figures, app->conv.wc3_scale);       /* a map's own WC3 models, in yards by its rule */
-    if (character_start_outfit(&app->chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why)) return start_failed(app, 1, "%s", why.text);
-    for (int k = 0; k < SLOT_COUNT; ++k) if (app->WEAR_OVER[k]) app->LOOK.items[k] = app->WEAR_OVER[k];
-    if (figure_from_character(app->figures, &app->her, &app->LOOK, &why)) return start_failed(app, 1, "%s", why.text);
+    WErr her_bad = character_start_outfit(&app->ws.chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why);
+    if (!her_bad) {
+        for (int k = 0; k < SLOT_COUNT; ++k) if (app->WEAR_OVER[k]) app->LOOK.items[k] = app->WEAR_OVER[k];
+        her_bad = figure_from_character(app->figures, &app->her, &app->LOOK, &why);
+    }
+    if (her_bad) {
+        /* a test map with no install (1109 step 1l): her character can't
+         * be made (its tables, model and skins are the game's), so the
+         * baseline set's stand-in figure stands in her place, said */
+        WWhy none;
+        if (!app->test_map || figure_stand_in(app->figures, &app->her, "her (the stand-in figure)", &none))
+            return start_failed(app, 1, "%s%s%s", why.text, app->test_map ? "; and no stand-in figure: " : "", app->test_map ? none.text : "");
+        printf("her: %s; the baseline set's stand-in figure stands in her place\n", why.text);
+    }
     static const int NEEDED[] = { MOVE_STAND, MOVE_RUN, MOVE_WALK, MOVE_WALK_BACK, MOVE_SHUFFLE_LEFT, MOVE_SHUFFLE_RIGHT, MOVE_JUMP_START, MOVE_JUMP, MOVE_JUMP_END, MOVE_FALL };
     for (unsigned i = 0; i < sizeof NEEDED / sizeof NEEDED[0]; ++i)
         if (anim_find(&app->her.anim, NEEDED[i], 0) < 0) fprintf(stderr, "her animations: her model has no animation %d; she stands instead\n", NEEDED[i]);
@@ -654,7 +604,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < NBYSTANDERS; ++i) {
         Figure *f = &app->others[app->nothers];
         CharacterLook look = { BYSTANDERS[i].race, BYSTANDERS[i].sex, 0, 0, 0, 0, { 0 }, BYSTANDERS[i].facial_hair, 0 };
-        if (BYSTANDERS[i].race && character_start_outfit(&app->chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, &why)) {
+        if (BYSTANDERS[i].race && character_start_outfit(&app->ws.chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, &why)) {
             fprintf(stderr, "bystander %d left out: %s\n", i, why.text);
             continue;
         }
@@ -664,7 +614,7 @@ int main(int argc, char **argv)
         double fx = cos(START_O), fy = sin(START_O);
         app->other_at[app->nothers].x = app->start_x + fx * BYSTANDERS[i].ahead - fy * BYSTANDERS[i].left;
         app->other_at[app->nothers].y = app->start_y + fy * BYSTANDERS[i].ahead + fx * BYSTANDERS[i].left;
-        app->other_at[app->nothers].z = maps_world_height(&app->world, (float)app->other_at[app->nothers].x, (float)app->other_at[app->nothers].y, &gx, &gy);
+        app->other_at[app->nothers].z = maps_world_height(&app->ws.world, (float)app->other_at[app->nothers].x, (float)app->other_at[app->nothers].y, &gx, &gy);
         app->other_at[app->nothers].facing = (float)atan2(app->start_y - app->other_at[app->nothers].y, app->start_x - app->other_at[app->nothers].x);
         moves_init(&app->other_at[app->nothers].moves, &f->anim);
         app->other_at[app->nothers].cycle = 0;
@@ -673,13 +623,13 @@ int main(int argc, char **argv)
         ++app->nothers;
     }
     /* the ground, its files through the resolver in a test-map run (its folder first) */
-    if (ground_place_init(&app->ground_place, &app->chain, app->assets, app->map_name, &app->world, app->ox, app->oy, &why))
+    if (ground_place_init(&app->ground_place, &app->ws.chain, app->ws.assets, app->ws.map_name, &app->ws.world, app->ox, app->oy, &why))
         return start_failed(app, 1, "%s", why.text);
     /* a test map's ground laid with WC3's own tilesets, when its own
      * ground and the tilesets' pictures are found (a player with WC3:
      * 078); otherwise said, and the converter's pictures stay */
     if (app->test_map) {
-        WErr w = wc3_ground_open(app->assets, &app->chain, app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_ground, &why);
+        WErr w = wc3_ground_open(app->ws.assets, &app->ws.chain, app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_ground, &why);
         if (w == W_OK) {
             int real = 0, n = wc3_ground_tilesets(app->wc3_ground);
             for (int k = 0; k < n; ++k) real += wc3_ground_tileset(app->wc3_ground, k)->source != ASSET_FROM_PLACEHOLDER;
@@ -703,17 +653,17 @@ int main(int argc, char **argv)
     if (!(app->ground = ground_new(&app->ground_place, &app->textures, &why)))
         return start_failed(app, 1, "%s", why.text);
     /* reads tiles ahead of her on a second thread, and prepares their ground (173u) */
-    app->pf = prefetch_start(&app->chain, app->assets, app->map_name, app->read_ahead);
+    app->pf = prefetch_start(&app->ws.chain, app->ws.assets, app->ws.map_name, app->read_ahead);
     prefetch_prepare_ground(app->pf, &app->ground_place, ground_on_card, app->ground);
     app->solids = collide_new(app->ox, app->oy);
     app->waters = liquid_new();
-    app->water = water_new(&app->chain, app->assets, &app->textures, &why);   /* its pictures through the resolver in a test-map run */
+    app->water = water_new(&app->ws.chain, app->ws.assets, app->ws.tables, &app->textures, &why);   /* its pictures through the resolver in a test-map run */
     if (!app->water) return start_failed(app, 1, "%s", why.text);
     /* a test map's water as WC3 draws it, when its sheet and frames are
      * found (a player with WC3: 081, tinted by its war3map.w3i);
      * otherwise said, and the converter's water stays */
     if (app->wc3_ground) {
-        WErr w = wc3_water_open(app->assets, &app->chain, wc3_ground_w3e(app->wc3_ground), app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_water, &why);
+        WErr w = wc3_water_open(app->ws.assets, &app->ws.chain, wc3_ground_w3e(app->wc3_ground), app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->wc3_water, &why);
         if (w == W_OK) {
             const Wc3WaterKind *k = wc3_water_kind(app->wc3_water);
             Wc3WaterCounts n = wc3_water_counts(app->wc3_water);
@@ -723,13 +673,13 @@ int main(int argc, char **argv)
         } else if (w == W_ERR_NOT_FOUND) printf("test map: its water keeps the converter's look: %s\n", why.text);
         else return start_failed(app, 1, "%s", why.text);
     }
-    app->doodads = doodads_new(&app->chain, app->assets, &app->textures, app->solids, app->waters, app->water, &why);
+    app->doodads = doodads_new(&app->ws.chain, app->ws.assets, &app->textures, app->solids, app->waters, app->water, &why);
     if (!app->doodads) return start_failed(app, 1, "%s", why.text);
     if (app->test_map) doodads_wc3_scale(app->doodads, app->conv.wc3_scale);   /* a map's own WC3 models, in yards by its rule (1109 step 1c) */
-    app->horizon = horizon_new(&app->chain, app->assets, app->map_name, app->ox, app->oy, &why);
+    app->horizon = horizon_new(&app->ws.chain, app->ws.assets, app->ws.map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
-    if (light_open(&lights, &app->chain, &why)) return start_failed(app, 1, "%s", why.text);
+    if (light_open(&lights, app->ws.assets, &app->ws.chain, &why)) return start_failed(app, 1, "%s", why.text);
     app->sky = sky_new();
     LightNow light;
     int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
@@ -740,7 +690,7 @@ int main(int argc, char **argv)
      * that turns none on, or has no war3map.w3i, keeps the zone's */
     if (app->test_map) {
         W3iInfo info;
-        WErr w = map_w3i_read(app->assets, &app->chain, &info, &why);
+        WErr w = map_w3i_read(app->ws.assets, &app->ws.chain, &info, &why);
         if (w && w != W_ERR_NOT_FOUND) return start_failed(app, 1, "%s", why.text);
         map_fog_from_w3i(w ? NULL : &info, app->conv.wc3_scale, &app->map_fog);
         if (app->map_fog.on)
@@ -799,7 +749,7 @@ int main(int argc, char **argv)
         if (go_to && frames == 20) {                     /* --goto: there, standing on the ground */
             go_to = 0;
             float gx2, gy2;
-            float gz = maps_world_height(&app->world, (float)goto_x, (float)goto_y, &gx2, &gy2);
+            float gz = maps_world_height(&app->ws.world, (float)goto_x, (float)goto_y, &gx2, &gy2);
             if (gz < -10000) { fprintf(stderr, "--goto %.1f %.1f: no ground there in the server's maps\n", goto_x, goto_y); break; }
             app->elf.x = goto_x; app->elf.y = goto_y; app->elf.z = gz; app->elf.grounded = 1; app->elf.swimming = 0;
         }
@@ -926,7 +876,7 @@ int main(int argc, char **argv)
                 float keep = fmaxf(in_way - 0.3f / fmaxf(app->view.dist, 0.3f), 0.05f);   /* 0.3 yards short of it */
                 eye = (Vector3){ at.x + (eye.x - at.x) * keep, at.y + (eye.y - at.y) * keep, at.z + (eye.z - at.z) * keep };
             }
-            float floor_z = maps_world_height(&app->world, eye.x + (float)app->ox, eye.y + (float)app->oy, &gx, &gy);
+            float floor_z = maps_world_height(&app->ws.world, eye.x + (float)app->ox, eye.y + (float)app->oy, &gx, &gy);
             if (floor_z > -10000 && eye.z < floor_z + 0.6f) {
                 /* never under the ground. Smart Pivot on: the camera slides along
                  * the ground and looks up at her; off: it stops lowering, the
@@ -1036,7 +986,7 @@ int main(int argc, char **argv)
             int ahead_tiles, ahead_files, grounds_made, grounds_taken;
             prefetch_counts(app->pf, &ahead_tiles, &ahead_files, &grounds_made, &grounds_taken);
             printf("unpacking files from the archives: %.0f ms over the run, both threads (%llu read, %llu from memory); read ahead: %d tiles, %d files\n",
-                   app->chain.unpack_s * 1000, (unsigned long long)app->chain.misses, (unsigned long long)app->chain.hits, ahead_tiles, ahead_files);
+                   app->ws.chain.unpack_s * 1000, (unsigned long long)app->ws.chain.misses, (unsigned long long)app->ws.chain.hits, ahead_tiles, ahead_files);
             printf("ground prepared ahead: %d tiles, %d of them loaded\n", grounds_made, grounds_taken);
             printf("tile loads: %.0f ms the slowest, %.0f ms on average (each stalls the frame it happens in; 173u)\n", app->tile_load_most_s * 1000, app->tiles_loaded ? app->tile_load_total_s * 1000 / app->tiles_loaded : 0.0);
             printf("  of those, while she moved: %d, %.0f ms the slowest, %.0f ms on average\n", app->walk_loads, app->walk_load_most_s * 1000, app->walk_loads ? app->walk_load_total_s * 1000 / app->walk_loads : 0.0);
@@ -1105,15 +1055,11 @@ int main(int argc, char **argv)
     free(app->standing);
     free(app->built_of);
     creatures_free(&app->spawns);
-    if (app->assets) resolver_report(app->assets, stdout);
-    if (app->test_map) tables_report(app->tables, stdout);
-    if (app->adt_heights) printf("ground: %d tiles' heights made from the map's own ground files\n", adt_heights_made(app->adt_heights));
+    if (app->ws.assets) resolver_report(app->ws.assets, stdout);
+    if (app->test_map) tables_report(app->ws.tables, stdout);
+    if (app->ws.adt_heights) printf("ground: %d tiles' heights made from the map's own ground files\n", adt_heights_made(app->ws.adt_heights));
     wc3_ground_free(app->wc3_ground);                         /* after the ground and the reading-ahead thread that painted with it */
-    maps_world_free(&app->world);                             /* before the heights' source it may ask */
-    adt_heights_free(app->adt_heights);
-    tables_free(app->tables);                                 /* before the resolver and archives it reads from */
-    resolver_free(app->assets);                               /* before the archives it reads from */
-    mpq_chain_close(&app->chain);
+    world_start_close(&app->ws);                              /* the heights, tables, resolver and archives, in that order */
     settings_free(app->settings);
     /* the goodbye receipt, last (1109): its being there says the run ended
      * by itself, not in a crash */

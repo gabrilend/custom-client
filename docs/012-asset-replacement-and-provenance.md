@@ -74,9 +74,15 @@ smallest one from the converter's own tables (`ground_textures.lua`,
 `models.lua`): a picture of each ground in its own colour, one grey
 post for every doodad, and water's run of frames, every file made by
 the client's code (route `hand`, lineage `independent`, no scores yet).
-Buildings, creatures, WC3's stock pictures and models, and the tables
-the client reads (`LiquidType`, `Light`, `Map` ...) are not in it yet,
-so the original game's archives are still needed to start.
+Since 1109's step 1l (decisions 89 to 97) it also holds the tables a
+start needs (`LiquidType`'s one row of water, and the light tables
+empty, so a plain grey day) and a stand-in figure, a sand column a
+person's height with a blue face and one animation, Stand, which
+stands in for her and for any creature whose model no place has; a
+test-map run starts with no install at all. Buildings, creatures' own
+looks, her character, WC3's stock pictures and models, sounds, the
+interface and the sky are not in it yet; an ordinary run still needs
+the original game's archives.
 
 Overlays (issue 105a's second step) sit after the server's assets: the
 server holds the truth about the world it runs (docs/001), so where a
