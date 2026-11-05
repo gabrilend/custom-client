@@ -100,6 +100,7 @@
 #include "094-wc3-pathing.h"
 #include "099-weather.h"
 #include "101-loading-screen.h"
+#include "103-area.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -196,6 +197,7 @@ typedef struct {
     int    nothers;
     struct { double x, y, z; float facing; MovesState moves; int cycle; float held; } other_at[NBYSTANDERS];
     WorldStart ws;                                    /* the archives, resolver, tables, map folder and heights (087-world-start.h) */
+    AreaHere area;                                    /* the area she stands in, its name in the title (103-area.h) */
     Doodads *doodads;                                 /* doodads and buildings (042-doodads.h) */
     Ground *ground;                                   /* the painted ground (038-ground.h) */
     Textures textures;                                /* how pictures go to the card (036-texture.h) */
@@ -737,6 +739,7 @@ int main(int argc, char **argv)
             printf("test map: its WC3 pathing, %d x %d cells, %d closed to walkers: walls\n", pw, ph, pb);
         }
     }
+    area_here_init(&app->area);
     app->horizon = horizon_new(&app->ws.chain, app->ws.assets, app->ws.map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
@@ -916,7 +919,13 @@ int main(int argc, char **argv)
         app->creature_pose_s += GetTime() - creature_t0;
         refresh_tiles(app);
         stream_creatures(app, 0.004);                         /* up to 4 ms a frame building creatures coming into sight (173u) */
-        SetWindowTitle(TextFormat("Everland Ghostsong  -  Ashenvale  x %.1f  y %.1f  z %.1f", app->elf.x, app->elf.y, app->elf.z));
+        /* the area she stands in (103, 1109 step 1aa): its name, said when it changes; the map's folder when none is named */
+        if (area_here_update(&app->area, app->ws.assets, &app->ws.chain, app->ws.tables, app->ws.map_name, app->elf.x, app->elf.y)) {
+            if (app->area.named) printf("area: %u, %s\n", app->area.id, app->area.row.name);
+            else printf("area: none named (%u): %s\n", app->area.id, app->area.why.text);
+        }
+        SetWindowTitle(TextFormat("Everland Ghostsong  -  %s  x %.1f  y %.1f  z %.1f", app->area.named ? app->area.row.name : app->ws.map_name,
+                                  app->elf.x, app->elf.y, app->elf.z));
         /* }}} */
 
         /* {{{ the camera: behind her by its own heading, raised by its pitch;

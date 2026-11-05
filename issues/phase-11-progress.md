@@ -337,3 +337,15 @@ the check share the placing arithmetic, so the check covers what is
 drawn. A planted mix-up of the tile numbers was caught. Calling the
 indoor fog blend was left: the converter writes no buildings to try it
 on. Decisions 183 to 185 in 1109.
+
+2026-11-05: 1109's step 1aa, the area she stands in. The converter
+names each map's zone after the map in its tables and marks every
+33-yard piece of ground with that zone's number, and the client
+ignored both. Now it reads them: the window's title shows the zone's
+name where it always said "Ashenvale", and the run with no window
+counts where she started and ended. On every build all 1024 pieces of
+ground carry the zone map.lua names, the zone's row is named after the
+map, and she starts in it. Two planted mistakes were caught. Comparing
+the two readers of a WC3 map's settings was left: they disagree on the
+byte order of the fog and water colours, and nothing here can say
+which is right. Decisions 186 to 190 in 1109.

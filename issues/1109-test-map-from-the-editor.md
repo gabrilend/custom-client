@@ -1674,6 +1674,45 @@ Not checked: the 16 x 16 centre heights (020 doesn't read them);
 the horizon's drawing (no window here); the archives' own Kalimdor.wdl
 check, which needs the install (a NEEDS here).
 
+**Step 1aa is built** (2026-11-05, the same background work): the
+area she stands in, and its name, as the converter writes them. The
+converter puts one AreaTable row named after the map in its tables and
+that row's number in every chunk of every ground file (its adt.lua,
+MCNK offset 52); the client read neither. Decisions 186 to 190; new
+file `src/103-area.{c,h}`.
+
+- **Reading it (020, 103):** `AdtChunk` gains `area`, and
+  `adt_read_areas` reads each chunk's corner and area from the MCNK
+  headers alone. `area_find` gives an AreaTable row's name, map and
+  parent by the layout's columns (097). `area_chunk_at` finds the chunk
+  under a point by its own corner. `AreaHere` keeps the tile she is on
+  and her area, reading a tile only when she enters it.
+- **Using it:** the window's title (043) shows the area's name where it
+  said "Ashenvale" (the map's folder when no area is named), and prints
+  it when it changes. The run with no window (089) says it and counts
+  `area_start`, `area_end`, `area_named` and `area_changes` in the
+  receipt.
+- **The checks (044):**
+  - Made files: a tile of bare MCNK blocks read back (256 areas, each
+    chunk's centre in its own chunk), four refusals, AreaTable rows
+    found and refused by number, and a 3-field copy that gives no name
+    but is still read for the rest.
+  - Every converter build: map.lua's area in all 1024 chunks of its 4
+    tiles; `adt_read` and `adt_read_areas` agree on every chunk; every
+    corner is where the converter places it on the tile that 018
+    names (worst 0.0000 yards); each centre is in its own chunk; the
+    AreaTable row is named as map.lua names the map, on the map, a zone
+    of its own; she starts in it; past the map's edge there is none.
+  - The receipt: standing, she starts and ends in map.lua's area,
+    named, with no change; the walk starts there too.
+- **Planted faults were caught:** reading the area at offset 56 failed
+  4 checks; swapping the corner's axes failed 2. Both were taken back.
+
+Not checked: that the original's own ground files mean the same at
+offset 52, and which of AreaName's languages the original shows (the
+converter fills them all alike); the title itself (no window here);
+Kalimdor's names in it, which need the install.
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1913,6 +1952,10 @@ return {
    is held to its own ground, by the converter's rule, as the horizon
    places it. The horizon and the check share one placing (decisions
    183 to 185).
+1aa. ~~The area she stands in.~~ Done (2026-11-05): each chunk's area
+   and AreaTable's row, as the converter writes them, read (103); the
+   window's title names it, and the run with no window counts it
+   (decisions 186 to 190).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -3269,6 +3312,46 @@ return {
     the same entry: each side's tx is a different number of the ground
     file's name. Recorded so the difference in names isn't taken for a
     disagreement again. A planted transposition fails the check.
+186. **The slice after 1z: a survey of what the converter writes.** Of
+    a build's files, the client read nothing of AreaTable's row or the
+    chunks' area numbers, of Faction and FactionTemplate (layouts only),
+    of `registration.lua` or of `conversion-report.lua`. The area passes
+    the bar: the converter's adt.lua writes the number, its dbc.lua and
+    registration.lua write the row, and 097's layout is the converter's
+    (tests/100). The factions mean something only with the server's
+    reactions (Phase 5), and the two Lua files record the conversion for
+    the converter and the editor; they were left. `light_indoor_fog`
+    still has no building to try it on (decision 183). Comparing the
+    WC3 map settings readers (083 and the converter's parsers/w3i.lua)
+    was weighed and not built. They disagree on the fog and water
+    colours' byte order: 083 takes red, green, blue, alpha, and the
+    Lua reads them as one number whose bytes are blue, green, red,
+    alpha. Both are recalled, and nothing here decides between them.
+    The Lua also skips the four game-version numbers of a version 28
+    or later file, and every build's file is version 25. Both are
+    left for the owner (unchecked).
+187. **AreaTable's columns stay unmarked**, as Map's LoadingScreenID
+    (decision 180). Marked, 074 would refuse the 2- and 3-field
+    AreaTables the test program makes for its other checks, and with
+    them every row. 103 checks the width itself: a narrow copy gives no
+    name, and its rows stay for the rest.
+188. **The chunk under a point is found by its own corner** (MCNK
+    offset 104, which the converter writes), with a hundredth of a yard
+    given for rounding, the first in file order on a shared edge. The
+    build check holds every corner to the tile 018 names and the
+    chunk's index, so the corner and the index arithmetic agree there.
+189. **A tile's areas are read from the MCNK headers alone**
+    (`adt_read_areas`). Reading the whole tile (about 5 MB, with blend
+    maps, whose form needs the WDT) to learn 256 numbers each time she
+    enters a tile would be waste. The build check holds it equal to
+    `adt_read` on every chunk.
+190. **The name is AreaName's first (English) text.** The converter
+    writes the same text in every language's slot, so on its tables any
+    would do. Which slot the original shows for a client's language is
+    recalled, and so is the meaning of offset 52 in the original's own
+    files, so a Kalimdor name in the title is for the owner's machine.
+    With no area named, the title shows the map's folder. The counter
+    is at 103.
 
 ## Open questions
 
@@ -3482,7 +3565,10 @@ return {
   [606](./606-the-loading-screen.md) (the loading screen's picture;
   its bar and the rest not built). For step 1z:
   `src/020-adt.info.md` (`adt_wdl_index`, `adt_wdl_corner_at`), 039,
-  075 and 098.
+  075 and 098. For step 1aa: `src/103-area.info.md` (the area), 020
+  (`adt_read_areas`), 097, 043, 089 and
+  [1002](./1002-zone-music-and-ambience.md) (the area under her, which
+  zone music needs).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

@@ -27,6 +27,7 @@
 #include "084-map-fog.h"
 #include "014-settings.h"
 #include "101-loading-screen.h"
+#include "103-area.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -405,6 +406,7 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "sky_red", r->sky_red }, { "sky_green", r->sky_green }, { "sky_blue", r->sky_blue },
         { "loading_screen", r->loading_screen }, { "loading_screen_width", r->loading_screen_width },
         { "loading_screen_height", r->loading_screen_height }, { "loading_screen_levels", r->loading_screen_levels },
+        { "area_start", r->area_start }, { "area_end", r->area_end }, { "area_named", r->area_named }, { "area_changes", r->area_changes },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -522,6 +524,15 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     int last_seq = ms.seq;
     r.start_x = m.x; r.start_y = m.y; r.start_z = m.z;
     r.lowest_z = r.highest_z = m.z;
+    /* the area she stands in (103, 1109 step 1aa), said when it changes */
+    AreaHere *area = malloc(sizeof *area);
+    if (area) {
+        area_here_init(area);
+        area_here_update(area, ws.assets, &ws.chain, ws.tables, ws.map_name, m.x, m.y);
+        r.area_start = (int)area->id;
+        if (area->named) fprintf(log, "headless: she starts in area %u, %s (map %u's, from %s)\n", area->id, area->row.name, area->row.continent, asset_source_name(area->row.from));
+        else fprintf(log, "headless: she starts in no named area (%u): %s\n", area->id, area->why.text);
+    }
     /* the weather (099, 1109 step 1v): 043's --weather from the start, at
      * once, then each move's as it begins; the clock is the steps' */
     Weather weather;
@@ -572,6 +583,12 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
                 .grounded = m.grounded || m.swimming, .rising = m.vz > 0, .swimming = m.swimming, .walking = mi.walking,
                 .speed = (float)mover_intended_speed(&m, &mi), .dt = (float)mv->step,
             };
+            if (area) {
+                uint32_t was = area->id;
+                area_here_update(area, ws.assets, &ws.chain, ws.tables, ws.map_name, m.x, m.y);
+                if (area->id != was && ++r.area_changes <= 20)
+                    fprintf(log, "headless: step %d: area %u%s%s\n", r.steps + 1, area->id, area->named ? ", " : "", area->named ? area->row.name : "");
+            }
             moves_step(&ms, &anim, &ai);
             if (ms.seq != last_seq) { ++r.her_animation_changes; last_seq = ms.seq; }
             ++r.steps;
@@ -584,6 +601,13 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     r.storm = weather_strength(&weather, clock);
     r.moves = mv->nmoves;
     r.end_x = m.x; r.end_y = m.y; r.end_z = m.z;
+    if (area) {
+        r.area_end = (int)area->id;
+        r.area_named = area->named;
+        if (area->named) fprintf(log, "headless: she ends in area %u, %s; it changed %d time%s\n", area->id, area->row.name, r.area_changes, r.area_changes == 1 ? "" : "s");
+        else fprintf(log, "headless: she ends in no named area (%u: %s); it changed %d time%s\n", area->id, area->why.text, r.area_changes, r.area_changes == 1 ? "" : "s");
+        free(area);
+    }
     r.end_facing = fmod(m.o, 2 * 3.14159265358979323846);
     if (r.end_facing < 0) r.end_facing += 2 * 3.14159265358979323846;
     r.her_animation = ms.seq >= 0 && ms.seq < anim.nseqs ? anim.seqs[ms.seq].id : -1;

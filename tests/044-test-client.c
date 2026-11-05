@@ -84,6 +84,7 @@
 #include "../src/098-wdt.h"
 #include "../src/099-weather.h"
 #include "../src/101-loading-screen.h"
+#include "../src/103-area.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -1710,6 +1711,208 @@ static void loading_screen_tests(const char *dir)
 }
 /* }}} */
 
+/* {{{ static t_mcnk_areas: a ground file of 256 bare MCNK blocks (a
+ * 128-byte header each, as world-edit-to-execute's adt.lua lays it: index
+ * x at 4, y at 8, area at 52, the north-west corner at 104), chunk k's
+ * area k * 7 + 1, its corner on tile (tx, ty) as the converter places it;
+ * `skip` (-1 none) leaves one out, `twice` (-1 none) writes chunk 0's
+ * index in its place. malloc'd, `*len`. */
+static unsigned char *t_mcnk_areas(int tx, int ty, int skip, int twice, size_t *len)
+{
+    unsigned char *s = calloc(256, 136), *p = s;
+    for (int k = 0; k < 256; ++k) {
+        if (k == skip) continue;
+        int ix = k == twice ? 0 : k % 16, iy = k == twice ? 0 : k / 16;
+        memcpy(p, "KNCM", 4);
+        t_le32(p + 4, 128);
+        t_le32(p + 12, (uint32_t)ix);
+        t_le32(p + 16, (uint32_t)iy);
+        t_le32(p + 60, (uint32_t)(k * 7 + 1));
+        float x = (float)((32 - tx) * 533.33333 - iy * (533.33333 / 16)), y = (float)((32 - ty) * 533.33333 - ix * (533.33333 / 16));
+        memcpy(p + 112, &x, 4);
+        memcpy(p + 116, &y, 4);
+        p += 136;
+    }
+    *len = (size_t)(p - s);
+    return s;
+}
+/* }}} */
+
+/* {{{ static area_tests: the area under a point and its name (103; 1109
+ * step 1aa), on files made here: the chunks' areas alone (020's
+ * adt_read_areas) and its refusals, the chunk under points, and
+ * AreaTable's rows by the layout's columns (097, the converter's), with
+ * the refusals and a copy too narrow for AreaName. No game data. */
+static void area_tests(const char *dir)
+{
+    char root[512], folder[600], narrow[600], line[600];
+    WWhy why;
+    size_t n;
+    AdtArea cells[256];
+    unsigned char *s = t_mcnk_areas(31, 30, -1, -1, &n);
+    WErr e = adt_read_areas(s, n, cells, &why);
+    int areas = 0, centres = 0;
+    for (int k = 0; !e && k < 256; ++k) {
+        areas += cells[k].area == (uint32_t)(k * 7 + 1);
+        double x = cells[k].x - 533.33333 / 32, y = cells[k].y - 533.33333 / 32;
+        centres += area_chunk_at(cells, x, y) == k;
+    }
+    snprintf(line, sizeof line, "a made tile's 256 chunks: each one's area read from its header (%d) and each centre found in its own chunk (%d)", areas, centres);
+    check(!e && areas == 256 && centres == 256, e ? why.text : line);
+    int tx, ty;
+    maps_tile_of(cells[0].x - 1, cells[0].y - 1, &tx, &ty);
+    check(tx == 31 && ty == 30 && area_chunk_at(cells, cells[0].x + 1, cells[0].y - 1) == -1 && area_chunk_at(cells, cells[255].x - 34, cells[255].y - 1) == -1,
+          "its corners are on the tile maps_tile_of names (018); a point a yard north of it, or past its south edge, is in none of its chunks");
+    free(s);
+    static const struct { int skip, twice, cut; const char *says, *what; } BAD[] = {
+        { 5, -1, 0, "255 MCNK", "a tile of 255 chunks: refused, counting them" },
+        { -1, 9, 0, "a second time", "a chunk given twice: refused, saying so" },
+        { -1, -1, 1, "past the file's end", "a block cut short: refused, saying where" },
+    };
+    for (size_t i = 0; i < sizeof BAD / sizeof BAD[0]; ++i) {
+        s = t_mcnk_areas(31, 30, BAD[i].skip, BAD[i].twice, &n);
+        e = adt_read_areas(s, BAD[i].cut ? n - 3 : n, cells, &why);
+        check(e == W_ERR_CORRUPT && strstr(why.text, BAD[i].says), e == W_ERR_CORRUPT ? BAD[i].what : why.text);
+        free(s);
+    }
+    s = t_mcnk_areas(31, 30, -1, -1, &n);
+    t_le32(s + 12, 16);
+    e = adt_read_areas(s, n, cells, &why);
+    check(e == W_ERR_CORRUPT && strstr(why.text, "out of range"), "a chunk index of 16: refused, saying it is out of range");
+    free(s);
+
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-area", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the area's fixtures"); return; }
+    t_remove_tree(root);
+    snprintf(folder, sizeof folder, "%s/area", root);
+    snprintf(narrow, sizeof narrow, "%s/narrow", root);
+    t_mkdirs(folder);
+    t_mkdirs(narrow);
+    const TableLayout *al = table_layout("AreaTable");
+    uint32_t c_cont = table_layout_find(al, "ContinentID"), c_parent = table_layout_find(al, "ParentAreaID"), c_name = table_layout_find(al, "AreaName_enUS");
+    check(al && al->fields == 36 && c_cont == 2 && c_parent == 3 && c_name == 12,
+          "AreaTable's columns by name (097, the converter's): 36 wide, ContinentID 2, ParentAreaID 3, AreaName_enUS 12 (its first text)");
+    /* rows: 9000 a zone of map 900, 9001 a part of it */
+    static const char ATEXT[] = "\0Made Zone\0Made Corner";                 /* 1, 11 */
+    static uint32_t acells[2 * 36];
+    memset(acells, 0, sizeof acells);
+    acells[0] = 9000; acells[c_cont - 1] = 900; acells[c_name - 1] = 1;
+    acells[36] = 9001; acells[36 + c_cont - 1] = 900; acells[36 + c_parent - 1] = 9000; acells[36 + c_name - 1] = 11;
+    static unsigned char ab[20 + sizeof acells + sizeof ATEXT];
+    n = t_dbc(ab, 2, 36, acells, ATEXT, sizeof ATEXT);
+    t_write(folder, "DBFilesClient/AreaTable.dbc", ab, n);
+    const uint32_t ncells[] = { 9000, 900, 0 };
+    static unsigned char nb[100];
+    n = t_dbc(nb, 1, 3, ncells, ATEXT, sizeof ATEXT);
+    t_write(narrow, "DBFilesClient/AreaTable.dbc", nb, n);
+    for (int pass = 0; pass < 2; ++pass) {
+        ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", pass ? narrow : folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (e) { check(0, why.text); fclose(place.log); free(log); continue; }
+        Tables *ts = tables_new(r, NULL);
+        AreaRow row;
+        if (!pass) {
+            e = area_find(ts, 9001, &row, &why);
+            snprintf(line, sizeof line, "area 9001: \"%s\", on map %u, part of %u, from %s", row.name, row.continent, row.parent, asset_source_name(row.from));
+            check(!e && row.id == 9001 && !strcmp(row.name, "Made Corner") && row.continent == 900 && row.parent == 9000 && row.from == ASSET_FROM_OVERLAY, e ? why.text : line);
+            e = area_find(ts, 9000, &row, &why);
+            check(!e && !strcmp(row.name, "Made Zone") && row.parent == 0, e ? why.text : "area 9000: \"Made Zone\", a zone of its own");
+            e = area_find(ts, 0, &row, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "area 0") && row.id == 0, "area 0: none, saying so");
+            e = area_find(ts, 9005, &row, &why);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "9005") && !row.name[0], "an area AreaTable hasn't: not found, naming it");
+            AssetCounts ac;
+            asset_counts(r, &ac);
+            check(ac.placeholder_answers == 0 && tables_placeholders(ts) == 0, "and no placeholder row stood in");
+        } else {
+            e = area_find(ts, 9000, &row, &why);
+            TableRow tr;
+            WWhy rw;
+            WErr re = tables_row(ts, "AreaTable", 9000, &tr, &rw);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "3 fields wide") && strstr(why.text, "field 12") && !re,
+                  "an AreaTable copy 3 fields wide: no name, saying its width and the column's; its row still there for the rest (074 doesn't refuse it)");
+        }
+        tables_free(ts);
+        resolver_free(r);
+        fclose(place.log);
+        free(log);
+    }
+    t_remove_tree(root);
+}
+/* }}} */
+
+/* {{{ static area_build: a converted build's areas (103; 1109 step 1aa),
+ * as the converter writes them: map.lua's map.area in every chunk of
+ * every ground file the WDT lists (read by adt_read and by
+ * adt_read_areas alike), each chunk's corner where the converter places
+ * it on the tile 018 files it under (so the chunk under a point is the
+ * one that holds it), AreaTable's row of that number named after the
+ * map, on the map, a zone of its own; and the area she starts in. */
+static void area_build(Resolver *r, Tables *ts, const ConvertedMap *m)
+{
+    char path[300], line[900];
+    WWhy why;
+    AssetAnswer fa;
+    snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m->directory, m->directory);
+    WErr e = asset_read(r, NULL, path, ASSET_GROUND, &fa, &why);
+    if (e) { check(0, why.text); return; }
+    Wdt *wdt = malloc(sizeof *wdt);
+    e = wdt_read(fa.data, fa.len, wdt, &why);
+    asset_answer_free(&fa);
+    if (e) { check(0, why.text); free(wdt); return; }
+    AdtTile *t = malloc(sizeof *t);
+    static AdtArea cells[256];
+    int tiles = 0, chunks = 0, same = 0, agree = 0, placed = 0, held = 0, bad = 0;
+    double worst = 0;
+    for (int tx = 0; tx < 64; ++tx)
+        for (int ty = 0; ty < 64; ++ty) {
+            if (!wdt_has_tile(wdt, tx, ty)) continue;
+            snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m->directory, m->directory, ty, tx);
+            if (asset_read(r, NULL, path, ASSET_GROUND, &fa, &why)) { ++bad; printf("  (%s)\n", why.text); continue; }
+            WErr ea = adt_read_areas(fa.data, fa.len, cells, &why), et = adt_read(fa.data, fa.len, wdt_big_alpha(wdt), t, &why);
+            asset_answer_free(&fa);
+            if (ea || et) { ++bad; printf("  (%s)\n", why.text); if (!et) adt_free(t); continue; }
+            ++tiles;
+            for (int k = 0; k < 256; ++k) {
+                const AdtChunk *c = &t->chunks[k];
+                ++chunks;
+                same += cells[k].area == (uint32_t)m->area && m->area != 0;
+                agree += c->area == cells[k].area && c->x == cells[k].x && c->y == cells[k].y;
+                double x = (32 - tx) * 533.33333 - c->iy * (533.33333 / 16), y = (32 - ty) * 533.33333 - c->ix * (533.33333 / 16);
+                double d = fmax(fabs(x - c->x), fabs(y - c->y));
+                if (d > worst) worst = d;
+                placed += d < 0.01;
+                held += area_chunk_at(cells, c->x - 533.33333 / 32, c->y - 533.33333 / 32) == k;
+            }
+            adt_free(t);
+        }
+    free(t);
+    snprintf(line, sizeof line, "its %d ground tiles' %d chunks: map.lua's area %d in each (%d), adt_read and adt_read_areas agreeing (%d), corners where the converter places them on the tile (%d, worst %.4f yards), each centre in its own chunk (%d)",
+             tiles, chunks, m->area, same, agree, placed, worst, held);
+    check(bad == 0 && tiles == wdt->ntiles && tiles > 0 && same == chunks && agree == chunks && placed == chunks && held == chunks, line);
+    free(wdt);
+
+    AreaRow row;
+    e = area_find(ts, (uint32_t)m->area, &row, &why);
+    snprintf(line, sizeof line, "its AreaTable row %d, from %s: \"%s\" (map.lua's name \"%s\"), on map %u (%d), a zone of its own (%u)",
+             m->area, asset_source_name(row.from), row.name, m->name, row.continent, m->id, row.parent);
+    check(!e && row.from == ASSET_FROM_OVERLAY && m->name[0] && !strcmp(row.name, m->name) && row.continent == (uint32_t)m->id && row.parent == 0, e ? why.text : line);
+    AreaHere *a = malloc(sizeof *a);
+    area_here_init(a);
+    int changed = area_here_update(a, r, NULL, ts, m->directory, m->start_x, m->start_y);
+    int again = area_here_update(a, r, NULL, ts, m->directory, m->start_x + 0.5, m->start_y);
+    snprintf(line, sizeof line, "she starts in area %u, %s (%s), on tile %d, %d; half a yard on, no change", a->id, a->named ? "named" : "not named", a->named ? a->row.name : a->why.text, a->tx, a->ty);
+    check(changed == 1 && again == 0 && a->tile_read && a->id == (uint32_t)m->area && a->named && !strcmp(a->row.name, m->name), line);
+    area_here_update(a, r, NULL, ts, m->directory, 17066.0 + 600, m->start_y);
+    check(a->id == 0 && !a->named && strstr(a->why.text, "off the map"), "past the map's edge: no area, saying it is off the map");
+    free(a);
+}
+/* }}} */
+
 /* {{{ static wdl_matches_ground: a converted map's far-off ground (its
  * .wdl, which the window's horizon draws, 039) against its own ground
  * files (075), by the converter's rule (world-edit-to-execute's
@@ -2534,6 +2737,7 @@ static void converted_tests(const char *dir, const char *build)
         check(lit == nlit, line);
     }
     loading_screen_build(r, ts, &m, conv_file);
+    area_build(r, ts, &m);
 
     LuaData *d = NULL;
     e = lua_data_read(conv_file, CONVERTED_MAP_MOST, &d, &why);
@@ -6846,6 +7050,21 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
                       && lua_value_number(lua_value_field(wt, "loading_screen")) == said && lua_value_number(lua_value_field(wt, "loading_screen_levels")) == 10,
                       wre ? why.text : line);
             }
+            /* the area she stands in (103, 1109 step 1aa): map.lua's, named
+             * (its AreaTable row), the same where she ends, in the receipt */
+            {
+                char mp[760];
+                snprintf(mp, sizeof mp, "%s/map.lua", build);
+                LuaData *md = NULL;
+                double said = lua_data_read(mp, CONVERTED_MAP_MOST, &md, &why) ? -1
+                            : lua_value_number(lua_value_field(lua_value_field(lua_data_top(md), "map"), "area"));
+                if (md) lua_data_free(md);
+                snprintf(line, sizeof line, "the run with no window: she starts and ends in area %d and %d (map.lua: %.0f), named %d, changed %d times, standing; the walk's start %d; in the receipt",
+                         wr.area_start, wr.area_end, said, wr.area_named, wr.area_changes, h->area_start);
+                check(!wre && wr.area_start == said && wr.area_end == said && wr.area_named == 1 && wr.area_changes == 0 && h->area_start == said
+                      && lua_value_number(lua_value_field(wt, "area_start")) == said && lua_value_number(lua_value_field(wt, "area_named")) == 1,
+                      wre ? why.text : line);
+            }
             if (wd) lua_data_free(wd);
             check(h->weather_changes == 0 && h->storm == 0 && h->weather_state == WEATHER_FINE, "with no weather given: fine, no storm, none taken");
         }
@@ -7062,6 +7281,11 @@ int main(int argc, char **argv)
     /* {{{ a map's loading screen (101; 1109 step 1y): tables and pictures made here, no game data */
     printf("a map's loading screen\n");
     loading_screen_tests(dir);
+    /* }}} */
+
+    /* {{{ the area under her and its name (103; 1109 step 1aa): files made here, no game data */
+    printf("the area she stands in\n");
+    area_tests(dir);
     /* }}} */
 
     /* {{{ a converted map's folder (1109): map.lua, its tables per row, its
