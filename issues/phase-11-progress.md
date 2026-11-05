@@ -326,3 +326,14 @@ picture writer make files, and this client reads every copy back exactly
 as the converter meant it; on the real builds each smaller copy is the
 one before halved. The bar, tips and the rest of issue 606 are not
 built. Decisions 177 to 182 in 1109.
+
+2026-11-05: 1109's step 1z, a converted map's far-off ground. The
+window's horizon draws each map's low-detail ground file (.wdl), and
+for a converted map nothing had checked that file against the map's
+real ground. Now the test program places every corner exactly as the
+horizon does and finds each within half a yard of the ground files
+(the converter rounds to whole yards), on every build. The horizon and
+the check share the placing arithmetic, so the check covers what is
+drawn. A planted mix-up of the tile numbers was caught. Calling the
+indoor fog blend was left: the converter writes no buildings to try it
+on. Decisions 183 to 185 in 1109.

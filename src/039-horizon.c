@@ -80,8 +80,8 @@ Horizon *horizon_new(MpqChain *chain, Resolver *assets, const char *map_name, do
 }
 float horizon_corner(const Horizon *h, int tx, int ty)
 {
-    if (!h->ready || tx < 0 || tx > 63 || ty < 0 || ty > 63 || !h->wdl->have[tx * 64 + ty]) return -100000.0f;
-    return h->wdl->heights[tx * 64 + ty][0];
+    if (!h->ready || tx < 0 || tx > 63 || ty < 0 || ty > 63 || !h->wdl->have[adt_wdl_index(tx, ty)]) return -100000.0f;
+    return h->wdl->heights[adt_wdl_index(tx, ty)][0];
 }
 /* }}} */
 
@@ -89,7 +89,7 @@ float horizon_corner(const Horizon *h, int tx, int ty)
  * triangles each over the corner heights, none over holes */
 static void make(Horizon *h, int tx, int ty)
 {
-    int i = tx * 64 + ty;
+    int i = adt_wdl_index(tx, ty);
     if (!h->wdl->have[i]) { h->made[i] = 2; return; }
     const float step = 533.33333f / 16;
     Mesh m = { 0 };
@@ -99,8 +99,10 @@ static void make(Horizon *h, int tx, int ty)
     for (int r = 0; r <= 16; ++r)
         for (int c = 0; c <= 16; ++c) {
             int k = r * 17 + c;
-            m.vertices[k * 3] = (float)((32 - tx) * 533.33333 - r * step - h->ox);
-            m.vertices[k * 3 + 1] = (float)((32 - ty) * 533.33333 - c * step - h->oy);
+            double wx, wy;
+            adt_wdl_corner_at(tx, ty, r, c, &wx, &wy);          /* as 044 holds a converted map's to its ground (1109 step 1z) */
+            m.vertices[k * 3] = (float)(wx - h->ox);
+            m.vertices[k * 3 + 1] = (float)(wy - h->oy);
             m.vertices[k * 3 + 2] = h->wdl->heights[i][k];
             const int16_t *hts = h->wdl->heights[i];
             float hn = hts[(r > 0 ? r - 1 : r) * 17 + c], hs = hts[(r < 16 ? r + 1 : r) * 17 + c];
@@ -142,7 +144,7 @@ void horizon_draw(Horizon *h, int tx, int ty, const char *loaded, Vector3 eye, c
     for (int x = tx - HORIZON_REACH; x <= tx + HORIZON_REACH; ++x)
         for (int y = ty - HORIZON_REACH; y <= ty + HORIZON_REACH; ++y) {
             if (x < 0 || x > 63 || y < 0 || y > 63 || loaded[x * 64 + y] == 1) continue;
-            int i = x * 64 + y;
+            int i = adt_wdl_index(x, y);
             if (!h->made[i]) make(h, x, y);
             if (h->made[i] == 1 && sight_ball(&sight, h->centre[i], h->radius[i])) DrawMesh(h->meshes[i], h->material, MatrixIdentity());
         }

@@ -1643,6 +1643,37 @@ copy against its source (the map's preview picture or its ground,
 not in the build). The rest of 606 (the bar, its rounds, the tips, input
 swallowed, ending when the reads finish) is not built.
 
+**Step 1z is built** (2026-11-05, the same background work): a
+converted map's far-off ground (its .wdl), which the window's horizon
+draws, held to the map's own ground. Decisions 183 to 185; no new file.
+
+- **One placing for the horizon and the check (020, 039):**
+  `adt_wdl_index` gives a tile's entry and `adt_wdl_corner_at` gives a
+  corner's place in world yards. The horizon (039) now draws by them,
+  rather than by its own arithmetic, and the check uses the same two.
+- **The check (044), on every converter build:**
+  - The .wdl is in the map's folder and reads.
+  - It has exactly the WDT's tiles.
+  - Each tile's 17 x 17 corners are within half a yard of the map's own
+    ground (075) at the place the horizon puts them. That is the
+    converter's rule from its adt.wdl_bytes: the height grid every 8
+    points, rounded to whole yards.
+  - It has no holes.
+  - Result: 4 tiles and 1156 of 1156 corners on each build; the worst
+    is 0.5 yards (the rounding).
+- **A planted fault was caught:** a transposed tile index put 482
+  corners out, up to 17.8 yards. It was taken back.
+
+The converter files a tile at "ty * 64 + tx" and the client at
+"tx * 64 + ty". These are the same tile, not a disagreement. The
+converter's tx is the ground file's first number; the client's is its
+second (033, 075: `<map>_<ty>_<tx>`). The check above confirms this on
+the builds.
+
+Not checked: the 16 x 16 centre heights (020 doesn't read them);
+the horizon's drawing (no window here); the archives' own Kalimdor.wdl
+check, which needs the install (a NEEDS here).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1878,6 +1909,10 @@ return {
    shows it while the world loads, and the run with no window counts it
    in the receipt. Held to the converter's writer by tests/102
    (decisions 177 to 182; 606's picture only).
+1z. ~~A converted map's far-off ground.~~ Done (2026-11-05): its .wdl
+   is held to its own ground, by the converter's rule, as the horizon
+   places it. The horizon and the check share one placing (decisions
+   183 to 185).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -3214,6 +3249,27 @@ return {
     layout. The builds' real files add that each smaller copy is the one
     before halved. The counter is at 102.
 
+183. **The slice after 1y, and what failed the bar.** Calling
+    `light_indoor_fog` would need a building the converter writes, and
+    it writes none: every build's conversion report says placed_wmo = 0
+    (as decision 163 found). With nothing to check it on, it waits for
+    the owner's machine or a converter that writes buildings. Of
+    the converter's files, the .wdl was one the client used but nothing
+    checked for a converted map. Its rule is in the converter's own
+    writer, so it passes the bar.
+184. **The horizon and its check share one placing.**
+    `adt_wdl_index` and `adt_wdl_corner_at` (020) are what 039 draws
+    by and what 044 checks by, so the check holds the horizon's own
+    arithmetic and not a copy. The tolerance is half a yard plus a
+    hundredth: the converter rounds to whole yards. A corner on the
+    tile's far edge is sampled a hundredth of a yard inside, so it is
+    the tile's own ground and not the next tile's.
+185. **The two sides' tile numbers are one convention.** The
+    converter's "ty * 64 + tx" and the client's "tx * 64 + ty" name
+    the same entry: each side's tx is a different number of the ground
+    file's name. Recorded so the difference in names isn't taken for a
+    disagreement again. A planted transposition fails the check.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -3424,7 +3480,9 @@ return {
   `src/101-loading-screen.info.md` (the loading screen), 097, 017, 043,
   089, `tests/102-loading-screen-matches-converter.lua`, and
   [606](./606-the-loading-screen.md) (the loading screen's picture;
-  its bar and the rest not built).
+  its bar and the rest not built). For step 1z:
+  `src/020-adt.info.md` (`adt_wdl_index`, `adt_wdl_corner_at`), 039,
+  075 and 098.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch
