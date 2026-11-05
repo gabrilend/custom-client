@@ -300,3 +300,17 @@ third to fifth parameter sets as read, which 026 has read since step
 the check can ask it from Lua. The nine tables the converter doesn't
 write keep widths nothing on its side checks. With no converter tree
 given, the check says so and passes. Decisions 166 to 171 in 1109.
+
+2026-11-05: 1109's step 1x, the six failures every run carried here.
+None was the client's fault. All six needed files that only the owner's
+machine has: the server's extracted maps and navigation tiles, and the
+original client's install. A check that can't find such a file now
+says NEEDS and what is missing. NEEDS are counted apart from passes and
+failures, and the run exits 2, so a run missing data never looks clean.
+Two of the six were faults in the test. Two slope checks took a missing
+server limit as -1, so they failed while their neighbours passed
+without testing anything. And a missing install ended the run early,
+uncounted, so 82 later checks that need no data never ran here. Both
+are fixed. Those checks now run, and all pass. With the run reaching its end, the
+leak the sanitized runs always reported turned out to be the early
+return's, and is gone. Decisions 172 to 176 in 1109.

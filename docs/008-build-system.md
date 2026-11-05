@@ -81,6 +81,13 @@ The script prints a warning when that line is crossed.
 
 One test program, run by `scripts/build --test`. Each check prints `ok:`
 or `FAIL:` with what it measured, and the program ends with the count.
+A check that needs what only the owner's machine has (the client's
+install, the server's extracted files under `assets/server-data`,
+war3.mpq) and doesn't find it prints `NEEDS:` with what is missing. It
+is counted apart in the closing line, and the program exits 2 rather
+than 0. One that finds the file and gets a wrong answer is still a
+`FAIL:` (exit 1). A run on the owner's machine should show no NEEDS
+(issue 1109 step 1x).
 The checks hold the client to facts about the original game's own files
 (Astranaar's ground height, her run speed, the server's own placement of
 every doodad) and to measured behaviour (tile loads, pictures compared

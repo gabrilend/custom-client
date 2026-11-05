@@ -24,6 +24,14 @@
  *                           ground_textures.lua and models.lua, for the
  *                           baseline set made from them (default:
  *                           world-edit-to-execute's src/wowbuild; "-" for it)
+ *
+ * Each check prints ok or FAIL. A check this machine can't make, for want
+ * of what only the owner's machine has (the client's install at
+ * CLIENT_DATA_DIR, the server's extracted files under PROJECT_DIR/assets/
+ * server-data, war3.mpq), prints NEEDS with what is missing instead,
+ * counted apart in the closing line; one that is there and wrong is still
+ * a FAIL. Exit status: 1 when a check failed, else 2 when one was NEEDS,
+ * else 0 (1109 step 1x).
  */
 #include "../src/020-adt.h"
 #include "../src/013-errors.h"
@@ -107,6 +115,30 @@ static void check(int ok, const char *what)
     else { printf("  FAIL: %s\n", what); ++fails; }
 }
 static int near(double a, double b, double tol) { return fabs(a - b) <= tol; }
+/* a check this machine can't make, for want of what only the owner's
+ * machine has: the original client's install, an AzerothCore server's
+ * extracted files (1109 step 1x, decision 172). Never an ok: printed as
+ * NEEDS with what is missing, counted, named in the closing line, and the
+ * exit status is 2 when nothing failed but something couldn't be checked.
+ * Only for a thing that is absent; one that is there and wrong is a FAIL. */
+static int needs;
+static void need(const char *what, const char *missing)
+{
+    ++needs;
+    printf("  NEEDS: %s (%s)\n", what, missing);
+}
+static int is_folder(const char *path) { struct stat sb; return !stat(path, &sb) && S_ISDIR(sb.st_mode); }
+/* the original client's archives for a part of the checks: open, or, when
+ * the folder holds none (no install on this machine), a NEEDS line for
+ * that part; archives that are there but won't open are a FAIL */
+static int client_open(MpqChain *c, const char *client, const char *part, WWhy *why)
+{
+    WErr e = mpq_chain_open(c, client, "enUS", why);
+    if (!e) return 1;
+    if (e == W_ERR_NOT_FOUND && strstr(why->text, "no MPQ archives")) need(part, why->text);
+    else check(0, why->text);
+    return 0;
+}
 /* a stand-in for the card's pictures (173u): an arbitrary half of them,
  * those with an odd-length name, count as sent already */
 static int test_on_card(void *ctx, const char *name) { (void)ctx; return strlen(name) % 2; }
@@ -6615,20 +6647,29 @@ int main(int argc, char **argv)
     MapWorld *w = malloc(sizeof *w);
     snprintf(path, sizeof path, "%s/assets/server-data/maps", dir);
     maps_world_init(w, path, 1);
+    /* the server's extracted maps (assets/server-data, a link to an
+     * AzerothCore server's): absent here, these checks are NEEDS; a
+     * folder that is there must hold the right ground (1109 step 1x) */
+    int have_maps = is_folder(path);
+    char maps_missing[760];
+    snprintf(maps_missing, sizeof maps_missing, "no server map files at %s", path);
     float gx, gy;
     float z = maps_world_height(w, 2828, -284, &gx, &gy);
     snprintf(line, sizeof line, "Astranaar's flight point stands at %.2f yards (Lua: 106.71)", z);
-    check(near(z, 106.71, 0.01), line);
+    if (have_maps) check(near(z, 106.71, 0.01), line);
+    else need("Astranaar's flight point stands at 106.71 yards (Lua)", maps_missing);
     float worst = 0;
+    int seams = 0;                                      /* points compared across a seam: none passed for nothing (1109 step 1x) */
     for (int edge = 25; edge <= 27; ++edge) {
         float x = (32 - edge) * MAPS_GRID_SIZE;
         for (int y = -900; y <= 100; y += 37) {
             float a = maps_world_height(w, x + 0.001f, (float)y, &gx, &gy), b = maps_world_height(w, x - 0.001f, (float)y, &gx, &gy);
-            if (a > -10000 && b > -10000 && fabsf(a - b) > worst) worst = fabsf(a - b);
+            if (a > -10000 && b > -10000) { ++seams; if (fabsf(a - b) > worst) worst = fabsf(a - b); }
         }
     }
-    snprintf(line, sizeof line, "no step where tiles meet (largest %.4f yards)", worst);
-    check(worst < 0.05f, line);
+    snprintf(line, sizeof line, "no step where tiles meet (largest %.4f yards over %d points)", worst, seams);
+    if (have_maps) check(seams > 0 && worst < 0.05f, line);
+    else need("no step where tiles meet", maps_missing);
     check(maps_world_height(w, 1e6f, 1e6f, &gx, &gy) < -10000, "far outside the world: no ground, not an error");
     /* }}} */
 
@@ -6685,7 +6726,20 @@ int main(int argc, char **argv)
     snprintf(path, sizeof path, "%s/assets/server-data/mmaps", dir);
     float limit = navmesh_slope_read(path, 1, &why);
     snprintf(line, sizeof line, "the server's tiles for Kalimdor say %.1f degrees is the steepest walkable", limit);
-    check(near(limit, 60, 1e-4), line);
+    if (is_folder(path)) check(near(limit, 60, 1e-4), limit < 0 ? why.text : line);
+    else {
+        char missing[760];
+        snprintf(missing, sizeof missing, "no server navigation tiles at %s", path);
+        need("the server's tiles for Kalimdor say 60 degrees is the steepest walkable", missing);
+        /* the made-up slopes below hold the mover to a limit, not the
+         * server: without its tiles they take the 60 the check above holds
+         * the server to, rather than navmesh_slope_read's -1, which made
+         * any slope over a degree too steep: the 70-degree checks passed
+         * without the limit being tested and the 45-degree ones failed
+         * (1109 step 1x, decision 174) */
+        limit = 60;
+        printf("  (the made-up slopes below take 60 degrees, the server's tiles not being here)\n");
+    }
     ramp_tan = tan(45 * 3.14159265358979 / 180);
     mover_init(&m, 0, 0, 10, 0, 1.2, limit); in = none; in.forward = 1; run(&m, in, 1, g_ramp);
     check(m.x > 6, "up a 45-degree ramp: walks on");
@@ -6701,14 +6755,17 @@ int main(int argc, char **argv)
     mover_init(&m, 4, 0, 12, 0, 1.2, limit); run(&m, none, 1, g_ramp);
     check(near(m.x, 4, 1e-9) && !m.sliding, "on a 45-degree slope, standing still stays put");
     /* the real ground: a second's run from the start point stays on the map */
-    mover_init(&m, 2717, -400, maps_world_height(w, 2717, -400, &gx, &gy), 3.6, 1.2, limit);
-    in = none; in.forward = 1;
-    for (int i = 0; i < 100; ++i) mover_step(&m, &in, 0.01, &(MoverWorld){ g_world, NULL, NULL, w });
-    check(m.grounded, "a second's run from the start point on Ashenvale's real ground stays on it");
+    if (have_maps) {
+        mover_init(&m, 2717, -400, maps_world_height(w, 2717, -400, &gx, &gy), 3.6, 1.2, limit);
+        in = none; in.forward = 1;
+        for (int i = 0; i < 100; ++i) mover_step(&m, &in, 0.01, &(MoverWorld){ g_world, NULL, NULL, w });
+        check(m.grounded, "a second's run from the start point on Ashenvale's real ground stays on it");
+    } else need("a second's run from the start point on Ashenvale's real ground stays on it", maps_missing);
     /* }}} */
 
     /* {{{ the asset resolver (105a): folders and an archive made here, no game data,
-     * so before the archives, which stop the program when there are none */
+     * so before the archives (which, since 1109 step 1x, no longer end the
+     * run when there are none: their checks are NEEDS) */
     printf("the asset resolver\n");
     resolver_tests(dir);
     /* }}} */
@@ -6822,8 +6879,8 @@ int main(int argc, char **argv)
     /* }}} */
 
     /* {{{ WC3's models (MDX, issue 401 step 2): one written here. It needs
-     * none of the game's files, so it comes before the archives, which
-     * end the program when the client's files aren't there. Every WC3
+     * none of the game's files, so it comes before the archives (whose
+     * checks are NEEDS when the client's files aren't there). Every WC3
      * model in war3.mpq is held to world-edit-to-execute's Lua reader by
      * tests/062-mdx-matches-lua.lua. */
     printf("WC3's models (MDX)\n");
@@ -6894,100 +6951,8 @@ int main(int argc, char **argv)
     check_wc3_ground();
     /* }}} */
 
-    /* {{{ the archives */
-    printf("the archives\n");
-    check(mpq_hash("(hash table)", 3) == 0xC3AF3770u, "the index's key is C3AF3770");
-    check(mpq_hash("(block table)", 3) == 0xEC83B3A3u, "the block list's key is EC83B3A3");
-    check(mpq_hash("a/b", 0) == mpq_hash("A\\B", 0), "names match without regard to case or slash");
-    MpqChain chain;
-    if (mpq_chain_open(&chain, client, "enUS", &why)) { printf("  FAIL: %s\n", why.text); return 1; }
-    snprintf(line, sizeof line, "all 13 of the client's archives open (%d)", chain.count);
-    check(chain.count == 13, line);
-    const char *base = "Character\\NightElf\\Female\\NightElfFemale";
-    size_t m2_len, skin_len;
-    const char *from = NULL;
-    snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(&chain, path, &m2_len, &from);
-    check(m2 && memcmp(m2, "MD20", 4) == 0, "her model is found and begins as a model does");
-    check(from && strstr(from, "patch-3.MPQ") != NULL, "and it is the newest patch's copy (patch-3)");
-    size_t nolen;
-    check(mpq_chain_read(&chain, "No\\Such\\File.m2", &nolen, NULL) == NULL, "a file no archive holds is none, not an error");
-    /* the chain's memory (173t): the same file again is served from it,
-     * byte for byte, under any case or slash, and reports where it came from */
-    {
-        uint64_t hits = chain.hits;
-        size_t again_len;
-        const char *again_from = NULL;
-        unsigned char *again = mpq_chain_read(&chain, "character/nightelf/female/NIGHTELFFEMALE.M2", &again_len, &again_from);
-        check(again && chain.hits == hits + 1 && again_len == m2_len && !memcmp(again, m2, m2_len) && again_from && strstr(again_from, "patch-3.MPQ"),
-              "read again (in other case and slashes), her model comes from the chain's memory, the same bytes and archive");
-        free(again);
-    }
-    /* }}} */
-
-    /* {{{ her model and pictures */
-    printf("her model\n");
-    snprintf(path, sizeof path, "%s00.skin", base);
-    unsigned char *skin = mpq_chain_read(&chain, path, &skin_len, NULL);
-    M2Model model;
-    check(m2_read(m2, m2_len, skin, skin_len, &model, &why) == 0, "her model and mesh read");
-    float zmax = -1e9f;
-    for (uint32_t i = 0; i < model.nvertices; ++i) if (model.vertices[i].z > zmax) zmax = model.vertices[i].z;
-    snprintf(line, sizeof line, "she stands %.2f yards tall (Lua: 2.29)", zmax);
-    check(near(zmax, 2.29, 0.02), line);
-    snprintf(line, sizeof line, "%u triangles (Lua: 5148)", model.nindices / 3);
-    check(model.nindices / 3 == 5148, line);
-    int in_range = 1;
-    for (uint32_t i = 0; i < model.nindices; ++i) if (model.indices[i] >= model.nvertices) in_range = 0;
-    check(in_range, "every triangle's corners are real points of the model");
-    check(model.textures[0].kind == 1 && model.textures[1].kind == 6, "her first picture is her skin, her second her hair");
-    m2_free(&model);
-    free(m2); free(skin);
-
-    printf("pictures\n");
-    size_t len;
-    snprintf(path, sizeof path, "%sSkin00_00.blp", base);
-    unsigned char *b = mpq_chain_read(&chain, path, &len, NULL);
-    BlpImage img;
-    check(b && blp_decode(b, len, &img, &why) == 0 && img.width == 512 && img.height == 512, "her skin sheet decodes to 512 x 512");
-    free(b);
-    b = mpq_chain_read(&chain, "Character\\NightElf\\Hair00_00.blp", &len, NULL);
-    BlpImage hair;
-    int cut = 0;
-    if (b && blp_decode(b, len, &hair, &why) == 0)
-        for (size_t i = 3; i < (size_t)hair.width * hair.height * 4; i += 4) if (hair.rgba[i] < 128) { cut = 1; break; }
-    check(cut, "her hair picture has see-through strands (alpha)");
-    free(b); blp_free(&hair);
-    /* an item's icon (410): the Stormwind tabard's look names a 64 x 64
-     * icon the archives hold; a look the table lacks is refused, named */
-    {
-        char icon[300] = "";
-        BlpImage ic = { 0 };
-        int named = character_item_icon(NULL, &chain, 59981, icon, sizeof icon, &why) == W_OK;
-        unsigned char *ib = named ? mpq_chain_read(&chain, icon, &len, NULL) : NULL;
-        int decoded = ib && blp_decode(ib, len, &ic, &why) == 0;
-        snprintf(line, sizeof line, "the Stormwind tabard's icon (%s) is in the archives and is 64 x 64 (%d x %d)", icon, ic.width, ic.height);
-        check(decoded && ic.width == 64 && ic.height == 64, line);
-        free(ib);
-        if (decoded) blp_free(&ic);
-        check(character_item_icon(NULL, &chain, 999999999, icon, sizeof icon, &why) == W_ERR_NOT_FOUND, "an item look not in the table has no icon, and says so");
-        /* a worn item whose pictures the archives lack is counted, so the
-         * dressing room can refuse it: look 3864 (the "Unused Tabard of
-         * Chow") names two torso pictures no archive holds */
-        CharacterLook lk = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
-        Character worn;
-        lk.items[SLOT_TABARD] = 59981;
-        int whole = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
-        if (whole >= 0) character_free(&worn);
-        lk.items[SLOT_TABARD] = 3864;
-        int lacking = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
-        if (lacking >= 0) character_free(&worn);
-        snprintf(line, sizeof line, "the Stormwind tabard is worn whole (%d missing); the Tabard of Chow lacks its 2 pictures (%d)", whole, lacking);
-        check(whole == 0 && lacking == 2, line);
-    }
-    /* }}} */
-
-    /* {{{ WC3's pictures (BLP1, issue 107): one built here, then WC3's own */
+    /* {{{ WC3's pictures (BLP1, issue 107): one built here, then WC3's own; before
+     * the original client's archives, which it doesn't need (1109 step 1x) */
     printf("WC3's pictures (BLP1)\n");
     {
         /* a 2 x 2 palette picture with 8-bit alpha and a 1 x 1 smaller copy:
@@ -7028,246 +6993,348 @@ int main(int argc, char **argv)
         /* WC3's own: the install world-edit-to-execute reads (its wc3-installs/) */
         const char *war3 = argc > 4 && strcmp(argv[4], "-") ? argv[4] : "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/wc3-installs/frozen-throne/war3.mpq";
         MpqArchive wa = { 0 };
-        check(mpq_open(&wa, war3, &why) == W_OK, "WC3's war3.mpq opens with this client's own archive reader");
-        size_t flen2 = 0;
-        unsigned char *fb = mpq_read(&wa, "Textures\\Footman.blp", &flen2, &why);
-        check(fb && !memcmp(fb, "BLP1", 4) && fb[4] == 0 && fb[5] == 0 && fb[6] == 0 && fb[7] == 0, "the footman's picture is there, a JPEG BLP1");
-        BlpImage foot;
-        if (fb && blp_decode(fb, flen2, &foot, &why) == W_OK) {
-            snprintf(line, sizeof line, "it decodes to %d x %d (Lua: 256 x 256)", foot.width, foot.height);
-            check(foot.width == 256 && foot.height == 256, line);
-            uint32_t sum = 0;
-            for (size_t i = 0; i < (size_t)foot.width * foot.height * 4; ++i) sum = sum * 31 + foot.rgba[i];
-            snprintf(line, sizeof line, "its bytes' running sum is %08X (Lua: %08X)", sum, FOOTMAN_SUM);
-            check(sum == FOOTMAN_SUM, line);
-            blp_free(&foot);
-        } else check(0, why.text);
-        free(fb);
-        if (wa.file) mpq_close(&wa);
+        struct stat wsb;
+        if (stat(war3, &wsb)) {                          /* not on this machine: NEEDS, not a FAIL (1109 step 1x) */
+            snprintf(line, sizeof line, "no war3.mpq at %s", war3);
+            need("WC3's war3.mpq opens, and its footman picture decodes as the Lua reader's", line);
+        } else {
+            check(mpq_open(&wa, war3, &why) == W_OK, "WC3's war3.mpq opens with this client's own archive reader");
+            size_t flen2 = 0;
+            unsigned char *fb = mpq_read(&wa, "Textures\\Footman.blp", &flen2, &why);
+            check(fb && !memcmp(fb, "BLP1", 4) && fb[4] == 0 && fb[5] == 0 && fb[6] == 0 && fb[7] == 0, "the footman's picture is there, a JPEG BLP1");
+            BlpImage foot;
+            if (fb && blp_decode(fb, flen2, &foot, &why) == W_OK) {
+                snprintf(line, sizeof line, "it decodes to %d x %d (Lua: 256 x 256)", foot.width, foot.height);
+                check(foot.width == 256 && foot.height == 256, line);
+                uint32_t sum = 0;
+                for (size_t i = 0; i < (size_t)foot.width * foot.height * 4; ++i) sum = sum * 31 + foot.rgba[i];
+                snprintf(line, sizeof line, "its bytes' running sum is %08X (Lua: %08X)", sum, FOOTMAN_SUM);
+                check(sum == FOOTMAN_SUM, line);
+                blp_free(&foot);
+            } else check(0, why.text);
+            free(fb);
+            if (wa.file) mpq_close(&wa);
+        }
     }
     /* }}} */
 
-    /* {{{ the character pictures table */
-    printf("the character pictures table\n");
-    b = mpq_chain_read(&chain, "DBFilesClient\\CharSections.dbc", &len, NULL);
-    Dbc d;
-    check(dbc_open(&d, b, len, &why) == 0 && d.rows > 1000, "the character pictures table reads (over a thousand rows)");
-    free(b);
-    /* }}} */
-
-    /* {{{ putting her together */
-    printf("putting her together\n");
-    Character ch;
-    CharacterLook look = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
-    int built = character_build(NULL, &chain, &look, &ch, &why) == 0;
-    check(built, built ? "she is put together" : why.text);
-    if (built) {
-        int body = 0, hair2 = 0, others = 0, clothes = 0, bare = 0;
-        for (uint32_t i = 0; i < ch.model.npieces; ++i) {
-            if (!ch.shown[i]) continue;
-            uint32_t id = ch.model.pieces[i].id;
-            if (id == 0) body = 1;
-            if (id == 2) hair2 = 1;
-            if (id >= 3 && id <= 13) others = 1;
-            if (id == 1002 || id == 1102 || id == 1202 || id == 1302 || id == 1502 || id == 802) clothes = 1;
-            if (id == 401 || id == 501 || id == 702) ++bare;
-        }
-        check(body && hair2, "her body (0) and hair style 0's piece (2) show");
-        check(!others, "no other hair style shows");
-        check(!clothes, "no clothing shapes show");
-        check(bare == 3, "bare hands, bare feet, and her ears show");
-        int changed = 0;
-        for (int y = 384; y <= 511; y += 8)
-            for (int x = 8; x <= 255; x += 8) {
-                size_t o = ((size_t)y * 512 + x) * 4;
-                if (ch.skin.rgba[o] != img.rgba[o]) ++changed;
-            }
-        snprintf(line, sizeof line, "her face is painted onto her skin sheet (%d of 512 samples changed; Lua: 393)", changed);
-        check(changed == 393, line);
-        check(ch.hair.width > 0, "her hair has its picture");
-        /* her eyes' glow (173o): piece 1702 shows (1703, a death knight's,
-         * doesn't), drawn as added light with a picture named in the model
-         * that the archives hold, and tinted visibly while she stands */
+    /* {{{ the archives */
+    printf("the archives\n");
+    check(mpq_hash("(hash table)", 3) == 0xC3AF3770u, "the index's key is C3AF3770");
+    check(mpq_hash("(block table)", 3) == 0xEC83B3A3u, "the block list's key is EC83B3A3");
+    check(mpq_hash("a/b", 0) == mpq_hash("A\\B", 0), "names match without regard to case or slash");
+    MpqChain chain;
+    /* no install here: the checks that read it are NEEDS, and the run goes
+     * on to the rest, which need none (1109 step 1x, decision 173) */
+    if (client_open(&chain, client, "the client's archives, her model and pictures, putting her together (the original client's install)", &why)) {
+        snprintf(line, sizeof line, "all 13 of the client's archives open (%d)", chain.count);
+        check(chain.count == 13, line);
+        const char *base = "Character\\NightElf\\Female\\NightElfFemale";
+        size_t m2_len, skin_len;
+        const char *from = NULL;
+        snprintf(path, sizeof path, "%s.m2", base);
+        unsigned char *m2 = mpq_chain_read(&chain, path, &m2_len, &from);
+        check(m2 && memcmp(m2, "MD20", 4) == 0, "her model is found and begins as a model does");
+        check(from && strstr(from, "patch-3.MPQ") != NULL, "and it is the newest patch's copy (patch-3)");
+        size_t nolen;
+        check(mpq_chain_read(&chain, "No\\Such\\File.m2", &nolen, NULL) == NULL, "a file no archive holds is none, not an error");
+        /* the chain's memory (173t): the same file again is served from it,
+         * byte for byte, under any case or slash, and reports where it came from */
         {
-            int glow = 0, dk = 0, unit = -1;
+            uint64_t hits = chain.hits;
+            size_t again_len;
+            const char *again_from = NULL;
+            unsigned char *again = mpq_chain_read(&chain, "character/nightelf/female/NIGHTELFFEMALE.M2", &again_len, &again_from);
+            check(again && chain.hits == hits + 1 && again_len == m2_len && !memcmp(again, m2, m2_len) && again_from && strstr(again_from, "patch-3.MPQ"),
+                  "read again (in other case and slashes), her model comes from the chain's memory, the same bytes and archive");
+            free(again);
+        }
+        /* }}} */
+
+        /* {{{ her model and pictures */
+        printf("her model\n");
+        snprintf(path, sizeof path, "%s00.skin", base);
+        unsigned char *skin = mpq_chain_read(&chain, path, &skin_len, NULL);
+        M2Model model;
+        check(m2_read(m2, m2_len, skin, skin_len, &model, &why) == 0, "her model and mesh read");
+        float zmax = -1e9f;
+        for (uint32_t i = 0; i < model.nvertices; ++i) if (model.vertices[i].z > zmax) zmax = model.vertices[i].z;
+        snprintf(line, sizeof line, "she stands %.2f yards tall (Lua: 2.29)", zmax);
+        check(near(zmax, 2.29, 0.02), line);
+        snprintf(line, sizeof line, "%u triangles (Lua: 5148)", model.nindices / 3);
+        check(model.nindices / 3 == 5148, line);
+        int in_range = 1;
+        for (uint32_t i = 0; i < model.nindices; ++i) if (model.indices[i] >= model.nvertices) in_range = 0;
+        check(in_range, "every triangle's corners are real points of the model");
+        check(model.textures[0].kind == 1 && model.textures[1].kind == 6, "her first picture is her skin, her second her hair");
+        m2_free(&model);
+        free(m2); free(skin);
+
+        printf("pictures\n");
+        size_t len;
+        snprintf(path, sizeof path, "%sSkin00_00.blp", base);
+        unsigned char *b = mpq_chain_read(&chain, path, &len, NULL);
+        BlpImage img;
+        check(b && blp_decode(b, len, &img, &why) == 0 && img.width == 512 && img.height == 512, "her skin sheet decodes to 512 x 512");
+        free(b);
+        b = mpq_chain_read(&chain, "Character\\NightElf\\Hair00_00.blp", &len, NULL);
+        BlpImage hair;
+        int cut = 0;
+        if (b && blp_decode(b, len, &hair, &why) == 0)
+            for (size_t i = 3; i < (size_t)hair.width * hair.height * 4; i += 4) if (hair.rgba[i] < 128) { cut = 1; break; }
+        check(cut, "her hair picture has see-through strands (alpha)");
+        free(b); blp_free(&hair);
+        /* an item's icon (410): the Stormwind tabard's look names a 64 x 64
+         * icon the archives hold; a look the table lacks is refused, named */
+        {
+            char icon[300] = "";
+            BlpImage ic = { 0 };
+            int named = character_item_icon(NULL, &chain, 59981, icon, sizeof icon, &why) == W_OK;
+            unsigned char *ib = named ? mpq_chain_read(&chain, icon, &len, NULL) : NULL;
+            int decoded = ib && blp_decode(ib, len, &ic, &why) == 0;
+            snprintf(line, sizeof line, "the Stormwind tabard's icon (%s) is in the archives and is 64 x 64 (%d x %d)", icon, ic.width, ic.height);
+            check(decoded && ic.width == 64 && ic.height == 64, line);
+            free(ib);
+            if (decoded) blp_free(&ic);
+            check(character_item_icon(NULL, &chain, 999999999, icon, sizeof icon, &why) == W_ERR_NOT_FOUND, "an item look not in the table has no icon, and says so");
+            /* a worn item whose pictures the archives lack is counted, so the
+             * dressing room can refuse it: look 3864 (the "Unused Tabard of
+             * Chow") names two torso pictures no archive holds */
+            CharacterLook lk = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
+            Character worn;
+            lk.items[SLOT_TABARD] = 59981;
+            int whole = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+            if (whole >= 0) character_free(&worn);
+            lk.items[SLOT_TABARD] = 3864;
+            int lacking = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+            if (lacking >= 0) character_free(&worn);
+            snprintf(line, sizeof line, "the Stormwind tabard is worn whole (%d missing); the Tabard of Chow lacks its 2 pictures (%d)", whole, lacking);
+            check(whole == 0 && lacking == 2, line);
+        }
+        /* }}} */
+
+        /* {{{ the character pictures table */
+        printf("the character pictures table\n");
+        b = mpq_chain_read(&chain, "DBFilesClient\\CharSections.dbc", &len, NULL);
+        Dbc d;
+        check(dbc_open(&d, b, len, &why) == 0 && d.rows > 1000, "the character pictures table reads (over a thousand rows)");
+        free(b);
+        /* }}} */
+
+        /* {{{ putting her together */
+        printf("putting her together\n");
+        Character ch;
+        CharacterLook look = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
+        int built = character_build(NULL, &chain, &look, &ch, &why) == 0;
+        check(built, built ? "she is put together" : why.text);
+        if (built) {
+            int body = 0, hair2 = 0, others = 0, clothes = 0, bare = 0;
             for (uint32_t i = 0; i < ch.model.npieces; ++i) {
-                if (ch.shown[i] && ch.model.pieces[i].id == 1702) glow = 1;
-                if (ch.shown[i] && ch.model.pieces[i].id == 1703) dk = 1;
+                if (!ch.shown[i]) continue;
+                uint32_t id = ch.model.pieces[i].id;
+                if (id == 0) body = 1;
+                if (id == 2) hair2 = 1;
+                if (id >= 3 && id <= 13) others = 1;
+                if (id == 1002 || id == 1102 || id == 1202 || id == 1302 || id == 1502 || id == 802) clothes = 1;
+                if (id == 401 || id == 501 || id == 702) ++bare;
             }
-            for (uint32_t u = 0; u < ch.model.nunits; ++u)
-                if (ch.model.pieces[ch.model.units[u].piece].id == 1702) unit = (int)u;
-            check(glow && !dk, "her race's eye glow (1702) shows, a death knight's (1703) doesn't");
-            if (unit >= 0) {
-                M2Unit un = ch.model.units[unit];
-                size_t gl;
-                const char *gfrom;
-                unsigned char *gpic = mpq_chain_read(&chain, ch.model.textures[un.texture].file, &gl, &gfrom);
-                snprintf(line, sizeof line, "the glow is added light (blend %u) with its own picture (%.100s)", un.blend, ch.model.textures[un.texture].file);
-                check(un.blend >= 3 && ch.model.textures[un.texture].kind == 0 && gpic, line);
-                free(gpic);
+            check(body && hair2, "her body (0) and hair style 0's piece (2) show");
+            check(!others, "no other hair style shows");
+            check(!clothes, "no clothing shapes show");
+            check(bare == 3, "bare hands, bare feet, and her ears show");
+            int changed = 0;
+            for (int y = 384; y <= 511; y += 8)
+                for (int x = 8; x <= 255; x += 8) {
+                    size_t o = ((size_t)y * 512 + x) * 4;
+                    if (ch.skin.rgba[o] != img.rgba[o]) ++changed;
+                }
+            snprintf(line, sizeof line, "her face is painted onto her skin sheet (%d of 512 samples changed; Lua: 393)", changed);
+            check(changed == 393, line);
+            check(ch.hair.width > 0, "her hair has its picture");
+            /* her eyes' glow (173o): piece 1702 shows (1703, a death knight's,
+             * doesn't), drawn as added light with a picture named in the model
+             * that the archives hold, and tinted visibly while she stands */
+            {
+                int glow = 0, dk = 0, unit = -1;
+                for (uint32_t i = 0; i < ch.model.npieces; ++i) {
+                    if (ch.shown[i] && ch.model.pieces[i].id == 1702) glow = 1;
+                    if (ch.shown[i] && ch.model.pieces[i].id == 1703) dk = 1;
+                }
+                for (uint32_t u = 0; u < ch.model.nunits; ++u)
+                    if (ch.model.pieces[ch.model.units[u].piece].id == 1702) unit = (int)u;
+                check(glow && !dk, "her race's eye glow (1702) shows, a death knight's (1703) doesn't");
+                if (unit >= 0) {
+                    M2Unit un = ch.model.units[unit];
+                    size_t gl;
+                    const char *gfrom;
+                    unsigned char *gpic = mpq_chain_read(&chain, ch.model.textures[un.texture].file, &gl, &gfrom);
+                    snprintf(line, sizeof line, "the glow is added light (blend %u) with its own picture (%.100s)", un.blend, ch.model.textures[un.texture].file);
+                    check(un.blend >= 3 && ch.model.textures[un.texture].kind == 0 && gpic, line);
+                    free(gpic);
+                    size_t ml;
+                    unsigned char *gm2 = mpq_chain_read(&chain, "Character\\NightElf\\Female\\NightElfFemale.m2", &ml, &gfrom);
+                    Anim ga;
+                    if (gm2 && !anim_read(gm2, ml, &ga, &why)) {
+                        float tint[4];
+                        anim_unit_tint(&ga, un.colour, un.fade, anim_find(&ga, 0, 0), 0, 0, tint);
+                        snprintf(line, sizeof line, "standing, the glow's tint is visible (%.2f %.2f %.2f, opacity %.2f)", tint[0], tint[1], tint[2], tint[3]);
+                        check(tint[3] > 0.1f && tint[0] + tint[1] + tint[2] > 0.1f, line);
+                        anim_free(&ga);
+                    } else check(0, "her model's skeleton could not be read for the glow's tint");
+                    free(gm2);
+                } else check(0, "her model has no unit drawing piece 1702");
+            }
+            character_free(&ch);
+        }
+        {
+            /* dressed (173p): the rogue's set paints her torso and switches on
+             * her boots (feet group 5: 501 + 3 for these boots) */
+            CharacterLook dressed = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 }, bare = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
+            dressed.items[SLOT_CHEST] = 41143; dressed.items[SLOT_FEET] = 41480; dressed.items[SLOT_HANDS] = 41138;
+            Character dc, bc;
+            if (character_build(NULL, &chain, &dressed, &dc, &why) || character_build(NULL, &chain, &bare, &bc, &why)) check(0, why.text);
+            else {
+                int changed = 0, boots = 0, bare_feet = 0;
+                int k = dc.skin.width / 256;
+                for (int y = 0; y < 64 * k; y += 4) for (int x = 128 * k; x < 256 * k; x += 4) {
+                    size_t o = ((size_t)y * dc.skin.width + x) * 4;
+                    if (dc.skin.rgba[o] != bc.skin.rgba[o] || dc.skin.rgba[o + 1] != bc.skin.rgba[o + 1]) ++changed;
+                }
+                for (uint32_t i = 0; i < dc.model.npieces; ++i) {
+                    if (dc.model.pieces[i].id == 504 && dc.shown[i]) boots = 1;
+                    if (dc.model.pieces[i].id == 501 && dc.shown[i]) bare_feet = 1;
+                }
+                snprintf(line, sizeof line, "dressed in the rogue's set, her upper torso is painted (%d of %d samples changed), her boots show and her bare feet don't", changed, 16 * k * 32 * k);
+                check(changed > 100 && boots && !bare_feet, line);
+                character_free(&dc);
+                character_free(&bc);
+            }
+            /* hung items: the rogue's hood hides her hair; shoulders and a sword */
+            dressed.items[SLOT_HEAD] = 41139; dressed.items[SLOT_SHOULDERS] = 41142; dressed.items[SLOT_MAIN_HAND] = 40857;
+            if (character_build(NULL, &chain, &dressed, &dc, &why)) check(0, why.text);
+            else {
+                int points = 0, hair = 0;
+                for (int i = 0; i < dc.nattached; ++i) points |= 1 << dc.attached[i].point;
+                for (uint32_t i = 0; i < dc.model.npieces; ++i) if (dc.model.pieces[i].id > 0 && dc.model.pieces[i].id < 100 && dc.shown[i]) hair = 1;
+                snprintf(line, sizeof line, "the hood, both shoulders and the sword hang from points 11, 6, 5 and 1 (%d items: %.80s), and the hood hides her hair", dc.nattached, dc.nattached ? dc.attached[0].model : "-");
+                check(dc.nattached == 4 && points == ((1 << 11) | (1 << 6) | (1 << 5) | (1 << 1)) && !hair, line);
                 size_t ml;
-                unsigned char *gm2 = mpq_chain_read(&chain, "Character\\NightElf\\Female\\NightElfFemale.m2", &ml, &gfrom);
-                Anim ga;
-                if (gm2 && !anim_read(gm2, ml, &ga, &why)) {
-                    float tint[4];
-                    anim_unit_tint(&ga, un.colour, un.fade, anim_find(&ga, 0, 0), 0, 0, tint);
-                    snprintf(line, sizeof line, "standing, the glow's tint is visible (%.2f %.2f %.2f, opacity %.2f)", tint[0], tint[1], tint[2], tint[3]);
-                    check(tint[3] > 0.1f && tint[0] + tint[1] + tint[2] > 0.1f, line);
-                    anim_free(&ga);
-                } else check(0, "her model's skeleton could not be read for the glow's tint");
-                free(gm2);
-            } else check(0, "her model has no unit drawing piece 1702");
-        }
-        character_free(&ch);
-    }
-    {
-        /* dressed (173p): the rogue's set paints her torso and switches on
-         * her boots (feet group 5: 501 + 3 for these boots) */
-        CharacterLook dressed = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 }, bare = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
-        dressed.items[SLOT_CHEST] = 41143; dressed.items[SLOT_FEET] = 41480; dressed.items[SLOT_HANDS] = 41138;
-        Character dc, bc;
-        if (character_build(NULL, &chain, &dressed, &dc, &why) || character_build(NULL, &chain, &bare, &bc, &why)) check(0, why.text);
-        else {
-            int changed = 0, boots = 0, bare_feet = 0;
-            int k = dc.skin.width / 256;
-            for (int y = 0; y < 64 * k; y += 4) for (int x = 128 * k; x < 256 * k; x += 4) {
-                size_t o = ((size_t)y * dc.skin.width + x) * 4;
-                if (dc.skin.rgba[o] != bc.skin.rgba[o] || dc.skin.rgba[o + 1] != bc.skin.rgba[o + 1]) ++changed;
+                const char *from;
+                unsigned char *hm = mpq_chain_read(&chain, dc.attached[0].model, &ml, &from);
+                check(hm != NULL, "the hood's model, made for a night elf woman (_NiF), is in the archives");
+                free(hm);
+                character_free(&dc);
             }
-            for (uint32_t i = 0; i < dc.model.npieces; ++i) {
-                if (dc.model.pieces[i].id == 504 && dc.shown[i]) boots = 1;
-                if (dc.model.pieces[i].id == 501 && dc.shown[i]) bare_feet = 1;
-            }
-            snprintf(line, sizeof line, "dressed in the rogue's set, her upper torso is painted (%d of %d samples changed), her boots show and her bare feet don't", changed, 16 * k * 32 * k);
-            check(changed > 100 && boots && !bare_feet, line);
-            character_free(&dc);
-            character_free(&bc);
         }
-        /* hung items: the rogue's hood hides her hair; shoulders and a sword */
-        dressed.items[SLOT_HEAD] = 41139; dressed.items[SLOT_SHOULDERS] = 41142; dressed.items[SLOT_MAIN_HAND] = 40857;
-        if (character_build(NULL, &chain, &dressed, &dc, &why)) check(0, why.text);
-        else {
-            int points = 0, hair = 0;
-            for (int i = 0; i < dc.nattached; ++i) points |= 1 << dc.attached[i].point;
-            for (uint32_t i = 0; i < dc.model.npieces; ++i) if (dc.model.pieces[i].id > 0 && dc.model.pieces[i].id < 100 && dc.shown[i]) hair = 1;
-            snprintf(line, sizeof line, "the hood, both shoulders and the sword hang from points 11, 6, 5 and 1 (%d items: %.80s), and the hood hides her hair", dc.nattached, dc.nattached ? dc.attached[0].model : "-");
-            check(dc.nattached == 4 && points == ((1 << 11) | (1 << 6) | (1 << 5) | (1 << 1)) && !hair, line);
-            size_t ml;
-            const char *from;
-            unsigned char *hm = mpq_chain_read(&chain, dc.attached[0].model, &ml, &from);
-            check(hm != NULL, "the hood's model, made for a night elf woman (_NiF), is in the archives");
-            free(hm);
-            character_free(&dc);
-        }
-    }
-    {
-        /* a tauren man: his tail (piece 1501) uses the fur picture (kind 8),
-         * the skin row's second; without it the tail was skipped (173d) */
-        CharacterLook tauren = { 6, 0, 0, 0, 0, 0, { 0 }, 0, 0 };
-        Character tc;
-        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
-        else {
-            int tail = 0, tail_fur = 0;
-            for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.model.pieces[i].id == 1501 && tc.shown[i]) tail = 1;
-            for (uint32_t u = 0; u < tc.model.nunits; ++u) {
-                M2Unit un = tc.model.units[u];
-                if (un.piece < tc.model.npieces && tc.model.pieces[un.piece].id == 1501 && un.texture < tc.model.ntextures && tc.model.textures[un.texture].kind == 8) tail_fur = 1;
-            }
-            snprintf(line, sizeof line, "a tauren man's tail shows, painted with his fur (%d x %d)", tc.fur.width, tc.fur.height);
-            check(tail && tail_fur && tc.fur.width > 0, line);
-            character_free(&tc);
-        }
-        /* the game's own tables pick a bare character's pieces (173d):
-         * CharacterFacialHairStyles gives his beard's three pieces in the
-         * order groups 1, 3, 2; choice 0 is clean-shaven (no 1xx-3xx), choice
-         * 1 shows 102, 302 and 202; his race has no eye glow */
-        int shaven_any = 1, beard = 0, glow = 0;
-        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
-        else {
-            shaven_any = 0;
-            for (uint32_t i = 0; i < tc.model.npieces; ++i) {
-                uint32_t id = tc.model.pieces[i].id;
-                if (tc.shown[i] && id >= 100 && id < 400) shaven_any = 1;
-                if (tc.shown[i] && id / 100 == 17) glow = 1;
-            }
-            character_free(&tc);
-        }
-        tauren.facial_hair = 1;
-        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
-        else {
-            for (uint32_t i = 0; i < tc.model.npieces; ++i) {
-                uint32_t id = tc.model.pieces[i].id;
-                if (tc.shown[i]) beard |= (id == 102) | (id == 302) << 1 | (id == 202) << 2;   /* by id: some ids are two meshes (fur and skin) */
-            }
-            character_free(&tc);
-            beard = (beard & 1) + (beard >> 1 & 1) + (beard >> 2 & 1);
-        }
-        snprintf(line, sizeof line, "a tauren man's facial-hair choice 0 shows no beard pieces (%s), choice 1 shows 102, 302 and 202 (%d of 3), and he has no eye glow (%s)",
-                 shaven_any ? "some" : "none", beard, glow ? "one" : "none");
-        check(!shaven_any && beard == 3 && !glow, line);
-        tauren.facial_hair = 99;
-        int refused = character_build(NULL, &chain, &tauren, &tc, &why) != 0;
-        snprintf(line, sizeof line, "a facial-hair choice the table lacks is refused, naming it (%.80s)", refused ? why.text : "built");
-        check(refused && strstr(why.text, "facial-hair choice 99"), line);
-        if (!refused) character_free(&tc);
-        /* starting outfits (173p): a fresh night-elf hunter woman wears the
-         * table's shirt, trousers, boots and axe; her bow, quiver and arrows
-         * have no slot here; a tauren warrior man his shirt, trousers, axe */
         {
-            int hunter[SLOT_COUNT] = { 0 }, warrior[SLOT_COUNT] = { 0 };
-            int ok1 = !character_start_outfit(NULL, &chain, 4, 3, 1, hunter, &why);
-            int ok2 = !character_start_outfit(NULL, &chain, 6, 1, 0, warrior, &why);
-            int filled = 0;
-            for (int k = 0; k < SLOT_COUNT; ++k) filled += hunter[k] != 0;
-            snprintf(line, sizeof line, "a fresh night-elf hunter wears shirt %d, trousers %d, boots %d, axe %d and nothing else (%d slots)",
-                     hunter[SLOT_SHIRT], hunter[SLOT_LEGS], hunter[SLOT_FEET], hunter[SLOT_MAIN_HAND], filled);
-            check(ok1 && hunter[SLOT_SHIRT] == 9976 && hunter[SLOT_LEGS] == 9975 && hunter[SLOT_FEET] == 9977 && hunter[SLOT_MAIN_HAND] == 22291 && filled == 4, line);
-            check(ok2 && warrior[SLOT_SHIRT] == 9995 && warrior[SLOT_LEGS] == 9988 && warrior[SLOT_MAIN_HAND] == 8690, "a fresh tauren warrior wears his shirt, trousers and axe");
-            check(character_start_outfit(NULL, &chain, 4, 2, 1, hunter, &why) != 0 && strstr(why.text, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
-        }
-        /* a creature's look (173t) may use a choice players can't: an
-         * Astranaar sentinel's facial-hair 10 (a night-elf woman's rows stop
-         * at 9) takes the race's choice-0 pieces, keeping her eye glow;
-         * a player's look with it is refused */
-        CharacterLook sentinel = { 4, 1, 0, 0, 0, 0, { 0 }, 10, 1 };
-        int glow10 = 0;
-        if (character_build(NULL, &chain, &sentinel, &tc, &why)) check(0, why.text);
-        else {
-            for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.shown[i] && tc.model.pieces[i].id == 1702) glow10 = 1;
-            character_free(&tc);
-        }
-        sentinel.npc = 0;
-        int player_refused = character_build(NULL, &chain, &sentinel, &tc, &why) != 0;
-        if (!player_refused) character_free(&tc);
-        check(glow10 && player_refused, "a creature's facial-hair choice beyond the table builds with the race's plain pieces (her eye glow kept); a player's is refused");
-        /* the sentinel's look: display 4841 names a CreatureDisplayInfoExtra
-         * row (a night-elf woman) whose baked skin sheet is in the archives */
-        {
-            size_t dl, el, bl;
-            unsigned char *ds = mpq_chain_read(&chain, "DBFilesClient\\CreatureDisplayInfo.dbc", &dl, NULL);
-            unsigned char *es = mpq_chain_read(&chain, "DBFilesClient\\CreatureDisplayInfoExtra.dbc", &el, NULL);
-            Dbc dd, ed;
-            uint32_t extra = 0;
-            int race = 0, sex = -1, baked = 0;
-            if (ds && es && !dbc_open(&dd, ds, dl, &why) && !dbc_open(&ed, es, el, &why)) {
-                for (uint32_t r = 0; r < dd.rows; ++r) if (dbc_u32(&dd, r, 1) == 4841) extra = dbc_u32(&dd, r, 4);
-                for (uint32_t r = 0; extra && r < ed.rows; ++r)
-                    if (dbc_u32(&ed, r, 1) == extra) {
-                        race = (int)dbc_u32(&ed, r, 2); sex = (int)dbc_u32(&ed, r, 3);
-                        char bp[300];
-                        snprintf(bp, sizeof bp, "Textures\\BakedNpcTextures\\%.200s", dbc_text(&ed, r, 21));
-                        unsigned char *b = mpq_chain_read(&chain, bp, &bl, NULL);
-                        baked = b != NULL;
-                        free(b);
-                    }
+            /* a tauren man: his tail (piece 1501) uses the fur picture (kind 8),
+             * the skin row's second; without it the tail was skipped (173d) */
+            CharacterLook tauren = { 6, 0, 0, 0, 0, 0, { 0 }, 0, 0 };
+            Character tc;
+            if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
+            else {
+                int tail = 0, tail_fur = 0;
+                for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.model.pieces[i].id == 1501 && tc.shown[i]) tail = 1;
+                for (uint32_t u = 0; u < tc.model.nunits; ++u) {
+                    M2Unit un = tc.model.units[u];
+                    if (un.piece < tc.model.npieces && tc.model.pieces[un.piece].id == 1501 && un.texture < tc.model.ntextures && tc.model.textures[un.texture].kind == 8) tail_fur = 1;
+                }
+                snprintf(line, sizeof line, "a tauren man's tail shows, painted with his fur (%d x %d)", tc.fur.width, tc.fur.height);
+                check(tail && tail_fur && tc.fur.width > 0, line);
+                character_free(&tc);
             }
-            free(ds); free(es);
-            snprintf(line, sizeof line, "a sentinel's display (4841) is a dressed character: extra row %u, race %d, sex %d, its baked skin %s", extra, race, sex, baked ? "found" : "missing");
-            check(extra && race == 4 && sex == 1 && baked, line);
+            /* the game's own tables pick a bare character's pieces (173d):
+             * CharacterFacialHairStyles gives his beard's three pieces in the
+             * order groups 1, 3, 2; choice 0 is clean-shaven (no 1xx-3xx), choice
+             * 1 shows 102, 302 and 202; his race has no eye glow */
+            int shaven_any = 1, beard = 0, glow = 0;
+            if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
+            else {
+                shaven_any = 0;
+                for (uint32_t i = 0; i < tc.model.npieces; ++i) {
+                    uint32_t id = tc.model.pieces[i].id;
+                    if (tc.shown[i] && id >= 100 && id < 400) shaven_any = 1;
+                    if (tc.shown[i] && id / 100 == 17) glow = 1;
+                }
+                character_free(&tc);
+            }
+            tauren.facial_hair = 1;
+            if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
+            else {
+                for (uint32_t i = 0; i < tc.model.npieces; ++i) {
+                    uint32_t id = tc.model.pieces[i].id;
+                    if (tc.shown[i]) beard |= (id == 102) | (id == 302) << 1 | (id == 202) << 2;   /* by id: some ids are two meshes (fur and skin) */
+                }
+                character_free(&tc);
+                beard = (beard & 1) + (beard >> 1 & 1) + (beard >> 2 & 1);
+            }
+            snprintf(line, sizeof line, "a tauren man's facial-hair choice 0 shows no beard pieces (%s), choice 1 shows 102, 302 and 202 (%d of 3), and he has no eye glow (%s)",
+                     shaven_any ? "some" : "none", beard, glow ? "one" : "none");
+            check(!shaven_any && beard == 3 && !glow, line);
+            tauren.facial_hair = 99;
+            int refused = character_build(NULL, &chain, &tauren, &tc, &why) != 0;
+            snprintf(line, sizeof line, "a facial-hair choice the table lacks is refused, naming it (%.80s)", refused ? why.text : "built");
+            check(refused && strstr(why.text, "facial-hair choice 99"), line);
+            if (!refused) character_free(&tc);
+            /* starting outfits (173p): a fresh night-elf hunter woman wears the
+             * table's shirt, trousers, boots and axe; her bow, quiver and arrows
+             * have no slot here; a tauren warrior man his shirt, trousers, axe */
+            {
+                int hunter[SLOT_COUNT] = { 0 }, warrior[SLOT_COUNT] = { 0 };
+                int ok1 = !character_start_outfit(NULL, &chain, 4, 3, 1, hunter, &why);
+                int ok2 = !character_start_outfit(NULL, &chain, 6, 1, 0, warrior, &why);
+                int filled = 0;
+                for (int k = 0; k < SLOT_COUNT; ++k) filled += hunter[k] != 0;
+                snprintf(line, sizeof line, "a fresh night-elf hunter wears shirt %d, trousers %d, boots %d, axe %d and nothing else (%d slots)",
+                         hunter[SLOT_SHIRT], hunter[SLOT_LEGS], hunter[SLOT_FEET], hunter[SLOT_MAIN_HAND], filled);
+                check(ok1 && hunter[SLOT_SHIRT] == 9976 && hunter[SLOT_LEGS] == 9975 && hunter[SLOT_FEET] == 9977 && hunter[SLOT_MAIN_HAND] == 22291 && filled == 4, line);
+                check(ok2 && warrior[SLOT_SHIRT] == 9995 && warrior[SLOT_LEGS] == 9988 && warrior[SLOT_MAIN_HAND] == 8690, "a fresh tauren warrior wears his shirt, trousers and axe");
+                check(character_start_outfit(NULL, &chain, 4, 2, 1, hunter, &why) != 0 && strstr(why.text, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
+            }
+            /* a creature's look (173t) may use a choice players can't: an
+             * Astranaar sentinel's facial-hair 10 (a night-elf woman's rows stop
+             * at 9) takes the race's choice-0 pieces, keeping her eye glow;
+             * a player's look with it is refused */
+            CharacterLook sentinel = { 4, 1, 0, 0, 0, 0, { 0 }, 10, 1 };
+            int glow10 = 0;
+            if (character_build(NULL, &chain, &sentinel, &tc, &why)) check(0, why.text);
+            else {
+                for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.shown[i] && tc.model.pieces[i].id == 1702) glow10 = 1;
+                character_free(&tc);
+            }
+            sentinel.npc = 0;
+            int player_refused = character_build(NULL, &chain, &sentinel, &tc, &why) != 0;
+            if (!player_refused) character_free(&tc);
+            check(glow10 && player_refused, "a creature's facial-hair choice beyond the table builds with the race's plain pieces (her eye glow kept); a player's is refused");
+            /* the sentinel's look: display 4841 names a CreatureDisplayInfoExtra
+             * row (a night-elf woman) whose baked skin sheet is in the archives */
+            {
+                size_t dl, el, bl;
+                unsigned char *ds = mpq_chain_read(&chain, "DBFilesClient\\CreatureDisplayInfo.dbc", &dl, NULL);
+                unsigned char *es = mpq_chain_read(&chain, "DBFilesClient\\CreatureDisplayInfoExtra.dbc", &el, NULL);
+                Dbc dd, ed;
+                uint32_t extra = 0;
+                int race = 0, sex = -1, baked = 0;
+                if (ds && es && !dbc_open(&dd, ds, dl, &why) && !dbc_open(&ed, es, el, &why)) {
+                    for (uint32_t r = 0; r < dd.rows; ++r) if (dbc_u32(&dd, r, 1) == 4841) extra = dbc_u32(&dd, r, 4);
+                    for (uint32_t r = 0; extra && r < ed.rows; ++r)
+                        if (dbc_u32(&ed, r, 1) == extra) {
+                            race = (int)dbc_u32(&ed, r, 2); sex = (int)dbc_u32(&ed, r, 3);
+                            char bp[300];
+                            snprintf(bp, sizeof bp, "Textures\\BakedNpcTextures\\%.200s", dbc_text(&ed, r, 21));
+                            unsigned char *b = mpq_chain_read(&chain, bp, &bl, NULL);
+                            baked = b != NULL;
+                            free(b);
+                        }
+                }
+                free(ds); free(es);
+                snprintf(line, sizeof line, "a sentinel's display (4841) is a dressed character: extra row %u, race %d, sex %d, its baked skin %s", extra, race, sex, baked ? "found" : "missing");
+                check(extra && race == 4 && sex == 1 && baked, line);
+            }
         }
+        blp_free(&img);
+        mpq_chain_close(&chain);
     }
-    blp_free(&img);
-    mpq_chain_close(&chain);
     /* }}} */
 
     /* {{{ what the camera sees (173u): a camera at the origin looking along
@@ -7291,8 +7358,7 @@ int main(int argc, char **argv)
     printf("reading ahead\n");
     {
         MpqChain rc;
-        if (mpq_chain_open(&rc, client, "enUS", &why)) check(0, why.text);
-        else {
+        if (client_open(&rc, client, "reading ahead (the original client's install)", &why)) {
             Prefetch *reader = prefetch_start(&rc, NULL, "Kalimdor", 1);
             prefetch_tile(reader, 26, 32);
             prefetch_tile(reader, 26, 32);                        /* asked twice: read once */
@@ -7424,8 +7490,7 @@ int main(int argc, char **argv)
         size_t n;
         WWhy r;
         MpqChain ec;
-        if (mpq_chain_open(&ec, client, "enUS", &r)) check(0, r.text);
-        else {
+        if (client_open(&ec, client, "a file an archive doesn't hold (the original client's install)", &r)) {
             check(!mpq_read(ec.archives[0], "No\\Such\\File.blp", &n, &r) && r.code == W_ERR_NOT_FOUND,
                   "a file an archive doesn't hold: W_ERR_NOT_FOUND, the next archive is tried");
             mpq_chain_close(&ec);
@@ -7514,7 +7579,7 @@ int main(int argc, char **argv)
     printf("the ground files (the original's ADTs)\n");
     {
         MpqChain gc;
-        if (mpq_chain_open(&gc, client, "enUS", &why)) { check(0, why.text); goto ground_done; }
+        if (!client_open(&gc, client, "the ground files (the original client's install)", &why)) goto ground_done;
         size_t len;
         const char *from;
         unsigned char *s = mpq_chain_read(&gc, "World\\Maps\\Kalimdor\\Kalimdor.wdt", &len, &from);
@@ -7757,7 +7822,7 @@ ground_done:
     printf("her animations\n");
     {
         MpqChain ac;
-        if (mpq_chain_open(&ac, client, "enUS", &why)) { check(0, why.text); goto anim_done; }
+        if (!client_open(&ac, client, "her animations (the original client's install)", &why)) goto anim_done;
         size_t len;
         const char *from;
         const char *base = "Character\\NightElf\\Female\\NightElfFemale";
@@ -7996,7 +8061,7 @@ anim_done:
     printf("particles\n");
     {
         MpqChain pc;
-        if (mpq_chain_open(&pc, client, "enUS", &why)) { check(0, why.text); goto particles_done; }
+        if (!client_open(&pc, client, "particles (the original client's install)", &why)) goto particles_done;
         size_t len;
         const char *from;
         unsigned char *s = mpq_chain_read(&pc, "World\\Generic\\PassiveDoodads\\Lights\\GeneralTorch01.m2", &len, &from);
@@ -8102,7 +8167,7 @@ particles_done:
     {
         MpqChain lc;
         LightTables lt;
-        if (mpq_chain_open(&lc, client, "enUS", &why)) { check(0, why.text); goto light_done; }
+        if (!client_open(&lc, client, "the zone's light (the original client's install)", &why)) goto light_done;
         Tables *lts = tables_new(NULL, &lc);
         if (light_open(&lt, lts, stdout, &why)) { check(0, why.text); tables_free(lts); mpq_chain_close(&lc); goto light_done; }
         LightNow noon, night, far;
@@ -8270,7 +8335,14 @@ light_done:
 
     maps_world_free(w);
     free(w);
-    if (fails == 0) printf("All %d checks passed\n", checks);
-    else printf("%d of %d checks failed\n", fails, checks);
-    return fails ? 1 : 0;
+    settings_free(st);
+    /* the closing line counts the checks made, and the NEEDS apart: those
+     * couldn't be made here, so they are neither passed nor failed. The
+     * exit status: 1 when any check failed, else 2 when any needed what
+     * this machine hasn't, else 0 (1109 step 1x, decision 172) */
+    char needed[120] = "";
+    if (needs) snprintf(needed, sizeof needed, "; %d more couldn't be made here, needing what this machine hasn't (NEEDS above)", needs);
+    if (fails == 0) printf("All %d checks passed%s\n", checks, needed);
+    else printf("%d of %d checks failed%s\n", fails, checks, needed);
+    return fails ? 1 : needs ? 2 : 0;
 }
