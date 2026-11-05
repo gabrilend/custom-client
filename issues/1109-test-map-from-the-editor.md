@@ -1398,6 +1398,77 @@ after it; the 10-yard floor and the share's range applied once to the
 blended light rather than to each; map 530 as the second mode's first
 map; the storm sets' field numbers (026's layout, recalled).
 
+**Step 1v is built** (2026-11-05, the same background work): the
+weather for the storm sets, and a building's fogs. Decisions 157 to
+165; the new file `src/099-weather.c`.
+
+- **The weather message (099):** `weather_msg_read` reads SMSG_WEATHER's
+  body as 9 bytes (state, grade, abrupt), refusing another length, a
+  grade that isn't a number or an abrupt byte other than 0 or 1, naming
+  it; the whole layout is recalled, not read from code (this client has
+  no network code, its docs don't list the message, and no server source
+  is here), and marked so (decision 157).
+- **The storm's strength (099):** every state but fine lays the storm
+  sets over by its grade; a change eases over ten seconds in a straight
+  line from wherever the strength stands, or is there at once when
+  abrupt (decision 158).
+- **Where the weather comes from, for now (043, 089):** `--weather STATE
+  GRADE` from the start, at once, for the window (eased on the world's
+  seconds each frame into `light_at_weather`) and the run with no
+  window; and in a moves file, a move's `weather = { state, grade,
+  abrupt }`, taken as the move begins on the steps' clock (a weather
+  alone takes no steps; format 1 still, older files read as before).
+  The receipt counts `weather_state`, `weather_grade`,
+  `weather_changes` and `storm`, the strength where she ends
+  (decision 159).
+- **A building's fogs (021):** the root's MFOG fogs (a sphere with two
+  radii, a fog in and under water) and each group's four fog numbers and
+  bounding box are read, recalled and unchecked; `wmo_group_depth` says
+  how far a point is inside a group's box (decision 161).
+- **The indoor blend (026):** `light_indoor_fog` blends the outdoor fog
+  into a group's own over the first 25 yards in, its underwater fog
+  under water, as 306's notes describe (decision 162). Which of a
+  group's fogs applies, and whether the eye is in a group, are not in
+  the notes: nothing calls it yet but the tests (decision 163).
+- **A converted map's own light (world-edit-to-execute's draft PR
+  #260):** a build converted with it carries Light and its tables in
+  the map's folder, the map's own default light first. The checks on a
+  build take either: the grey day where the build has no light rows,
+  its own default's id where it has (decision 165). Saying "no row 1"
+  moved from opening the tables to `light_map_default`, called once for
+  the map being lit, so a map with its own default isn't told about
+  row 1 (decision 164).
+
+Checked (`tests/044-test-client.c`): a made weather body read (state,
+grade, eased); refused, named: 8 bytes, 13 (an older client's, with a
+sound id), a grade that isn't a number, an abrupt byte of 2; a grade of
+1.5 held to 1; fine weather is no storm whatever its grade; the easing
+(0, 0.3, 0.6 at 0, 5 and 10 seconds; fine at once; a change half way
+through eased from where it stood: 0.5, 0.25, 0); moves with weather
+read, and five broken ones refused by name; the run with no window on
+each converter build: light rain from the start and heavy rain eased in
+two seconds on, half way where she ends (0.5), its state, grade and
+two changes in the receipt; with no weather, fine and none taken. A
+made building: two fogs read field by field, a group's fog numbers and
+box, how far in a point is (the middle, by a wall, outside, past a
+corner), the blend outside (none), 12.5 yards in (half), 30 in (the
+group's), under water (its underwater fog). The light under every
+sphere (map 900 its own default, 902 row 1, 571 its own), nothing said;
+the set's empty tables, with no row 1, said for the map. On the two maps
+converted by #260's commit 306b40f40 (exported to the scratch folder;
+ai-stuff left as it was): the map's own light 20000 from its own rows,
+the map's folder's copy first, no placeholder row made and no word of
+row 1; the run with no window lit by it, twice the same; with no
+baseline set, still lit by it, saying only that no skybox is drawn
+(#260 writes no LightSkybox).
+
+Not checked: the weather message's layout, opcode and state numbers,
+and that 3.3.5a sends no sound id (recalled); how the original turns a
+state and grade into a storm's strength, and how long it eases; the
+building fog's layout and units; the blend's straight line and the box
+as the group's boundary; the window's weather (raylib isn't here; 043
+compiles under gcc and clang -Werror).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1408,9 +1479,11 @@ a placeholder row for tables other than a creature's (step 1r gives
 every table the client reads a layout, but only 041 and 088 ask for
 one); the layouts written out for the converter (decision 134); the
 light's other differences from the original (306: the second fog
-mode's curve and rate, zone and override lights, the indoor fog blend,
-the seven-ring sky dome; decision 155), and reading the weather for
-storms (decision 154); logging in, and the `lost-connection` ending
+mode's curve and rate, zone and override lights, which of a building
+group's fogs applies and whether the eye is in the group, so the indoor
+blend can be used, the seven-ring sky dome; decisions 155, 163), and
+the weather from the server itself (decision 159; Phase 5's network
+code); logging in, and the `lost-connection` ending
 (Phase 5's 609).
 
 ## Intended behavior
@@ -1609,6 +1682,12 @@ return {
    whole 255ths, the fog end's floor and the start's range, the two fog
    modes' start rule, storm sets by strength, and the test program's
    output line buffered (decisions 151 to 156).
+1v. ~~The weather and a building's fogs.~~ Done (2026-11-05): 099 reads
+   the weather message and eases the storm's strength, from `--weather`
+   or a moves file for now, counted in the receipt; 021 reads a
+   building's fogs and 026 blends them in indoors, not yet called;
+   a converted map's own light (#260) taken by the checks, and "no row
+   1" said only for a map with no default (decisions 157 to 165).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2765,6 +2844,82 @@ return {
     counted 575 by line start against 576 checks; the 576 reported was
     right. No new numbered file: `.file-index-counter` stays at 98.
 
+## Decisions (2026-11-05, step 1v, answered here; the owner may overturn any)
+
+157. **SMSG_WEATHER is read as recalled, and refused when it doesn't
+    fit.** This client has no network code yet, docs/004 doesn't list
+    the message, and no server source is on this machine, so the layout
+    is from memory: opcode 0x2F4, a body of 9 bytes (a 4-byte state, a
+    float grade, a 1-byte abrupt flag), no sound id (older clients'
+    messages carried one; 3.3.5a's, as recalled, doesn't). A body of
+    any other length is refused, naming its length, so a wrong guess
+    shows on the first real message instead of being read as nonsense;
+    a grade that isn't a number, or an abrupt byte other than 0 or 1, is
+    refused too; a grade outside 0 to 1 is held to it. The state numbers
+    in 099-weather.h are the server's, recalled.
+158. **Every state but fine is a storm of its grade, eased over ten
+    seconds.** The notes say only that storm sets are laid over by the
+    storm's strength; which states count (fog, rain, snow, sandstorm)
+    and how a grade maps to strength are not in them, so every state
+    but fine counts and the grade is the strength. A change eases in a
+    straight line over ten seconds from wherever the strength stands
+    (so a change half way through starts from there), or is there at
+    once when abrupt. The original's easing time is unknown.
+159. **The weather comes from `--weather` or the moves file until the
+    client talks to a server.** 043's `--weather STATE GRADE` sets it from
+    the start, at once, for the window (eased on the world's seconds,
+    the frames' capped steps) and the run with no window. A move may
+    carry `weather = { state, grade, abrupt }`, taken as the move
+    begins on the steps' clock, so a test can drive a change and its
+    easing; a weather alone takes no steps. The moves format stays 1:
+    the field is new, and every older file reads as before. The receipt
+    counts the last weather's state and grade, how many were taken, and
+    the storm's strength where she ends (the light there uses it).
+160. **The weather is its own file, 099.** Window-free (CORE), not in
+    the reader library (the editor has no use for it). The counter goes
+    to 99.
+161. **A building's fogs are read as recalled.** MFOG, 48 bytes a fog
+    (flags, a centre, two radii, then an end, a start share and a
+    colour, in and under water); a group's four fog numbers at MOGP +
+    48, its bounding box at MOGP + 12. Only the fog numbers' place has
+    any support here: the four bytes right before the liquid field at
+    MOGP + 52 that 173r reads. Colours are blue-green-red bytes, as
+    MOCV's; distances are taken as yards, as the building's points are.
+    WmoRoot and WmoGroup gained their fields at the end (the editor's
+    FFI header is written from these headers by scripts/build).
+162. **The indoor blend is a straight line over 25 yards, to a box.**
+    306: "outdoor fog blends into a building group's own fog over the
+    first 25 yards past its boundary (its underwater fog in liquid)".
+    `light_indoor_fog` mixes colour, start (the share times the end) and
+    end in a straight line over those 25 yards; none of the original's
+    other fog rules (the floor, the modes) are applied to a building's
+    fog, the notes not saying. How far in a point is, is measured to
+    the group's bounding box, standing in for the group's own shape.
+163. **Where the notes run out for buildings.** Which of a group's four
+    fogs applies at a point (each fog has a sphere with two radii, most
+    likely picked or blended as lights are, but the notes don't say),
+    and whether the eye is inside a group at all (the box is a stand-in;
+    305's portal walk is not built), are left. So nothing calls the
+    blend in the window or the run with no window yet. The converter
+    writes no buildings (WC3 buildings become WC3 models), so there is
+    no converter build to check this on.
+164. **"No row 1" is said for the map being lit.** Light's row 1 is only
+    a fallback for a map with no default light of its own, so opening
+    the tables no longer says it has none: `light_map_default` gives the
+    light under every sphere on a map (its own default, else row 1, else
+    none) and says so only in the last case. 043 and the run with no
+    window call it once for their map. A map converted with #260 has its
+    own default, so its log says nothing of row 1.
+165. **The checks on a build take its own light or the grey day.** A
+    build converted before world-edit-to-execute's #260 has no light
+    rows: the grey day, as before. One converted with it has the map's
+    own default light: the checks then want that light's id, read from
+    the map's folder's rows (its copy first), no placeholder row made,
+    the run with no window lit by it, and with no baseline set still lit
+    by it. Which a build is, is read from whether its folder has
+    DBFilesClient/Light.dbc. The id (20000 on these maps) isn't fixed in
+    the checks: it is whatever the map's own default is.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -2963,7 +3118,9 @@ return {
   step 1t: `src/026-light.info.md` (the light through the tables), 074,
   097, 089, 043 and 084; [306](./306-light-and-sky.md) (the light and
   sky, and the original's notes). For step 1u: 026 (the original's
-  colour, fog and storm rules), 084, 089, 043 and 044's `main`.
+  colour, fog and storm rules), 084, 089, 043 and 044's `main`. For
+  step 1v: `src/099-weather.info.md` (the weather's storm), 026, 021,
+  089 and 043; [305](./305-wmo-renderer.md) (a building's fogs).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

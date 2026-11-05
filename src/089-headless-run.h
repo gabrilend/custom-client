@@ -27,6 +27,7 @@
  *           { turn_to = 1.5708 },          -- she faces west (radians, the game's:
  *                                          -- 0 north, rising west), at once
  *           { turn_to = 0, hold = "forward", seconds = 2 },   -- faces north, then runs
+ *           { weather = { state = 4, grade = 0.6 } },        -- the weather changes (1109 step 1v)
  *       },
  *   }
  *
@@ -35,7 +36,12 @@
  * with spaces between; `walking` is the walk toggle (173i); `turn_to`
  * (step 1p) turns her to a facing at once before the move's keys, as a
  * mouse turn does, so a route doesn't hang on how far a held key turns
- * her (a move with turn_to alone takes no steps). A step is
+ * her (a move with turn_to alone takes no steps); `weather` (step 1v)
+ * is a weather message taken as the move begins, as if the server sent
+ * it then: { state = a whole number (099-weather.h; 0 fine), grade = 0
+ * to 1, abrupt = true or false (optional, false: eased over
+ * WEATHER_FADE_SECONDS of steps) } (a move with weather alone takes no
+ * steps either). A step is
  * the same length every time, so a run is the same every time. A field
  * or key the format doesn't have is refused by name and line, so a
  * misspelt move doesn't pass silently. tests/090-test-map-moves.lua is
@@ -70,7 +76,9 @@
  * light_tables 1 when the four light tables are in some place; light_hours,
  * the time of day it was taken at, noon unless 043's --hour; fog_from_map 1
  * when a test map's own war3map.w3i fog is laid over it, as the window
- * does; fog_mode, the original's fog mode the light's fog follows (026,
+ * does; weather_state and weather_grade, the last weather taken (043's
+ * --weather, then the moves'), weather_changes how many, storm the storm
+ * sets' strength where she ends (099, eased; 0-1; step 1v); fog_mode, the original's fog mode the light's fog follows (026,
  * step 1u: 1 below map 530, 2 from it, 0 for the grey day or the map's
  * own fog); fog_start and fog_end in yards, fog_red/green/blue the window's
  * clear colour, sky_red/green/blue the sky overhead, each 0-1).
@@ -83,6 +91,7 @@
 #include "013-errors.h"
 #include "068-goodbye.h"
 #include "087-world-start.h"
+#include "099-weather.h"
 
 #include <stddef.h>
 
@@ -122,6 +131,8 @@ typedef struct {
     const HeadlessMoves *moves;
     const char          *world_dir;
     float                hours;           /* the time of day for the light, 0-24 (043: HEADLESS_HOURS unless --hour) */
+    WeatherMsg           weather;         /* the weather from the start, at once, when has_weather (043's --weather; 1109 step 1v) */
+    int                  has_weather;
 } HeadlessIn;
 
 /* A headless run's time of day when none is given: noon, so the same
@@ -145,7 +156,8 @@ typedef struct {
      * tables are there, the fog's start and end (yards), its colour (the
      * window's clear colour) and the sky overhead, 0-1; the mode the fog
  * follows (026: 0, 1 or 2) */
-    int    light, light_tables, fog_from_map, fog_mode;
+    int    light, light_tables, fog_from_map, fog_mode, weather_state, weather_changes;
+    double weather_grade, storm;
     double light_hours, fog_start, fog_end, fog_red, fog_green, fog_blue, sky_red, sky_green, sky_blue;
 } HeadlessResult;
 

@@ -37,7 +37,8 @@
  * larger inner radius first), so the nearest is laid on top (306's
  * notes on the original; 1109 step 1t, decision 146). A map with no
  * default of its own takes Light's row 1 (306's notes: the original's),
- * and with no row 1 either, the plain grey day, said once at light_open (decision 147).
+ * and with no row 1 either, the plain grey day (decision 147), said by
+ * light_map_default for the map being lit (decision 164).
  *
  * Read through the client's tables (074, 1109 step 1t): a converted
  * map's own Light rows are met before the archives', and a band, set or
@@ -67,6 +68,7 @@
 #include "013-errors.h"
 
 #include "016-dbc.h"
+#include "021-wmo.h"
 #include "060-resolver.h"
 #include "074-tables.h"
 
@@ -123,6 +125,13 @@ typedef struct {
 WErr  light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why);
 void light_close(LightTables *t);
 
+/* The light under every sphere on map `map`: its own default's id, else
+ * Light's row 1's, else -1 (the grey day where no sphere reaches), which
+ * is said on `log` (may be NULL), once per call: 043 and 089 call it once
+ * for the map they light (1109 decision 164, so a converted map with a
+ * default light of its own isn't told about row 1). */
+int  light_map_default(const LightTables *t, int map, FILE *log);
+
 /* The plain grey day: a map with no lights, or no light tables at all
  * (the fixed sky and fog this client draws without them); also each
  * band of a light whose row no place has. */
@@ -156,8 +165,20 @@ int  light_at(const LightTables *t, int map, float x, float y, float z, float ho
 /* light_at in a storm of strength `storm`, 0 (none: light_at's) to 1:
  * each light's storm set (Light's field 10, under water 11) laid over its
  * set by that share, where it names one (306's notes: the original's;
- * 1109 decision 154). Nothing here reads the weather yet: 043 and 089
- * pass 0. */
+ * 1109 decision 154). 043 and 089 pass 099's eased strength (the
+ * weather from --weather or a moves file until there is network code;
+ * 1109 step 1v). */
 int  light_at_weather(const LightTables *t, int map, float x, float y, float z, float hours, int kind, float storm, LightNow *out);
+
+/* Indoors (306's notes: the original's): the outdoor fog in `l` blends
+ * into a building group's own fog `f` over the first
+ * LIGHT_INDOOR_FOG_YARDS past the group's boundary, `depth` yards in
+ * (021's wmo_group_depth; 0 or less: outside, `l` as it is), its
+ * underwater fog when `under`. Its colour, start and end; straight-line
+ * over the 25 yards (decision 162). Which of a group's fogs, and whether
+ * the point is in the group at all, are the caller's: neither is built
+ * yet (decision 163), so nothing calls this but the tests. */
+#define LIGHT_INDOOR_FOG_YARDS 25.0f
+void light_indoor_fog(LightNow *l, const WmoFog *f, float depth, int under);
 
 #endif

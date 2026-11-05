@@ -8,6 +8,7 @@
 #include "021-wmo.h"
 #include "013-errors.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +70,23 @@ WErr wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, WWhy *why)
                 out->sets[i].first = (int)u32(s, e + 20);
                 out->sets[i].count = (int)u32(s, e + 24);
             }
+        } else if (is_tag(s, at, "MFOG")) {
+            /* the building's fogs (1109 step 1v; the layout recalled, unchecked) */
+            out->nfogs = (int)(size / 48);
+            out->fogs = calloc(out->nfogs ? out->nfogs : 1, sizeof *out->fogs);
+            for (int i = 0; i < out->nfogs; ++i) {
+                size_t e = d + (size_t)i * 48;
+                WmoFog *f = &out->fogs[i];
+                f->flags = u32(s, e);
+                for (int k = 0; k < 3; ++k) f->pos[k] = f32(s, e + 4 + k * 4);
+                f->inner = f32(s, e + 16); f->outer = f32(s, e + 20);
+                f->end = f32(s, e + 24); f->start_share = f32(s, e + 28);
+                f->under_end = f32(s, e + 36); f->under_start_share = f32(s, e + 40);
+                for (int k = 0; k < 3; ++k) {                       /* blue, green, red, alpha bytes */
+                    f->colour[k] = s[e + 32 + 2 - k] / 255.0f;
+                    f->under_colour[k] = s[e + 44 + 2 - k] / 255.0f;
+                }
+            }
         } else if (is_tag(s, at, "MODD")) {
             out->nfurnishings = (int)(size / 40);
             out->furnishings = calloc(out->nfurnishings ? out->nfurnishings : 1, sizeof *out->furnishings);
@@ -104,6 +122,8 @@ WErr wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, WWhy *why
     if (!mogp || mogp + 8 + 68 > mogp_end) { w_fail(why, W_ERR_CORRUPT, "no MOGP block: not a building's group file"); return why->code; }
     out->flags = u32(s, mogp + 8 + 8);
     out->liquid = u32(s, mogp + 8 + 52);
+    memcpy(out->fog, s + mogp + 8 + 48, 4);                   /* the root's fogs it names (1109 step 1v; unchecked) */
+    for (int k = 0; k < 6; ++k) out->box[k] = f32(s, mogp + 8 + 12 + (size_t)k * 4);
     const unsigned char *movt = NULL, *monr = NULL, *motv = NULL, *mocv = NULL;
     size_t nmovt = 0, nmonr = 0, nmotv = 0, nmocv = 0;
     /* the group's own blocks follow its 68-byte header, inside MOGP */
@@ -179,8 +199,22 @@ WErr wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, WWhy *why
 }
 /* }}} */
 
+/* {{{ wmo_group_depth */
+float wmo_group_depth(const WmoGroup *g, const float p[3])
+{
+    float in = 1e30f, out = 0;
+    for (int k = 0; k < 3; ++k) {
+        float lo = p[k] - g->box[k], hi = g->box[3 + k] - p[k];
+        float m = lo < hi ? lo : hi;                         /* the nearer face on this axis; negative: past it */
+        if (m < in) in = m;
+        if (m < 0) out += m * m;
+    }
+    return in >= 0 ? in : -sqrtf(out);
+}
+/* }}} */
+
 /* {{{ wmo_free_root, wmo_free_group */
-void wmo_free_root(WmoRoot *r) { free(r->materials); free(r->furnishings); free(r->sets); memset(r, 0, sizeof *r); }
+void wmo_free_root(WmoRoot *r) { free(r->materials); free(r->furnishings); free(r->sets); free(r->fogs); memset(r, 0, sizeof *r); }
 void wmo_free_group(WmoGroup *g) { free(g->vertices); free(g->indices); free(g->batches); free(g->tri_flags); free(g->pool.height); free(g->pool.cell); memset(g, 0, sizeof *g); }
 /* }}} */
 

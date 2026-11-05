@@ -26,6 +26,8 @@ Usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--
   --pitch DEG       (pictures) the camera raised DEG degrees (up to 83)
   --clock MS        (pictures) start the world's animations MS milliseconds in
   --hour H          the time of day, 0 to 24 (default: this machine's clock; a --test-map run with no window: noon)
+  --weather S G     the weather from the start: state S (099-weather.h: 0 fine, 3-5 rain ...), grade G 0-1,
+                    at once (the server's weather isn't read yet; 1109 step 1v)
   --face DEG        her start facing turned DEG degrees (left)
   --walk S          (pictures) hold forward for S world-seconds
   --walking         walk toggled on from the start (173i), as the keypad's / does

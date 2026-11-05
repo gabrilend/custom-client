@@ -34,6 +34,17 @@
  *   yards (4.17) a side. The pool's kind (LiquidType.dbc id) comes from
  *   the group header's liquid field (MOGP + 52), see wmo_liquid_kind.
  *
+ * Fog (1109 step 1v; recalled, unchecked: neither project writes or
+ *   reads one, and no 3.3.5a building is here): the root's MFOG, 48
+ *   bytes a fog: 0 flags, 4 its centre (3 floats, the building's space),
+ *   16 its smaller radius, 20 its larger, 24 the fog's end, 28 its start
+ *   as a share of the end, 32 its colour (blue, green, red, alpha bytes),
+ *   36 40 44 the same three under water. A group names up to four of
+ *   them by number in its header (MOGP + 48, four bytes, beside the
+ *   liquid field at 52 that 173r reads), and its bounding box is at
+ *   MOGP + 12 (two corners, 3 floats each). Distances are taken as
+ *   yards, as the building's points are.
+ *
  * Material flags: 0x1 unlit, 0x2 no fog, 0x4 two-sided. Blend modes as
  * in models (022-m2.h): 0 opaque, 1 cut-out, 2 see-through, 3+ added light.
  */
@@ -71,6 +82,8 @@ typedef struct {
     uint16_t  *indices;   uint32_t nindices;
     WmoBatch  *batches;   int      nbatches;
     uint8_t   *tri_flags;  uint32_t nflags;   /* MOPY, per triangle: see wmo_solid */
+    uint8_t    fog[4];                /* MOGP + 48: the root's fogs it names (unchecked; 1109 step 1v) */
+    float      box[6];                /* MOGP + 12: its bounding box, low corner then high (unchecked) */
 } WmoGroup;
 
 /* Whether a building's triangle is solid (173q), from its MOPY flags:
@@ -81,6 +94,15 @@ static inline int wmo_solid(uint8_t flags) { return (flags & 0x08) || ((flags & 
 typedef struct { uint32_t flags, blend; char picture[260]; } WmoMaterial;
 typedef struct { char model[260]; float pos[3]; float quat[4]; float scale; } WmoFurnishing;
 typedef struct { char name[24]; int first, count; } WmoSet;
+/* One of the root's fogs (MFOG; unchecked): its sphere, and its fog out
+ * of the water and under it (each an end in yards, a start as a share of
+ * that end, a colour 0-1). */
+typedef struct {
+    uint32_t flags;
+    float    pos[3], inner, outer;
+    float    end, start_share, colour[3];
+    float    under_end, under_start_share, under_colour[3];
+} WmoFog;
 
 typedef struct {
     int            ngroups;
@@ -88,6 +110,7 @@ typedef struct {
     WmoMaterial   *materials;    int nmaterials;
     WmoFurnishing *furnishings;  int nfurnishings;
     WmoSet        *sets;         int nsets;
+    WmoFog        *fogs;         int nfogs;   /* MFOG (1109 step 1v) */
 } WmoRoot;
 
 WErr  wmo_read_root(const unsigned char *s, size_t len, WmoRoot *out, WWhy *why);
@@ -101,6 +124,10 @@ WErr  wmo_read_group(const unsigned char *s, size_t len, WmoGroup *out, WWhy *wh
  * flag 0x80000), sea 14, magma 19, slime 20. 0 when the part has no
  * pool. */
 int  wmo_liquid_kind(const WmoRoot *r, const WmoGroup *g);
+/* How far a point (the building's space) is inside the group's bounding
+ * box: the distance to its nearest face, negative outside (1109 step 1v:
+ * the box stands in for the group's own shape, decision 162). */
+float wmo_group_depth(const WmoGroup *g, const float p[3]);
 void wmo_free_root(WmoRoot *r);
 void wmo_free_group(WmoGroup *g);
 

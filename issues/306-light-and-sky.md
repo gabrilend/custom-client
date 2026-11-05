@@ -52,10 +52,18 @@ Measured against the clean-room checklist
     end's push, the rate and the curve are not built (no formula for the
     rate in these notes, the shader files not here);
   - indoors, outdoor fog blends into a building group's own fog over the
-    first 25 yards past its boundary (its underwater fog in liquid);
+    first 25 yards past its boundary (its underwater fog in liquid). The
+    blend is built (`light_indoor_fog`, 1109 step 1v, decision 162: a
+    straight line over the 25 yards, the boundary taken as the group's
+    bounding box), and the groups' fogs are read (305); which of a
+    group's fogs applies and whether the eye is in the group are not in
+    these notes, so nothing calls it yet (decision 163);
   - ~~storm sets blended over the normal set by the storm's
-    strength;~~ Done in 1109 step 1u (decision 154): `light_at_weather`,
-    though nothing reads the weather yet (strength 0);
+    strength;~~ Done in 1109 step 1u (decision 154): `light_at_weather`;
+    the weather it takes is read from SMSG_WEATHER's body by
+    `src/099-weather.c` and eased over ten seconds unless abrupt (1109
+    step 1v, decisions 157 to 159; the layout recalled, unchecked), from
+    043's `--weather` or a moves file until the client has network code;
   - up to 5 zone lights by percentage; override lights with their own
     fades (not built: these notes name no table or fade rule; 1109
     decision 155);

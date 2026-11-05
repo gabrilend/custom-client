@@ -74,6 +74,7 @@
 #include "../src/094-wc3-pathing.h"
 #include "../src/097-table-layouts.h"
 #include "../src/098-wdt.h"
+#include "../src/099-weather.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -276,6 +277,7 @@ static size_t open_chunk(Bytes *o, const char *t) { puttag(o, t); put32(o, 0); r
 static void close_chunk(Bytes *o, size_t body) { patch32(o, body - 4, (uint32_t)(o->n - body)); }
 static size_t open_record(Bytes *o) { put32(o, 0); return o->n - 4; }
 static void close_record(Bytes *o, size_t at) { patch32(o, at, (uint32_t)(o->n - at)); }
+static void wmo_fog_tests(void);   /* a building's fogs (1109 step 1v), with the made buildings below */
 static unsigned char *find_tag(Bytes *o, const char *t) { for (size_t i = 0; i + 4 <= o->n; ++i) if (!memcmp(o->b + i, t, 4)) return o->b + i; return NULL; }
 /* a geoset: points (x y z, three a point), normals (as many as given),
  * triangles, its material; one matrix group, all points in it */
@@ -1999,6 +2001,11 @@ static void converted_tests(const char *dir, const char *build)
             id = light_at(&lt, 901, 100, 205, 0, 12, LIGHT_CLEAR, &other);
             check(id == 13 && other.fog[1] == 1 && other.fog_end == 200,
                   "inside that map's sphere: the sphere, laid over row 1");
+            int d900 = light_map_default(&lt, 900, place.log), d902 = light_map_default(&lt, 902, place.log), d571 = light_map_default(&lt, 571, place.log);
+            fflush(place.log);
+            snprintf(line, sizeof line, "the light under every sphere, said only when it is the grey day (1109 decision 164): map 900 its own default %d, map 902 row 1 (%d), map 571 its own %d; nothing said",
+                     d900, d902, d571);
+            check(d900 == 10 && d902 == 1 && d571 == 16 && !(llog && strstr(llog, "no default light")), line);
             /* {{{ the original's fog rules and storms (1109 step 1u) */
             LightNow f1, f2, f571, st0, sth, st1, sti, sthalf, plain;
             int i1 = light_at(&lt, 1, 0, 0, 0, 12, LIGHT_CLEAR, &f1);
@@ -2059,6 +2066,55 @@ static void converted_tests(const char *dir, const char *build)
         fclose(only.log); free(olog);
         fclose(place.log); free(llog);
     }
+    /* }}} */
+
+    /* {{{ the server's weather (099, 1109 step 1v): its message read, the storm eased */
+    {
+        unsigned char wb[16];
+        float g6 = 0.6f, g15 = 1.5f, gnan = NAN;
+        WeatherMsg wm;
+        memset(wb, 0, sizeof wb);
+        wb[0] = 4; memcpy(wb + 4, &g6, 4); wb[8] = 0;
+        WErr e = weather_msg_read(wb, 9, &wm, &why);
+        check(!e && wm.state == WEATHER_MEDIUM_RAIN && wm.grade == 0.6f && !wm.abrupt && weather_msg_storm(&wm) == 0.6f,
+              e ? why.text : "a weather message's 9 bytes: state 4 (medium rain), grade 0.6, eased: the storm sets at 0.6");
+        WErr short_e = weather_msg_read(wb, 8, &wm, &why);
+        int short_named = short_e == W_ERR_CORRUPT && strstr(why.text, "8 bytes") && strstr(why.text, "reads 9");
+        WErr long_e = weather_msg_read(wb, 13, &wm, &why);   /* an older client's, a sound id after the state */
+        int long_named = long_e == W_ERR_CORRUPT && strstr(why.text, "13 bytes");
+        memcpy(wb + 4, &gnan, 4);
+        WErr nan_e = weather_msg_read(wb, 9, &wm, &why);
+        memcpy(wb + 4, &g15, 4); wb[8] = 2;
+        WErr ab_e = weather_msg_read(wb, 9, &wm, &why);
+        wb[8] = 1;
+        WErr big_e = weather_msg_read(wb, 9, &wm, &why);
+        check(short_named && long_named && nan_e == W_ERR_CORRUPT && ab_e == W_ERR_CORRUPT && !big_e && wm.grade == 1 && wm.abrupt,
+              "refused, named: a body of 8 bytes, one of 13 (an older client's, with a sound id), a grade that isn't a number, an abrupt byte of 2; a grade of 1.5 held to 1");
+        float g5 = 0.5f;
+        wb[0] = 0; memcpy(wb + 4, &g5, 4);                   /* fine, grade 0.5 */
+        e = weather_msg_read(wb, 9, &wm, &why);
+        check(!e && wm.state == WEATHER_FINE && weather_msg_storm(&wm) == 0, e ? why.text : "fine weather whatever its grade: no storm");
+        Weather w;
+        weather_init(&w);
+        WeatherMsg rain = { .state = WEATHER_HEAVY_RAIN, .grade = 0.6f }, clear = { .state = WEATHER_FINE, .abrupt = 1 },
+                   pour = { .state = WEATHER_HEAVY_RAIN, .grade = 1 }, ease_off = { .state = WEATHER_FINE };
+        float s0 = weather_strength(&w, 0);
+        weather_take(&w, &rain, 0);
+        float a0 = weather_strength(&w, 0), a5 = weather_strength(&w, 5), a10 = weather_strength(&w, 10), a20 = weather_strength(&w, 20);
+        weather_take(&w, &clear, 20);
+        float b20 = weather_strength(&w, 20);
+        weather_take(&w, &pour, 25);
+        weather_take(&w, &ease_off, 30);                       /* half way in: eases out from 0.5 */
+        float c30 = weather_strength(&w, 30), c35 = weather_strength(&w, 35), c40 = weather_strength(&w, 40);
+        snprintf(line, sizeof line, "the storm eased over %.0f seconds: none at first (%.2f); heavy rain 0.6: %.2f, %.2f, %.2f, %.2f at 0, 5, 10, 20 seconds; fine at once: %.2f; a pour broken off half way: %.2f, %.2f, %.2f; %d messages",
+                 WEATHER_FADE_SECONDS, s0, a0, a5, a10, a20, b20, c30, c35, c40, w.changes);
+        check(s0 == 0 && a0 == 0 && fabsf(a5 - 0.3f) < 1e-6f && a10 == 0.6f && a20 == 0.6f && b20 == 0 && fabsf(c30 - 0.5f) < 1e-6f && fabsf(c35 - 0.25f) < 1e-6f
+              && c40 == 0 && w.changes == 4, line);
+    }
+    /* }}} */
+
+    /* {{{ a building's fogs and the indoor blend (021, 026; 1109 step 1v) */
+    wmo_fog_tests();
     /* }}} */
 
     /* {{{ heights from a map's own ground files (075) */
@@ -2485,6 +2541,71 @@ static void t_made_wmo_group(Bytes *o)
     c = open_chunk(o, "VTOM"); for (int i = 0; i < 6; ++i) putf(o, 0); close_chunk(o, c);
     c = open_chunk(o, "ABOM"); for (int i = 0; i < 3; ++i) put32(o, 0); put32(o, 0); put16(o, 3); put16(o, 0); put16(o, 0); o->b[o->n++] = 0; o->b[o->n++] = 0; close_chunk(o, c);
     close_chunk(o, g);
+}
+/* a building's fogs and a group naming them (021, 026; 1109 step 1v):
+ * made here, the layout as 021-wmo.h recalls it */
+static void wmo_fog_tests(void)
+{
+    char line[600];
+    WWhy why;
+    static Bytes o;
+    t_made_wmo_root(&o);
+    size_t c = open_chunk(&o, "GOFM");
+    /* fog 0: centre (1, 2, 3), radii 5 and 20, ends at 100 yards, starts
+     * at a quarter, orange (blue 0, green 128, red 255); under water ends
+     * at 30, starts at a tenth, blue. Fog 1: grey, 50 yards. */
+    static const unsigned char ORANGE[4] = { 0, 128, 255, 255 }, BLUE[4] = { 255, 0, 0, 255 }, GREY[4] = { 128, 128, 128, 255 };
+    put32(&o, 0); putf(&o, 1); putf(&o, 2); putf(&o, 3); putf(&o, 5); putf(&o, 20);
+    putf(&o, 100); putf(&o, 0.25f); memcpy(o.b + o.n, ORANGE, 4); o.n += 4;
+    putf(&o, 30); putf(&o, 0.1f); memcpy(o.b + o.n, BLUE, 4); o.n += 4;
+    put32(&o, 1); for (int i = 0; i < 5; ++i) putf(&o, 0);
+    putf(&o, 50); putf(&o, 0.5f); memcpy(o.b + o.n, GREY, 4); o.n += 4;
+    putf(&o, 50); putf(&o, 0.5f); memcpy(o.b + o.n, GREY, 4); o.n += 4;
+    close_chunk(&o, c);
+    WmoRoot r;
+    WErr e = wmo_read_root(o.b, o.n, &r, &why);
+    const WmoFog *f = e || r.nfogs < 1 ? NULL : &r.fogs[0];
+    snprintf(line, sizeof line, "a building's fogs (MFOG, its layout recalled): %d, the first centred (%.0f, %.0f, %.0f), radii %.0f and %.0f, ending at %.0f yards from %.2f of it, (%.3f, %.3f, %.3f); under water %.0f from %.2f, (%.0f, %.0f, %.0f)",
+             e ? 0 : r.nfogs, f ? f->pos[0] : 0, f ? f->pos[1] : 0, f ? f->pos[2] : 0, f ? f->inner : 0, f ? f->outer : 0, f ? f->end : 0, f ? f->start_share : 0,
+             f ? f->colour[0] : 0, f ? f->colour[1] : 0, f ? f->colour[2] : 0, f ? f->under_end : 0, f ? f->under_start_share : 0,
+             f ? f->under_colour[0] : 0, f ? f->under_colour[1] : 0, f ? f->under_colour[2] : 0);
+    check(!e && r.nfogs == 2 && f && f->pos[2] == 3 && f->inner == 5 && f->outer == 20 && f->end == 100 && f->start_share == 0.25f && f->colour[0] == 1
+          && f->colour[1] == 128.0f / 255 && f->colour[2] == 0 && f->under_end == 30 && f->under_colour[2] == 1 && f->under_colour[0] == 0
+          && r.fogs[1].flags == 1 && r.fogs[1].end == 50 && r.materials && r.nmaterials == 1, e ? why.text : line);
+    /* a group naming fog 1 then 0, its box from (0, 0, 0) to (40, 40, 10) */
+    static Bytes gb;
+    t_made_wmo_group(&gb);
+    unsigned char *mogp = find_tag(&gb, "PGOM");
+    static const float BOX[6] = { 0, 0, 0, 40, 40, 10 };
+    for (int k = 0; k < 6; ++k) memcpy(mogp + 8 + 12 + k * 4, &BOX[k], 4);
+    mogp[8 + 48] = 1; mogp[8 + 49] = 0;
+    WmoGroup g;
+    WErr ge = wmo_read_group(gb.b, gb.n, &g, &why);
+    float mid[3] = { 20, 20, 5 }, near_wall[3] = { 2, 20, 5 }, out1[3] = { -3, 20, 5 }, out2[3] = { -3, -4, 5 };
+    float dm = ge ? 0 : wmo_group_depth(&g, mid), dw = ge ? 0 : wmo_group_depth(&g, near_wall), d1 = ge ? 0 : wmo_group_depth(&g, out1), d2 = ge ? 0 : wmo_group_depth(&g, out2);
+    snprintf(line, sizeof line, "a group's fogs by number (%d, %d) and its box; how far in: the middle %.1f yards (its floor and roof 5 off), by a wall %.1f, outside %.1f and %.1f (past a corner)",
+             ge ? -1 : g.fog[0], ge ? -1 : g.fog[1], dm, dw, d1, d2);
+    check(!ge && g.fog[0] == 1 && g.fog[1] == 0 && g.box[3] == 40 && dm == 5 && dw == 2 && d1 == -3 && d2 == -5, ge ? why.text : line);
+    /* the blend into fog 0 over the first 25 yards in */
+    LightNow out, l0, half, whole, under;
+    memset(&out, 0, sizeof out);
+    for (int k = 0; k < 3; ++k) out.fog[k] = LIGHT_GREY_FOG;
+    out.fog_start = 125; out.fog_end = 500;
+    l0 = half = whole = under = out;
+    if (f) {
+        light_indoor_fog(&l0, f, d1, 0);
+        light_indoor_fog(&half, f, 12.5f, 0);
+        light_indoor_fog(&whole, f, 30, 0);
+        light_indoor_fog(&under, f, 25, 1);
+    }
+    snprintf(line, sizeof line, "indoors, the outdoor fog (grey, 125 to 500) into the group's (orange, 25 to 100): outside %s; 12.5 yards in (%.3f, %.3f, %.3f) from %.1f to %.1f; 30 in, all the group's (%.3f, %.3f, %.3f) from %.1f to %.1f; under water 25 in, its underwater fog (%.0f, %.0f, %.0f) from %.1f to %.1f",
+             memcmp(&l0, &out, sizeof out) ? "changed" : "as it was", half.fog[0], half.fog[1], half.fog[2], half.fog_start, half.fog_end,
+             whole.fog[0], whole.fog[1], whole.fog[2], whole.fog_start, whole.fog_end, under.fog[0], under.fog[1], under.fog[2], under.fog_start, under.fog_end);
+    check(f && !memcmp(&l0, &out, sizeof out) && fabsf(half.fog[0] - 0.8f) < 1e-5f && fabsf(half.fog[1] - (0.6f + 128.0f / 255) / 2) < 1e-5f && fabsf(half.fog[2] - 0.3f) < 1e-5f
+          && fabsf(half.fog_start - 75) < 1e-3f && fabsf(half.fog_end - 300) < 1e-3f && whole.fog[0] == 1 && whole.fog[2] == 0 && whole.fog_start == 25 && whole.fog_end == 100
+          && under.fog[2] == 1 && under.fog[0] == 0 && fabsf(under.fog_start - 3) < 1e-5f && under.fog_end == 30, line);
+    if (!ge) wmo_free_group(&g);
+    if (!e) wmo_free_root(&r);
 }
 static void placed_tests(const char *dir)
 {
@@ -5880,8 +6001,13 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             { "return { format = 1, map = 3, moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
             { "return { format = 1, moves = { { turn_to = 7, hold = \"\", seconds = 1 } } }", "turn_to must be" },
             { "return { format = 1, moves = { { turn_to = \"north\" } } }", "turn_to must be" },
-            { "return { format = 1, moves = { { turn_to = 0, hold = \"forward\" } } }", "or turn_to alone" },
-            { "return { format = 1, moves = { { turn_to = 0, seconds = 1 } } }", "or turn_to alone" },
+            { "return { format = 1, moves = { { turn_to = 0, hold = \"forward\" } } }", "or turn_to or weather alone" },
+            { "return { format = 1, moves = { { turn_to = 0, seconds = 1 } } }", "or turn_to or weather alone" },
+            { "return { format = 1, moves = { { weather = { state = 4, grade = 2 } } } }", "grade must be" },
+            { "return { format = 1, moves = { { weather = { grade = 0.5 } } } }", "needs state and grade" },
+            { "return { format = 1, moves = { { weather = { state = 4.5, grade = 0.5 } } } }", "state must be" },
+            { "return { format = 1, moves = { { weather = { state = 4, grade = 0.5, sound = 3 } } } }", "sound" },
+            { "return { format = 1, moves = { { weather = \"rain\" } } }", "must be a table" },
         };
         int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
         for (int i = 0; i < nbad; ++i) {
@@ -5890,7 +6016,7 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             else printf("    (moves %d: %s)\n", i, e ? why.text : "taken");
             if (!e) headless_moves_free(hm);
         }
-        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name, a turn_to past a whole turn or not a number, a turn_to with hold and no seconds or seconds and no hold", refused, nbad);
+        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name, a turn_to past a whole turn or not a number, a turn_to with hold and no seconds or seconds and no hold, a weather's grade past 1, no state, a state not whole, a field it doesn't have, not a table", refused, nbad);
         check(refused == nbad, line);
         const char *named = "return { format = 1, map = \"Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }";
         e = headless_moves_parse(named, strlen(named), "made", &hm, &why);
@@ -5915,6 +6041,10 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         const char *turns = "return { format = 1, moves = { { turn_to = 1.5708 }, { turn_to = -6.2832, hold = \"forward\", seconds = 1 }, { hold = \"\", seconds = 0.5 } } }";
         e = headless_moves_parse(turns, strlen(turns), "made", &hm, &why);
         check(!e && headless_moves_count(hm) == 3 && headless_moves_steps(hm) == 30, e ? why.text : "turn_to (1109 step 1p): a facing alone takes no steps; with hold and seconds she faces it, then holds them (3 moves, 30 steps)");
+        if (!e) headless_moves_free(hm);
+        const char *wet = "return { format = 1, moves = { { weather = { state = 4, grade = 0.6 } }, { hold = \"\", seconds = 1, weather = { state = 0, grade = 0, abrupt = true } } } }";
+        e = headless_moves_parse(wet, strlen(wet), "made", &hm, &why);
+        check(!e && headless_moves_count(hm) == 2 && headless_moves_steps(hm) == 20, e ? why.text : "weather (1109 step 1v): alone a move takes no steps; with hold and seconds it is taken as the move begins (2 moves, 20 steps)");
         if (!e) headless_moves_free(hm);
         snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
         const char *tiny = "return { format = 1, moves = { { hold = \"\", seconds = 0.001 }, { hold = \"left right\", seconds = 0.08 } } }";
@@ -5984,6 +6114,11 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     snprintf(rm, sizeof rm, "%s/models.lua", tables);
     snprintf(conv_file, sizeof conv_file, "%s/map.lua", build);
     struct stat sb;
+    /* a build converted with its own light (world-edit-to-execute's draft
+     * PR #260): Light and its tables in the map's folder; before it, none */
+    char own_light_file[760];
+    snprintf(own_light_file, sizeof own_light_file, "%s/DBFilesClient/Light.dbc", build);
+    int own_tables = !stat(own_light_file, &sb), own_light = -1;
     if (stat(rg, &sb) || stat(rm, &sb) || stat(conv_file, &sb)) {
         printf("  (no converter tables at %s or no converted build at %s: the start with no install is skipped)\n", tables, build);
         t_remove_tree(root);
@@ -6014,15 +6149,28 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     check(!e && !ws.install && ws.assets && resolver_baseline(ws.assets) && !strcasecmp(ws.map_name, m.directory) && ws.adt_heights
           && (!m.has_z || near(ws.z, m.start_z, 0.5)) && ws.max_slope == WORLD_START_SLOPE && strstr(log, "no WoW install"), e ? why.text : line);
     if (!e) {
-        /* the light: the set's empty tables, so the plain grey day */
+        /* the light: the set's empty tables, so the plain grey day; or, on
+         * a build with its own light (#260), the map's own default, read
+         * from its own rows, no placeholder row made (1109 step 1v) */
         LightTables lights;
         e = light_open(&lights, ws.tables, lf, &why);
         LightNow now;
+        int placeholders0 = tables_placeholders(ws.tables);
+        int base = e ? -1 : light_map_default(&lights, m.id, lf);
         int lid = e ? 0 : light_at(&lights, m.id, (float)m.start_x, (float)m.start_y, ws.z, 12, LIGHT_CLEAR, &now);
+        int made_rows = tables_placeholders(ws.tables) - placeholders0;
         fflush(lf);
-        check(!e && !lights.none && lights.from == ASSET_FROM_BASELINE && lights.ncopies == 1 && lights.nlights == 0 && lights.skyboxes && lid < 0
-              && now.fog_end == LIGHT_GREY_FOG_END && now.fog[0] == LIGHT_GREY_FOG && strstr(log, "light: Light.dbc has no row 1"),
-              e ? why.text : "the light tables (026, through the tables: 074) from the set, empty: no light and no row 1 to fall back on (said), so 043's plain grey day");
+        if (!own_tables)
+            check(!e && !lights.none && lights.from == ASSET_FROM_BASELINE && lights.ncopies == 1 && lights.nlights == 0 && lights.skyboxes && lid < 0 && base < 0
+                  && now.fog_end == LIGHT_GREY_FOG_END && now.fog[0] == LIGHT_GREY_FOG && strstr(log, "has no default light of its own and Light.dbc has no row 1"),
+                  e ? why.text : "the light tables (026, through the tables: 074) from the set, empty: no light and no row 1 to fall back on (said), so 043's plain grey day");
+        else {
+            own_light = lid;
+            snprintf(line, sizeof line, "the build's own light (world-edit-to-execute's #260): light %d, its map's own default, from the map's folder first (%d copies of Light, %d lights), fog from %.1f to %.1f yards, sky (%.3f, %.3f, %.3f), %d placeholder rows made, no word of row 1",
+                     lid, lights.ncopies, lights.nlights, now.fog_start, now.fog_end, now.sky[0][0], now.sky[0][1], now.sky[0][2], made_rows);
+            check(!e && !lights.none && lights.from == ASSET_FROM_OVERLAY && lid >= 0 && lid == base && made_rows == 0
+                  && (now.sky[0][0] != LIGHT_GREY_SKY || now.sky[0][1] != LIGHT_GREY_SKY || now.sky[0][2] != LIGHT_GREY_SKY) && !strstr(log, "row 1"), e ? why.text : line);
+        }
         if (!e) light_close(&lights);
         /* the water: LiquidType's water row from the set, naming frames the set has */
         TableRow lr;
@@ -6166,8 +6314,12 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         snprintf(line, sizeof line, "the light where she ends, at noon (026 through 074, 1109 step 1t): %s%d, the tables %s, fog from %.1f to %.1f yards%s (fog mode %d: none of the original's), colour (%.3f, %.3f, %.3f), sky (%.3f, %.3f, %.3f), twice the same",
                  h->light < 0 ? "none (the set's tables are empty) " : "light ", h->light, h->light_tables ? "there" : "in no place", h->fog_start, h->fog_end,
                  h->fog_from_map ? " (the map's own)" : "", h->fog_mode, h->fog_red, h->fog_green, h->fog_blue, h->sky_red, h->sky_green, h->sky_blue);
-        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->light < 0 && h->fog_mode == 0 && h->fog_end > 0 && h->fog_start <= h->fog_end
-              && (h->fog_from_map || (h->fog_red == LIGHT_GREY_FOG && h->fog_green == LIGHT_GREY_FOG && h->fog_end <= LIGHT_GREY_FOG_END)) && h->sky_blue == LIGHT_GREY_SKY
+        /* the grey day on a build with no light rows; its own light (its
+         * default's id) on one converted with #260 (1109 step 1v) */
+        check(ran == 2 && h->light_hours == HEADLESS_HOURS && h->light_tables == 1 && h->fog_end > 0 && h->fog_start <= h->fog_end
+              && (own_tables ? h->light >= 0 && h->light == own_light && (h->fog_from_map ? h->fog_mode == 0 : h->fog_mode >= 1)
+                             : h->light < 0 && h->fog_mode == 0 && h->sky_blue == LIGHT_GREY_SKY
+                               && (h->fog_from_map || (h->fog_red == LIGHT_GREY_FOG && h->fog_green == LIGHT_GREY_FOG && h->fog_end <= LIGHT_GREY_FOG_END)))
               && res[1].fog_end == h->fog_end && res[1].fog_red == h->fog_red && res[1].light == h->light, line);
         snprintf(line, sizeof line, "the placed models in the headless world (091, 1109 step 1o): %d models and %d buildings read, %d placed copies (%d WC3 models and %d stand-ins walked through, %d left out), %d solid copies, %d solid triangles; %d steps on models' floors, %d against their walls",
                  h->models, h->buildings, h->model_copies, h->models_wc3, h->model_stand_ins, h->models_left_out, h->solid_copies, h->solid_triangles, h->steps_on_models, h->steps_walled);
@@ -6331,6 +6483,36 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             headless_moves_free(om);
             check(!oe && !t_receipts_same(r1, r3, diff, sizeof diff) && strstr(diff, "moves"), oe ? why.text : "other moves: another receipt (the comparison finds the difference)");
         }
+        /* the weather (099, 1109 step 1v): --weather's from the start, then
+         * a move's, eased; the receipt counts the last, how many and the
+         * storm where she ends */
+        {
+            char r5[700];
+            snprintf(r5, sizeof r5, "%s/headless-weather", root);
+            const char *wet = "return { format = 1, moves = { { hold = \"\", seconds = 2 }, { weather = { state = 5, grade = 0.8 } }, { hold = \"\", seconds = 5 } } }";
+            HeadlessMoves *wm = NULL;
+            Goodbye *g = NULL;
+            HeadlessResult wr;
+            memset(&wr, 0, sizeof wr);
+            WErr we = headless_moves_parse(wet, strlen(wet), "made", &wm, &why);
+            if (!we) we = goodbye_begin(r5, build, &g, &why);
+            HeadlessIn hin = { .start = in, .moves = wm, .world_dir = world, .hours = HEADLESS_HOURS,
+                               .weather = { .state = WEATHER_LIGHT_RAIN, .grade = 0.2f, .abrupt = 1 }, .has_weather = 1 };
+            hin.start.log = lf;
+            if (!we) we = headless_run(&hin, g, &wr, &why);
+            goodbye_free(g);
+            headless_moves_free(wm);
+            LuaData *wd = NULL;
+            WErr wre = we ? we : lua_data_read(r5, 65536, &wd, &why);
+            const LuaValue *wt = wre ? NULL : lua_data_top(wd);
+            snprintf(line, sizeof line, "the weather in the run with no window: light rain 0.2 from the start, heavy rain 0.8 eased in 2 seconds on, so %.3f where she ends 5 seconds later (half way); state %d, grade %.2f, %d changes, in the receipt",
+                     wr.storm, wr.weather_state, wr.weather_grade, wr.weather_changes);
+            check(!wre && wr.weather_state == WEATHER_HEAVY_RAIN && fabs(wr.weather_grade - 0.8) < 1e-6 && wr.weather_changes == 2 && fabs(wr.storm - 0.5) < 1e-4
+                  && lua_value_number(lua_value_field(wt, "weather_state")) == WEATHER_HEAVY_RAIN && lua_value_number(lua_value_field(wt, "weather_changes")) == 2
+                  && fabs(lua_value_number(lua_value_field(wt, "storm")) - wr.storm) < 1e-6, wre ? why.text : line);
+            if (wd) lua_data_free(wd);
+            check(h->weather_changes == 0 && h->storm == 0 && h->weather_state == WEATHER_FINE, "with no weather given: fine, no storm, none taken");
+        }
         LuaData *rd = NULL;
         WErr re = ran ? lua_data_read(r1, 65536, &rd, &why) : W_ERR_NOT_FOUND;
         const LuaValue *rt = re ? NULL : lua_data_top(rd);
@@ -6371,9 +6553,19 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         int lid = le ? 0 : light_at(&lights, m.id, (float)m.start_x, (float)m.start_y, ws.z, 12, LIGHT_CLEAR, &now);
         fflush(lf);
         const char *said = log ? strstr(log, "light: Light.dbc, LightParams.dbc, LightIntBand.dbc, LightFloatBand.dbc in no place: the fixed grey sky and fog") : NULL;
-        check(!e && strstr(log, "no install and no baseline set") && !le && lights.none && lid < 0 && now.fog_end == LIGHT_GREY_FOG_END && now.sky[0][1] == LIGHT_GREY_SKY
-              && said && !strstr(said + 1, "light:"),
-              le ? why.text : "with no install and no baseline set, the start opens on the map's own files, and with no light tables anywhere the fixed grey sky and fog stand, said in one line (1109 step 1t)");
+        if (!own_tables)
+            check(!e && strstr(log, "no install and no baseline set") && !le && lights.none && lid < 0 && now.fog_end == LIGHT_GREY_FOG_END && now.sky[0][1] == LIGHT_GREY_SKY
+                  && said && !strstr(said + 1, "light:"),
+                  le ? why.text : "with no install and no baseline set, the start opens on the map's own files, and with no light tables anywhere the fixed grey sky and fog stand, said in one line (1109 step 1t)");
+        else
+        {
+            /* what it says of the light: at most that no skybox is drawn (#260 writes no LightSkybox) */
+            const char *l1 = log ? strstr(log, "light:") : NULL;
+            int only_skybox = !l1 || (!strncmp(l1, "light: LightSkybox.dbc in no place", 34) && !strstr(l1 + 1, "light:"));
+            snprintf(line, sizeof line, "with no install and no baseline set, a build with its own light (#260) still lights by it (light %d), from its own rows; of the light it says %s",
+                     lid, !l1 ? "nothing" : only_skybox ? "only that no skybox is drawn (it writes no LightSkybox)" : l1);
+            check(!e && strstr(log, "no install and no baseline set") && !le && !lights.none && lid == own_light && !said && only_skybox, le ? why.text : line);
+        }
         if (!le) light_close(&lights);
         if (!e) world_start_close(&ws);
     }

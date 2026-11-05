@@ -64,8 +64,6 @@ WErr light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why)
     }
     t->record1 = -1;
     for (int k = 0; k < t->nlights && t->record1 < 0; ++k) if (t->lights[k].id == 1) t->record1 = k;
-    if (t->record1 < 0 && log)   /* decision 147's fallback isn't there: said once, not at each frame */
-        fprintf(log, "light: Light.dbc has no row 1: a map with no default light of its own has the fixed grey sky and fog\n");
     t->skyboxes = tables_copies(tables, "LightSkybox", NULL, NULL) > 0;
     if (!t->skyboxes && log) fprintf(log, "light: LightSkybox.dbc in no place: no skybox drawn\n");
     return W_OK;
@@ -189,6 +187,17 @@ static void fog_rules(int map, LightNow *o)
 }
 /* }}} */
 
+/* {{{ light_map_default */
+int light_map_default(const LightTables *t, int map, FILE *log)
+{
+    if (t->none) return -1;
+    for (int k = 0; k < t->nlights; ++k) if (t->lights[k].map == map && t->lights[k].fallback) return t->lights[k].id;
+    if (t->record1 >= 0) return t->lights[t->record1].id;
+    if (log) fprintf(log, "light: map %d has no default light of its own and Light.dbc has no row 1: the fixed grey sky and fog where no light reaches\n", map);
+    return -1;
+}
+/* }}} */
+
 /* {{{ light_at, light_at_weather */
 int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out)
 {
@@ -262,5 +271,18 @@ int light_at_weather(const LightTables *t, int map, float x, float y, float z, f
     float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
     for (int c = 0; c < 3; ++c) out->sun_dir[c] = dir[c] / len;
     return used;
+}
+/* }}} */
+
+/* {{{ light_indoor_fog */
+void light_indoor_fog(LightNow *l, const WmoFog *f, float depth, int under)
+{
+    if (!f || depth <= 0) return;
+    float w = depth >= LIGHT_INDOOR_FOG_YARDS ? 1 : depth / LIGHT_INDOOR_FOG_YARDS;
+    float end = under ? f->under_end : f->end, share = under ? f->under_start_share : f->start_share;
+    const float *c = under ? f->under_colour : f->colour;
+    for (int k = 0; k < 3; ++k) l->fog[k] += (c[k] - l->fog[k]) * w;
+    l->fog_start += (end * share - l->fog_start) * w;
+    l->fog_end += (end - l->fog_end) * w;
 }
 /* }}} */
