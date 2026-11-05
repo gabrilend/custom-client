@@ -1183,15 +1183,72 @@ Not checked: the windowed run's creature built from a placeholder row
 no place has), and the light tables (026), still read whole from the
 first place (decision 129).
 
+**Step 1r is built** (2026-11-05, the same background work): the
+tables' layouts (issue 106), `src/097-table-layouts.c`. Decisions 134
+to 139.
+
+- **What each column is (097):** for the twenty tables this client
+  reads or the converter writes, each column's name, kind (whole
+  number, signed, decimal, text, or a localised text as 16 texts and a
+  mask), its placeholder value, and the readers that read it. The
+  converter's seven (Map, AreaTable, LoadingScreens,
+  CreatureDisplayInfo, CreatureModelData, FactionTemplate, Faction)
+  are world-edit-to-execute's `src/wowbuild/dbc.lua` LAYOUTS, all 221
+  columns' names and kinds checked equal to it, one by one; the
+  others' read columns are the readers' own offsets (025, 026, 040,
+  041, 087, 088), the rest recalled. A column a reader reads is marked
+  with that reader (checked from code); every other column, and every
+  width, is unchecked: neither project has a 3.3.5a file to measure
+  (decision 134).
+- **Widths (074, 026):** a copy narrower than the last column this
+  client reads is refused, an error naming its place, its width and
+  that column; a copy of another width than its layout's is said on
+  the standard error and read as it is, since the layout may be the
+  wrong one (decision 135). 026's light tables are checked the same
+  way (Light now to field 9, which it reads, and LightParams and
+  LightSkybox too).
+- **Placeholder rows from the layout (074):** a placeholder row's
+  columns hold the layout's values: a size of 1, an opaque alpha, water
+  three-quarters opaque, a visible name "unknown Map 900" in its
+  first-language text with the mask, the rest 0 or "" (decision 136).
+  A table no place has can now take one too, as wide as its layout; a
+  table with no layout still gets the old row of its number and zeros,
+  and one whose first column isn't a row number
+  (CharacterFacialHairStyles) gets none (decision 139).
+- **Who asks (041, 088):** 088 as before; 041's window now asks for its
+  CreatureDisplayInfo and CreatureDisplayInfoExtra rows the same way,
+  and a placeholder look row stands the stand-in figure in, said
+  (decision 137). Map, LiquidType and the rest stay an error.
+- **The baseline set (085):** its tables' widths come from the layouts
+  (decision 138); its bytes are as before.
+
+Checked (`tests/044-test-client.c`): every layout's columns fill its
+width exactly and are named once; the readers' last columns (Map 2,
+CreatureDisplayInfo 9, LiquidType 16, LightParams 9,
+CreatureDisplayInfoExtra 21); columns by number, a localised text's
+names and mask; a too-narrow width refused naming both, a wider one
+fitting; placeholder rows for CreatureDisplayInfo (its number, size 1,
+alpha 255), Map (its "unknown Map 77", its mask, a wider copy's extra
+columns 0) and LightParams (0.75); on the made archive and folder, a
+3-wide CreatureDisplayInfo refused, a Faction no place has given a
+57-wide placeholder row named "unknown Faction 3", a table with no
+layout and CharacterFacialHairStyles given none; each real build's
+seven tables as wide as their layouts.
+
+Not checked: any width or unread column against a real 3.3.5a file
+(none in either project); the windowed run's look from a placeholder
+CreatureDisplayInfoExtra row (raylib isn't here; 041 compiles under
+gcc and clang -Werror); the mask 0xFF01FE (the converter's, recalled).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
 its replaceable pictures are left off); the baseline set's buildings, creatures' own looks, her character, WC3
 stock art and the rest of the client's tables (decisions 88, 97), and
 the asset forge's real set;
-a placeholder row for tables other than a creature's (step 1q makes one
-only where 088 asks; layouts, 106, would say what each field should
-hold); the light tables searched across places (026); logging in, and the `lost-connection` ending
+a placeholder row for tables other than a creature's (step 1r gives
+every table the client reads a layout, but only 041 and 088 ask for
+one); the layouts written out for the converter (decision 134); the light tables searched across places (026); logging in, and the `lost-connection` ending
 (Phase 5's 609).
 
 ## Intended behavior
@@ -1372,6 +1429,10 @@ return {
    `asset_row_stand_in`, 088 standing the stand-in in, the receipt's
    counts (decisions 128 to 133); the converter's own `war3map.wpm`
    checked against the hand-copied one.
+1r. ~~The tables' layouts (106).~~ Done (2026-11-05): 097, 074's
+   width check and layout-filled placeholder rows, 026's width check,
+   041 asking for placeholder rows, 085's widths from the layouts
+   (decisions 134 to 139).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2317,7 +2378,9 @@ return {
     model rows. A lookup elsewhere (her map's Map row, LiquidType) is
     still an error naming the table and the row, since a zero row
     there would mislead rather than stand in. A table no place has
-    gets none: there is no width to make one by.
+    gets none: there is no width to make one by. (Changed in step 1r:
+    a layout fills the row and gives a table no place has its width;
+    decisions 136, 137.)
 131. **Short-lived: made once, kept in memory, never written.** A
     placeholder row lives with the tables until they are let go, made
     the first time its number is asked and given again after; the
@@ -2341,6 +2404,50 @@ return {
     look: particle emitters alone (403's), no geometry. The check of a
     map's WC3 creature models now asks that each is read and that some
     have something to draw, not all.
+
+## Decisions (2026-11-05, step 1r, answered here; the owner may overturn any)
+
+134. **Layouts are C data in the client, for the tables it reads and
+    the converter writes.** 097 holds twenty: the converter's seven,
+    copied from world-edit-to-execute's LAYOUTS (names and kinds checked
+    equal, column by column), and the thirteen this client reads
+    (her character's six, CreatureDisplayInfoExtra, LiquidType and the
+    five light tables). Columns a reader reads are marked with it;
+    the rest are unchecked, as in the converter. One file for both
+    projects (the converter reading 097, or 097 written from its Lua)
+    waits: ai-stuff isn't changed here.
+135. **Another width is said; too narrow is refused.** Every width is
+    unchecked against a 3.3.5a file, so a copy of another width than
+    its layout's is said on the standard error and read as it is (the
+    layout may be the wrong one). A copy narrower than the last column
+    this client reads is refused, an error naming its place, its width
+    and that column, since a reader would read past its row. Copies of
+    a table must still agree with each other (decision 129). This is
+    softer than 106's "a mismatch is a hard error", which assumes a
+    layout checked against a real file; once one is, the said case can
+    become the refusal.
+136. **A placeholder's values are the layout's.** Sizes and scales 1,
+    CreatureModelAlpha 255, LightParams' water alphas 0.75 (026's own
+    for a missing set), a name text "unknown <table> <row>" in its
+    first-language text (106's "a visible 'unknown spell 133'") with
+    the mask 0xFF01FE (the converter's, unchecked), every other column
+    0 or "". Its width is its copies' (they agree) or, with none, its
+    layout's; columns past a layout are 0; a table with no layout gets
+    the step 1q row (its number, zeros).
+137. **Readers that ask for a placeholder: 088 and 041.** 041 now asks
+    for its CreatureDisplayInfo and CreatureDisplayInfoExtra rows as
+    088 does, so the window's creature from a missing display row is
+    088's stand-in, and one from a missing look row the stand-in figure,
+    said. Her map's Map row, LiquidType, the light tables and her
+    character's tables still error: a made-up row there would mislead.
+    A table no place has can take one when a layout gives its width.
+138. **The baseline set's widths come from the layouts.** 085's light
+    tables and LiquidType are as wide as 097 says (the same 15, 34, 34,
+    9, 3 and 45 as before), so the two can't drift apart.
+139. **A table without a row number gets no placeholder.**
+    CharacterFacialHairStyles' first column is the race, so a row
+    "numbered" by it would mean nothing; asking for one is not found,
+    said.
 
 ## Open questions
 
@@ -2532,7 +2639,9 @@ return {
   089, 043, 068, and `tests/095-test-map-walls-plaguelands.lua` and
   `tests/096-test-map-walls-master-crafters.lua`. For step 1q:
   `src/074-tables.info.md` (a search's rows, placeholder rows), 025,
-  060, 088, 089 and 043.
+  060, 088, 089 and 043. For step 1r: `src/097-table-layouts.info.md`
+  (the tables' layouts), 074, 026, 041 and 085;
+  [106](./106-dbc-parser.md) (layouts).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

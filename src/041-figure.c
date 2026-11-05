@@ -417,11 +417,13 @@ static WErr from_wc3(Figures *fs, Figure *f, const unsigned char *s, size_t len,
 }
 /* }}} */
 
-/* {{{ static row: a table's row by number, its failure said naming the display that asked */
+/* {{{ static row: a table's row by number, its failure said naming the
+ * display that asked; a placeholder row where no place has it, on a test
+ * map's run (074: only with a resolver; 1109 step 1r, decision 137) */
 static WErr row(Figures *fs, int display_id, const char *table, uint32_t id, TableRow *r, WWhy *why)
 {
     WWhy inner;
-    WErr rc = tables_row(fs->tables, table, id, r, &inner);
+    WErr rc = tables_row_or_placeholder(fs->tables, table, id, r, &inner);
     if (rc) return w_fail(why, rc, "creature display %d: %s", display_id, inner.text);
     return W_OK;
 }
@@ -476,6 +478,14 @@ WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
          * Textures\BakedNpcTextures\) */
         TableRow ex;
         if (row(fs, display_id, "CreatureDisplayInfoExtra", extra, &ex, why)) return why->code;
+        if (ex.placeholder) {                            /* no place has its look (a placeholder row, 097's defaults: race 0): the stand-in, said */
+            char name[64];
+            snprintf(name, sizeof name, "display %d (a stand-in)", display_id);
+            if (figure_stand_in(fs, f, name, why)) return why->code;
+            fprintf(stderr, "creatures: display %d: no place has row %u of CreatureDisplayInfoExtra; the baseline set's stand-in figure stands in\n", display_id, extra);
+            f->scale = scale;
+            return W_OK;
+        }
         static const int SLOT[11] = { SLOT_HEAD, SLOT_SHOULDERS, SLOT_SHIRT, SLOT_CHEST, SLOT_WAIST, SLOT_LEGS, SLOT_FEET, SLOT_WRISTS, SLOT_HANDS, SLOT_TABARD, SLOT_BACK };
         CharacterLook look = { 0 };
         const Dbc *x = ex.dbc;

@@ -45,7 +45,9 @@ the map's rows first (`074-tables.c`, issue 106), and searched the same
 way (her character's tables, `025-character.c`: the map's rows met
 first, the others still found); a creature's display row no place has
 is a placeholder row, the stand-in figure standing in for it, said and
-counted (1109 step 1q); the ground files
+counted (1109 step 1q), its columns filled from the table's layout
+(`097-table-layouts.c`: each column's name, kind and placeholder value;
+a copy too narrow for the columns read is refused, 1109 step 1r); the ground files
 (WDT, ADT, WDL), the ground's pictures, the placed doodads' and
 buildings' models, pictures and `.anim` files (`076-placed-models.c`
 finds a placed name's files: a map's own WC3 `.mdx` from its folder,
@@ -100,6 +102,7 @@ stand-in figure stands in her place.
 | `091-model-solids.c` | a tile's placed doodads and buildings (020), their files through 076 | with no window: each model's and building part's solid shape (also for `042-doodads.c`), placed into `028-collide.c`, buildings' pools into `027-liquid.c`; the mover's floor and wall rule (for 043 and 089) |
 | `094-wc3-pathing.c` | a converted map's `war3map.wpm` and `war3map.w3e` (for its grid's corner) through the resolver (060) | with no window: the cell under a place in the converted world (map.lua's rule turned round), and whether a step enters land closed to walkers, as a wall (for 091's rule, so for 043 and 089) |
 | `088-figure-model.c` | a creature's display row (`CreatureDisplayInfo`, `CreatureModelData`, through the tables; a placeholder row where no place has it) and the resolver | which files a figure is made from: the map's own WC3 model, the game's `.m2` and view, a character look, or the baseline set's stand-in figure (also for a placeholder row) |
+| `097-table-layouts.c` | nothing: data (the converter's `dbc.lua` LAYOUTS and the readers' own offsets) | each table's columns: names, kinds, placeholder values, the columns read; for 074's width check and placeholder rows, 026's width check and 085's widths |
 | `084-map-fog.c` | a converted map's `war3map.w3i` (read by `083-w3i.c`, through the resolver) | in a test-map run, the map's own fog (its distances in yards, its colour) put in place of the zone's in that light each frame, out of the water |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
 | `028-collide.c` | models' and buildings' solid shapes, placed | floors, walls and lines of sight (for the mover and camera) |

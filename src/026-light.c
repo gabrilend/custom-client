@@ -6,6 +6,7 @@
  */
 #include "026-light.h"
 #include "013-errors.h"
+#include "097-table-layouts.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -29,10 +30,9 @@ WErr light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why)
         t->from[i] = a.source;
         if (dbc_open(dbcs[i], t->files[i], a.len, &inner)) { w_fail(why, inner.code, "%s: %s", NAMES[i], inner.text); light_close(t); return why->code; }
     }
-    if (t->light.fields < 8 || t->ints.fields < 34 || t->floats.fields < 34) {
-        w_fail(why, W_ERR_CORRUPT, "the light tables have %u, %u and %u fields; 3.3.5a's have 15, 34 and 34", t->light.fields, t->ints.fields, t->floats.fields);
-        light_close(t);
-        return why->code;
+    static const char *const TABLE[5] = { "Light", "LightIntBand", "LightFloatBand", "LightParams", "LightSkybox" };
+    for (int i = 0; i < 5; ++i) {                         /* each as wide as the columns read here (097: 1109 step 1r, decision 135) */
+        if (table_layout_fits(table_layout(TABLE[i]), dbcs[i]->fields, asset_source_name(t->from[i]), why)) { light_close(t); return why->code; }
     }
     return 0;
 }

@@ -10,6 +10,7 @@
  */
 #include "085-baseline-set.h"
 #include "059-loose-folders.h"
+#include "097-table-layouts.h"
 
 #include <errno.h>
 #include <math.h>
@@ -281,7 +282,8 @@ unsigned char *baseline_figure_picture(size_t *len)
 
 /* {{{ the tables a run reads at its start, as 3.3.5a's widths: LiquidType
  * (one row, water, naming the set's frames), and the light tables empty
- * (no light anywhere: 026's plain grey day) */
+ * (no light anywhere: 026's plain grey day); each as wide as its layout
+ * (097: 1109 step 1r, decision 138) */
 typedef struct { uint32_t rows, fields; uint32_t *cells; char *text; size_t text_len; } Table;
 static unsigned char *dbc_bytes(const Table *t, size_t *len)
 {
@@ -296,13 +298,12 @@ static unsigned char *dbc_bytes(const Table *t, size_t *len)
 }
 unsigned char *baseline_table(const char *name, size_t *len)
 {
-    static const struct { const char *name; uint32_t fields; } EMPTY[] = {
-        { "Light", 15 }, { "LightIntBand", 34 }, { "LightFloatBand", 34 }, { "LightParams", 9 }, { "LightSkybox", 3 },
-    };
+    static const char *const EMPTY[] = { "Light", "LightIntBand", "LightFloatBand", "LightParams", "LightSkybox" };
+    *len = 0;
     for (size_t i = 0; i < sizeof EMPTY / sizeof EMPTY[0]; ++i)
-        if (!strcmp(name, EMPTY[i].name)) {
+        if (!strcmp(name, EMPTY[i])) {
             char nul = '\0';
-            Table t = { 0, EMPTY[i].fields, NULL, &nul, 1 };
+            Table t = { 0, table_layout(EMPTY[i])->fields, NULL, &nul, 1 };   /* its width the layout's (097, decision 138) */
             return dbc_bytes(&t, len);
         }
     if (!strcmp(name, "LiquidType")) {
@@ -313,12 +314,15 @@ unsigned char *baseline_table(const char *name, size_t *len)
         memset(text, 0, sizeof text);
         memcpy(text + water, "Water", sizeof "Water");
         memcpy(text + pattern, BASELINE_WATER_PATTERN, sizeof BASELINE_WATER_PATTERN);
-        uint32_t cells[BASELINE_LIQUID_FIELDS] = { 0 };
+        uint32_t fields = table_layout("LiquidType")->fields;
+        uint32_t *cells = calloc(fields, sizeof *cells);
+        if (!cells) return NULL;
         cells[0] = 1; cells[1] = (uint32_t)water; cells[15] = (uint32_t)pattern;
-        Table t = { 1, BASELINE_LIQUID_FIELDS, cells, text, pattern + sizeof BASELINE_WATER_PATTERN };
-        return dbc_bytes(&t, len);
+        Table t = { 1, fields, cells, text, pattern + sizeof BASELINE_WATER_PATTERN };
+        unsigned char *s = dbc_bytes(&t, len);
+        free(cells);
+        return s;
     }
-    *len = 0;
     return NULL;
 }
 const char *const BASELINE_TABLES[] = { "LiquidType", "Light", "LightIntBand", "LightFloatBand", "LightParams", "LightSkybox", NULL };

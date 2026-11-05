@@ -230,3 +230,16 @@ has gets a placeholder row (its number and zeros, made once, warned
 and counted by the resolver, refused in strict mode), and the stand-in
 figure stands for it, so such a map still shows its creatures; the
 receipt counts them. Decisions 128 to 133 in 1109.
+
+2026-11-05: 1109's step 1r, issue 106's layouts. `097-table-layouts.c`
+says what each column of twenty tables is: its name, kind, placeholder
+value and the readers that read it. The converter's seven tables match
+world-edit-to-execute's own layouts column by column; the others' read
+columns come from the readers' code, and the rest are marked unchecked,
+as is every width (no 3.3.5a file to measure). A copy too narrow for
+the columns read is refused (074, and 026's light tables); another
+width than the layout's is said. Placeholder rows now hold the layout's
+values (a size of 1, an opaque alpha, a visible "unknown Map 900"), a
+table no place has can take one, and the window's creatures (041) ask
+for them as 088 does. The baseline set's widths come from the layouts.
+Decisions 134 to 139 in 1109.
