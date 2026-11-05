@@ -13,7 +13,7 @@ of this client.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 1108 | [Phase 11 demo](./1108-phase-demo.md) | pending | Phase 4, Phase 7 |
-| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
+| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05; step 1g (its ground laid cell by cell by the ground's shader: every tileset in a chunk, each cell's variation) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
 | 1110 | [A hosted map's models come with it](./1110-a-hosted-maps-models-come-with-it.md) | pending (decided 2026-11-04; from world-edit-to-execute's pull request #227) | 105a, Phase 7, 707, 1101-1107 |
 
 The capstone names the issues to be written when the phase begins
@@ -76,6 +76,19 @@ Master Crafters (905 ramps placed, 184 blighted points) and War in the
 Plaguelands (1246 blighted points) with made sheets and models. Real
 ramp models and the editor's data unchecked (no install). Decisions 51
 to 56 in 1109.
+
+2026-11-05: 1109's step 1g. A converted map's WC3 ground is laid cell
+by cell: each cell's pieces (a tileset picture, or half of an extended
+one, and the subtile in it) go to the card in a small picture a tile,
+and the ground's shader (now `080-ground-shader.c`, read by 038) reads
+them per point, so a chunk shows every tileset its cells lay instead
+of its four most used, and each cell its own variation. Checked on War
+in the Plaguelands (3145728 of 3145728 blend points as WC3 lays them,
+90.4% before; 531 chunks lay more than four tilesets) and Master
+Crafters (all 4194304, 99.8% before) with made pictures colouring each
+subtile its own; the shader itself compiled and drawn on Mesa's
+software renderer under a virtual display (outside the tests). Real
+WC3 art and a window unchecked. Decisions 57 to 63 in 1109.
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

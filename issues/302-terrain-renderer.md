@@ -67,12 +67,14 @@ them, each cliff cell laid with its cliff tileset's ground: decisions
 by point. Since step 1f its ramps stand as WC3's ramp models on their
 own ground, and blighted ground wears the main tileset's blight
 picture from the editor's data, blended on its blighted corners
-(decisions 51-56). Still to come: cliffs and ramps bent to the ground,
-the tilesets' variation pictures (one whole tile a
-tileset for now), and chunks with more than four tilesets (the rest
-folded): the last two are where a ground shader for WC3's own blend
-would earn its place, and the bending where a cliff shader reading the
-ground's heights would.
+(decisions 51-56). Since step 1g the ground's shader lays a converted
+map's WC3 cells one by one (`src/080-ground-shader.c`, read by 038): a
+small picture a tile names each cell's pieces (a tileset picture's
+layer in the array and the subtile in it), so a chunk shows every
+tileset its cells lay, each cell's own variation, and each piece's
+own colours, as WC3 lays them (decisions 57-63). Still to come:
+cliffs and ramps bent to the ground, where a cliff shader reading the
+ground's heights would earn its place.
 
 ## Intended behavior
 

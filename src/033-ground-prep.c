@@ -40,7 +40,7 @@ WErr ground_prep_pixels(const GroundPlace *p, const char *name, GroundPixels *px
     AssetAnswer a;
     WWhy inner;
     size_t nl = strlen(name), ml = strlen(WC3_LAYER_MARK);
-    if (nl > ml && !strcmp(name + nl - ml, WC3_LAYER_MARK)) {     /* a WC3 tileset's whole tile (078) */
+    if (nl > ml && !strcmp(name + nl - ml, WC3_LAYER_MARK)) {     /* a WC3 tileset's square of subtiles (078) */
         if (!p->wc3) return w_fail(why, W_ERR_NOT_FOUND, "%s is a WC3 layer, and this ground has no WC3 tilesets", name);
         int side;
         if (wc3_ground_layer(p->wc3, name, &px->rgba, &side, &inner)) return w_fail(why, inner.code, "%s", inner.text);
@@ -186,24 +186,29 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
             g->needed[t] = 1;
         }
     }
-    /* a converted map's own WC3 ground: its chunks on the WC3 grid take
-     * WC3's tilesets instead (078), the pictures needed counted again */
-    unsigned char *wc3_rgb = NULL, painted[256] = { 0 };
+    /* a converted map's own WC3 ground: its chunks on the WC3 grid are
+     * laid cell by cell with WC3's tilesets instead (078), the pictures
+     * needed counted again */
+    unsigned char painted[256] = { 0 };
     if (p->wc3) {
-        wc3_rgb = malloc((size_t)1024 * 1024 * 3);
-        if (wc3_ground_paint_tile(p->wc3, g->adt, g->chunk_tex, wc3_rgb, painted, NULL, &inner)
+        g->wc3_lay = malloc(sizeof *g->wc3_lay * WC3_TILE_CELLS * WC3_TILE_CELLS);
+        Wc3Paint laid = { 0 };
+        if (wc3_ground_lay_tile(p->wc3, g->adt, g->wc3_lay, g->chunk_tex, painted, &laid, &inner)
             || wc3_ground_place_cliffs(p->wc3, g->adt, NULL, &inner)) {   /* its cliffs, drawn as its doodads (042) */
             w_fail(why, inner.code, "%s: %s", path, inner.text);
-            free(wc3_rgb); ground_prep_free(g, 0);
+            ground_prep_free(g, 0);
             return why->code;
         }
+        if (!laid.painted) { free(g->wc3_lay); g->wc3_lay = NULL; }   /* off the WC3 grid: drawn as any tile */
         memset(g->needed, 0, sizeof g->needed);
         for (int k = 0; k < 256; ++k) for (int l = 0; l < 4; ++l) g->needed[g->chunk_tex[k][l]] = 1;
+        for (size_t c = 0; g->wc3_lay && c < (size_t)WC3_TILE_CELLS * WC3_TILE_CELLS; ++c)
+            for (int q = 0; q < 4 && g->wc3_lay[c].sub[q] != WC3_PIECE_NONE; ++q) g->needed[g->wc3_lay[c].pic[q]] = 1;
     }
     /* the pictures not already on the card */
     for (int t = 0; t < adt->ntextures; ++t) {
         if (!g->needed[t] || (on_card && on_card(ctx, adt->textures[t]))) continue;
-        if (ground_prep_pixels(p, adt->textures[t], &g->pixels[t], why)) { free(wc3_rgb); ground_prep_free(g, 0); return why->code; }
+        if (ground_prep_pixels(p, adt->textures[t], &g->pixels[t], why)) { ground_prep_free(g, 0); return why->code; }
     }
     /* each quarter: 64 chunks of 145 points (9,280, within the 16-bit
      * point numbers), 768 triangle corners a chunk at most */
@@ -232,7 +237,7 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
             }
             for (int i = 0; i < 4096; ++i) {
                 size_t at = (size_t)(crow * 64 + i / 64) * 1024 + (size_t)(ccol * 64 + i % 64), o = at * 4;
-                if (painted[k]) memcpy(g->blend + o, wc3_rgb + at * 3, 3);   /* WC3's strengths (078) */
+                if (painted[k]) memset(g->blend + o, 0, 3);   /* WC3's cells say what shows (078) */
                 else {
                     g->blend[o]     = c->nlayers > 1 ? c->alpha[1][i] : 0;
                     g->blend[o + 1] = c->nlayers > 2 ? c->alpha[2][i] : 0;
@@ -245,9 +250,24 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
         float dx = hi[0] - q->centre[0], dy = hi[1] - q->centre[1], dz = hi[2] - q->centre[2];
         q->radius = sqrtf(dx * dx + dy * dy + dz * dz);
     }
-    free(wc3_rgb);
     *out = g;
     return 0;
+}
+/* }}} */
+
+/* {{{ ground_prep_cell_texels */
+void ground_prep_cell_texels(const GroundPrep *g, const int layer_of[256], unsigned char *out)
+{
+    for (int r = 0; r < WC3_TILE_CELLS; ++r)
+        for (int c = 0; c < WC3_TILE_CELLS; ++c) {
+            const Wc3Lay *e = &g->wc3_lay[(size_t)r * WC3_TILE_CELLS + c];
+            unsigned char *o = out + ((size_t)r * 2 * WC3_TILE_CELLS + (size_t)c * 2) * 4;
+            for (int q = 0; q < 4; ++q) {
+                int none = e->sub[q] == WC3_PIECE_NONE;
+                o[q] = (unsigned char)(none ? 0 : layer_of[e->pic[q]]);
+                o[4 + q] = none ? WC3_PIECE_NONE : e->sub[q];
+            }
+        }
 }
 /* }}} */
 
@@ -260,6 +280,7 @@ void ground_prep_free(GroundPrep *g, int keep_adt)
     }
     for (int t = 0; t < 256; ++t) { free(g->pixels[t].rgba); free(g->pixels[t].smaller); }
     free(g->blend);
+    free(g->wc3_lay);
     if (!keep_adt && g->adt) { adt_free(g->adt); free(g->adt); }
     free(g);
 }

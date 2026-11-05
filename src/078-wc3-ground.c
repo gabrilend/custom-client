@@ -75,6 +75,7 @@ static WErr load_tileset(Resolver *r, MpqChain *chain, const Slk *sheet, const c
     ts->rgba = img.rgba;                                 /* kept: blp_free would only free this */
     ts->t.width = img.width; ts->t.height = img.height;
     ts->t.extended = img.width > img.height;
+    if (img.width >= 2 * img.height) snprintf(ts->t.layer_right, sizeof ts->t.layer_right, "%s%s%s", named, WC3_RIGHT_MARK, WC3_LAYER_MARK);
     return W_OK;
 }
 
@@ -219,26 +220,32 @@ WErr wc3_ground_layer(const Wc3Ground *w, const char *name, unsigned char **rgba
     *rgba = NULL; *side = 0;
     for (int k = 0; k < w->nsets; ++k) {
         const Tileset *ts = &w->sets[k];
-        if (strcmp(ts->t.layer, name)) continue;
-        int sub = ts->t.height / 4;                      /* subtile 15: column 3, row 3 of the left half */
-        unsigned char *o = malloc((size_t)sub * sub * 4);
-        for (int y = 0; y < sub; ++y) {
-            memcpy(o + (size_t)y * sub * 4, ts->rgba + ((size_t)(3 * sub + y) * ts->t.width + 3 * sub) * 4, (size_t)sub * 4);
-            for (int x = 0; x < sub; ++x) o[((size_t)y * sub + x) * 4 + 3] = 255;
-        }
-        *rgba = o; *side = sub;
+        int right = !strcmp(ts->t.layer_right, name) && ts->t.layer_right[0];
+        if (!right && strcmp(ts->t.layer, name)) continue;
+        int sq = ts->t.height < ts->t.width ? ts->t.height : ts->t.width, x0 = right ? sq : 0;   /* the left square, or the right */
+        unsigned char *o = malloc((size_t)sq * sq * 4);
+        for (int y = 0; y < sq; ++y) memcpy(o + (size_t)y * sq * 4, ts->rgba + ((size_t)y * ts->t.width + x0) * 4, (size_t)sq * 4);
+        *rgba = o; *side = sq;
         return W_OK;
     }
     return w_fail(why, W_ERR_NOT_FOUND, "no WC3 tileset's layer is named %s", name);
 }
 /* }}} */
 
-/* {{{ wc3_ground_paint_tile */
+/* {{{ wc3_ground_lay_tile */
+/* the whole piece tileset t is laid with in cell (i, j): its south-west
+ * point's variation (063) */
+static uint8_t whole(const Wc3Ground *w, int t, int i, int j)
+{
+    return (uint8_t)w3e_variation(w->sets[t].t.extended, w3e_point(w->g, i, j)->texture_details);
+}
+
 /* a cell's (tileset, subtile) pairs, lowest first: 063's; for a cliff
  * cell with a model (not a ramp's), its cliff tileset's ground whole;
  * for a blighted cell, when the blight is named, its corners' tilesets
  * with the blight for each blighted one; for another bare (cliff or
- * blighted) cell its south-west point's tileset whole */
+ * blighted) cell its south-west point's tileset whole. The lowest's
+ * piece is always its variation's. */
 typedef struct { int n; uint8_t t[4], s[4]; int inside, bare, cliff, blight; } Cell;
 static Cell cell_pairs(const Wc3Ground *w, int i, int j)
 {
@@ -249,7 +256,7 @@ static Cell cell_pairs(const Wc3Ground *w, int i, int j)
     int cl = w->cliffs ? wc3_cliffs_at(w->cliffs, i, j) : -1;
     if (cl >= 0 && !wc3_cliffs_get(w->cliffs, cl)->ramp) {   /* a ramp's cell keeps its ground */
         int t = w->cliff_ground[wc3_cliffs_get(w->cliffs, cl)->type];
-        if (t >= 0) { c.cliff = 1; c.t[0] = (uint8_t)t; c.s[0] = 15; c.n = 1; return c; }
+        if (t >= 0) { c.cliff = 1; c.t[0] = (uint8_t)t; c.s[0] = whole(w, t, i, j); c.n = 1; return c; }
     }
     if (w->blight >= 0 && w->prep->cell_kind[(size_t)j * cw + i] == W3E_CELL_BLIGHT) {
         /* each corner the blight where blighted, its tileset where not, laid as 063 lays tilesets */
@@ -269,30 +276,19 @@ static Cell cell_pairs(const Wc3Ground *w, int i, int j)
         for (int k = 0; k < c.n; ++k) {
             int bits = 0;
             for (int q = 0; q < 4; ++q) if (t[q] == c.t[k]) bits |= BIT[q];
-            c.s[k] = (uint8_t)(k ? bits : 15);
+            c.s[k] = k ? (uint8_t)bits : whole(w, c.t[0], i, j);
         }
         return c;
     }
     if (w->prep->cell_kind[(size_t)j * cw + i] != W3E_CELL_TEXTURED) {
         c.bare = 1;
         int t = w3e_point(w->g, i, j)->ground_texture;
-        if (t < w->npoint) { c.t[0] = (uint8_t)t; c.s[0] = 15; c.n = 1; }
+        if (t < w->npoint) { c.t[0] = (uint8_t)t; c.s[0] = whole(w, t, i, j); c.n = 1; }
         return c;
     }
     for (int q = 0; q < 4 && e[q * 2] != W3E_NONE; ++q)
         if (e[q * 2] < w->npoint) { c.t[c.n] = e[q * 2]; c.s[c.n] = e[q * 2 + 1]; ++c.n; }
     return c;
-}
-
-/* a subtile's alpha at (fx east, fy south from its north-west corner, 0 to 1) */
-static int subtile_alpha(const Tileset *ts, int s, double fx, double fy)
-{
-    int sub = ts->t.height / 4;
-    int col = s % 4, row = s / 4;
-    int px = (int)(fx * sub), py = (int)(fy * sub);
-    if (px > sub - 1) px = sub - 1;
-    if (py > sub - 1) py = sub - 1;
-    return ts->rgba[((size_t)(row * sub + py) * ts->t.width + col * sub + px) * 4 + 3];
 }
 
 /* the tile's picture number for a name, added when new */
@@ -307,18 +303,34 @@ static int picture_of(AdtTile *adt, const char *name)
     return adt->ntextures++;
 }
 
-WErr wc3_ground_paint_tile(const Wc3Ground *w, AdtTile *adt, int chunk_tex[256][4], unsigned char *rgb, unsigned char painted[256], Wc3Paint *counts, WWhy *why)
+/* tileset t's piece s (0 to 31) as a picture of the tile and a subtile
+ * in it: 16 and up in an extended picture's right half (one wider than
+ * high but not twice: its left square's, as WC3 has none such); -1
+ * when the tile's list is full */
+static int piece(const Wc3Ground *w, AdtTile *adt, int t, int s, uint8_t *pic, uint8_t *sub)
+{
+    const Wc3Tileset *ts = &w->sets[t].t;
+    int right = s >= 16 && ts->layer_right[0];
+    int at = picture_of(adt, right ? ts->layer_right : ts->layer);
+    if (at < 0) return -1;
+    *pic = (uint8_t)at;
+    *sub = (uint8_t)(s & 15);
+    return 0;
+}
+
+WErr wc3_ground_lay_tile(const Wc3Ground *w, AdtTile *adt, Wc3Lay *lay, int chunk_tex[256][4], unsigned char painted[256], Wc3Paint *counts, WWhy *why)
 {
     Wc3Paint none = { 0 };
     if (!counts) counts = &none;
     const float step = ADT_CHUNK_SIZE / 8;
+    for (size_t c = 0; c < (size_t)WC3_TILE_CELLS * WC3_TILE_CELLS; ++c) { memset(lay[c].pic, 0, 4); memset(lay[c].sub, WC3_PIECE_NONE, 4); }
     for (int k = 0; k < 256; ++k) {
         painted[k] = 0;
         const AdtChunk *c = &adt->chunks[k];
         int crow = k / 16, ccol = k % 16;
         /* the chunk's 64 cells (r south, cc east), each by its centre */
         Cell cells[8][8];
-        int use[TILESETS_MAX] = { 0 }, inside = 0;
+        int use[TILESETS_MAX] = { 0 }, inside = 0, most = -1, nused = 0;
         for (int r = 0; r < 8; ++r)
             for (int cc = 0; cc < 8; ++cc) {
                 int i, j;
@@ -326,61 +338,34 @@ WErr wc3_ground_paint_tile(const Wc3Ground *w, AdtTile *adt, int chunk_tex[256][
                 if (!wc3_ground_cell_at(w, x, y, &i, &j, NULL, NULL)) { memset(&cells[r][cc], 0, sizeof cells[r][cc]); continue; }
                 cells[r][cc] = cell_pairs(w, i, j);
                 ++inside;
-                for (int q = 0; q < cells[r][cc].n; ++q) ++use[cells[r][cc].t[q]];
+                for (int q = 0; q < cells[r][cc].n; ++q) nused += !use[cells[r][cc].t[q]]++;
             }
         if (!inside) continue;                            /* off the WC3 grid: the converter's own pictures */
-        /* the four tilesets used most, then drawn lowest number first */
-        int keep[4], nkeep = 0;
-        int taken[TILESETS_MAX] = { 0 };
-        for (; nkeep < 4; ++nkeep) {
-            int best = -1;
-            for (int t = 0; t < w->nsets; ++t) if (use[t] && !taken[t] && (best < 0 || use[t] > use[best])) best = t;
-            if (best < 0) break;
-            taken[best] = 1;
-            keep[nkeep] = best;
-        }
-        if (!nkeep) continue;                             /* every cell inside bare with no tileset named: left as it was */
-        for (int a = 1; a < nkeep; ++a)
-            for (int b = a; b > 0 && keep[b - 1] > keep[b]; --b) { int s = keep[b]; keep[b] = keep[b - 1]; keep[b - 1] = s; }
-        int layer_of[TILESETS_MAX];
-        for (int t = 0; t < TILESETS_MAX; ++t) layer_of[t] = -1;
-        int pics[4];
-        for (int l = 0; l < nkeep; ++l) {
-            layer_of[keep[l]] = l;
-            pics[l] = picture_of(adt, w->sets[keep[l]].t.layer);
-            if (pics[l] < 0) return w_fail(why, W_ERR_FULL, "the tile's %d pictures and its WC3 layers come to more than 256", adt->ntextures);
-        }
-        for (int l = 0; l < 4; ++l) chunk_tex[k][l] = pics[l < nkeep ? l : 0];
-        /* each cell's kept pairs: the first whole, the others by their subtile's alpha */
+        for (int t = 0; t < w->nsets; ++t) if (use[t] && (most < 0 || use[t] > use[most])) most = t;
+        if (most < 0) continue;                           /* every cell inside bare with no tileset named: left as it was */
+        uint8_t mpic, msub;
+        if (piece(w, adt, most, 15, &mpic, &msub)) return w_fail(why, W_ERR_FULL, "the tile's %d pictures and its WC3 layers come to more than 256", adt->ntextures);
+        for (int l = 0; l < 4; ++l) chunk_tex[k][l] = mpic;
+        if (nused > counts->most) counts->most = nused;
         for (int r = 0; r < 8; ++r)
             for (int cc = 0; cc < 8; ++cc) {
-                Cell *e = &cells[r][cc];
-                if (!e->inside) { ++counts->outside; continue; }
+                const Cell *e = &cells[r][cc];
+                Wc3Lay *o = &lay[(size_t)(crow * 8 + r) * WC3_TILE_CELLS + (size_t)(ccol * 8 + cc)];
+                if (!e->inside || !e->n) {                /* outside the grid, or bare with no tileset: the chunk's most used, whole */
+                    counts->outside += !e->inside;
+                    counts->cells += e->inside;
+                    counts->bare += e->bare;
+                    o->pic[0] = mpic; o->sub[0] = msub;
+                    continue;
+                }
                 ++counts->cells;
                 counts->bare += e->bare;
                 counts->cliff_ground += e->cliff;
                 counts->blight += e->blight;
-                int n = 0, dropped = 0;
-                for (int q = 0; q < e->n; ++q) {
-                    if (layer_of[e->t[q]] < 0) { dropped = 1; continue; }
-                    e->t[n] = e->t[q]; e->s[n] = (uint8_t)(n ? e->s[q] : 15); ++n;
-                }
-                e->n = n;
-                counts->folded += dropped;
-            }
-        /* the blend picture's 64 x 64 points: point p lies at 8 p / 63 cells in */
-        for (int py = 0; py < 64; ++py)
-            for (int px = 0; px < 64; ++px) {
-                double rf = py * 8.0 / 63.0, cf = px * 8.0 / 63.0;
-                int r = rf >= 8 ? 7 : (int)rf, cc = cf >= 8 ? 7 : (int)cf;
-                const Cell *e = &cells[r][cc];
-                unsigned char *o = rgb + ((size_t)(crow * 64 + py) * 1024 + (size_t)(ccol * 64 + px)) * 3;
-                o[0] = o[1] = o[2] = 0;
-                for (int q = 0; q < e->n; ++q) {
-                    int l = layer_of[e->t[q]];
-                    if (l == 0) continue;                 /* the bottom layer has no strength of its own */
-                    o[l - 1] = (unsigned char)(q == 0 ? 255 : subtile_alpha(&w->sets[e->t[q]], e->s[q], cf - cc, rf - r));
-                }
+                counts->varied += e->s[0] != 15;
+                for (int q = 0; q < e->n; ++q)
+                    if (piece(w, adt, e->t[q], e->s[q], &o->pic[q], &o->sub[q]))
+                        return w_fail(why, W_ERR_FULL, "the tile's %d pictures and its WC3 layers come to more than 256", adt->ntextures);
             }
         painted[k] = 1;
         ++counts->painted;

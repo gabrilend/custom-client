@@ -47,8 +47,9 @@ finds a placed name's files: a map's own WC3 `.mdx` from its folder,
 else the `.m2` and its view) and a creature look's own WC3 model come
 through the resolver (stock WC3 ones from the player's Warcraft III
 install, `assetWc3`, after the game's archives; a converted map's
-ground painted with WC3's own tilesets when its build carries
-`war3map.w3e`, `078-wc3-ground.c`, with WC3's blight on blighted
+ground laid cell by cell with WC3's own tilesets and variations when
+its build carries `war3map.w3e`, `078-wc3-ground.c`, drawn by the
+ground's shader, `080-ground-shader.c`, with WC3's blight on blighted
 ground, and its cliffs and ramps standing as WC3's own models among
 its doodads, `079-wc3-cliffs.c`), with the magenta checker for a missing picture
 and a magenta wire-frame box for a missing model; and while the server
@@ -64,7 +65,7 @@ switches with its own issue.
 | `016-dbc.c` | the client's tables (`DBFilesClient\*.dbc`) | rows and fields (Map, Light*, LiquidType, CharSections, ItemDisplayInfo, CreatureDisplayInfo ...) |
 | `017-blp.c` (with `049-jpeg.c` for WC3's JPEG pictures) | pictures (`.blp`): the game's BLP2, and Warcraft III's BLP1 (from `war3.mpq`, read by `015-mpq.c` too) | RGBA images, at any of their smaller sizes |
 | `020-adt.c` | ground files (`World\Maps\<map>\<map>_<ty>_<tx>.adt`) | chunks (heights, layers, blend maps, shadows, tints), water layers, placements of doodads and buildings |
-| `063-w3e.c` | Warcraft III's ground (a map's `war3map.w3e`) | tile points (heights, water, tileset, cliff level, ramp, blight and boundary marks), then each point's heights in the world and each cell's tileset pictures and subtiles, cliff and blighted cells marked; a stroke's area redone alone (for an editor, through the FFI); drawn on a converted map's ADT ground by `078-wc3-ground.c` (four tilesets a chunk, through 033) |
+| `063-w3e.c` | Warcraft III's ground (a map's `war3map.w3e`) | tile points (heights, water, tileset, cliff level, ramp, blight and boundary marks), then each point's heights in the world and each cell's tileset pictures and subtiles, cliff and blighted cells marked; a stroke's area redone alone (for an editor, through the FFI); drawn on a converted map's ADT ground by `078-wc3-ground.c` (each cell's own pieces, through 033, read per cell by 038's shader) |
 | `077-slk.c` | Warcraft III's spreadsheets (SYLK: `TerrainArt\Terrain.slk`, `TerrainArt\CliffTypes.slk` ...) | each row's cells by row and column name (a tileset's picture folder and file; a cliff tileset's model folder, picture and ground) |
 | `022-m2.c` | models (`.m2` + `00.skin`) | points, pieces, units (pictures, layers, blends, tints), solid shapes |
 | `061-mdx.c` | Warcraft III's models (`.mdx`, from `war3.mpq`) | the same points, pieces and units as `022-m2.c` gives, and beside them its sequences, skeleton (bones, helpers, pivots) and animated values (for 402); not yet drawn by any part |
@@ -85,7 +86,9 @@ Each frame, in this order (`043-main.c`):
    ground's points, light and blend picture, and unpacks its new
    pictures, with no window needed), and handed to:
    - `038-ground.c`: sends the prepared meshes, blend picture and new
-     pictures to the card;
+     pictures to the card (with a converted map's WC3 cells, a small
+     picture of each cell's pieces; the shader's text is
+     `080-ground-shader.c`);
    - `040-water.c` and `027-liquid.c`;
    - `042-doodads.c`: copies, solid shapes into `028-collide.c`, buildings'
      pools into `040-water.c` and `027-liquid.c`.

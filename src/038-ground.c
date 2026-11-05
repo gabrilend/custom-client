@@ -11,6 +11,7 @@
 #include "032-sight.h"
 #include "037-sky.h"
 #include "036-texture.h"
+#include "080-ground-shader.h"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -20,55 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* {{{ the shader
- * A tile is drawn in four orders (one a quarter: 64 chunks each), not 256
- * (173u). Every ground picture lives in one texture array (`layers`, one
- * 256 x 256 layer a picture, shared by all tiles); each chunk's four
- * layer numbers ride on its points (Raylib's tangent slot, `lay`, not
- * blended across a triangle). The tile's 256 blend pictures sit in one
- * 1024 x 1024 picture (`blend`), 64 x 64 a chunk; `uv2` reaches only the
- * chunk's own square (from its first point's centre to its last's), so
- * smoothing never borrows a neighbour's. `uv` repeats each picture 8
- * times across a chunk (once every 4.2 yards, as the original tiles them).
- * Blending is the original's: each layer laid over the ones below by its
- * strength, then tinted by the chunk's colours (MCCV; 127 = unchanged, so
- * 0 to 2 times), then darkened where the chunk's baked shadow says (173h:
- * to 60%, the blend picture's alpha), and under each character by a soft
- * round patch (a "blob": its centre, its radius; fading out over 3 yards
- * of height, so a character high above the ground casts none). */
-static const char *VS =
-    "#version 330\n"
-    "in vec3 vertexPosition; in vec3 vertexNormal; in vec2 vertexTexCoord; in vec2 vertexTexCoord2; in vec4 vertexColor; in vec4 vertexTangent;\n"
-    "uniform mat4 mvp; uniform vec3 eye;\n"
-    "out vec3 n; out vec2 uv; out vec2 uv2; out vec3 tint; out float dist; out vec3 pos; flat out vec4 lay;\n"
-    "void main() {\n"
-    "  pos = vertexPosition; lay = vertexTangent;\n"
-    "  n = vertexNormal; uv = vertexTexCoord; uv2 = vertexTexCoord2; tint = vertexColor.rgb * (255.0 / 127.0);\n"
-    "  dist = length(vertexPosition - eye);\n"
-    "  gl_Position = mvp * vec4(vertexPosition, 1.0);\n"
-    "}\n";
-static const char *FS =
-    "#version 330\n"
-    "in vec3 n; in vec2 uv; in vec2 uv2; in vec3 tint; in float dist; in vec3 pos; flat in vec4 lay; out vec4 frag;\n"
-    "uniform sampler2D blend; uniform sampler2DArray layers; uniform vec3 sun_dir, sun_col, shade_col, fog_col; uniform vec2 fog_range;\n"
-    "uniform vec4 blobs[8]; uniform int nblobs;\n"
-    "void main() {\n"
-    "  vec4 a = texture(blend, uv2);\n"
-    "  vec3 c = texture(layers, vec3(uv, lay.x)).rgb;\n"
-    "  c = mix(c, texture(layers, vec3(uv, lay.y)).rgb, a.r);\n"
-    "  c = mix(c, texture(layers, vec3(uv, lay.z)).rgb, a.g);\n"
-    "  c = mix(c, texture(layers, vec3(uv, lay.w)).rgb, a.b) * tint;\n"
-    "  c *= mix(0.6, 1.0, a.a);\n"
-    "  for (int i = 0; i < nblobs; ++i) {\n"
-    "    float d = length(pos.xy - blobs[i].xy) / blobs[i].w;\n"
-    "    float above = clamp(1.0 - abs(pos.z - blobs[i].z) / 3.0, 0.0, 1.0);\n"
-    "    c *= 1.0 - 0.6 * (1.0 - smoothstep(0.3, 1.0, d)) * above;\n"
-    "  }\n"
-    "  vec3 light = shade_col + sun_col * max(dot(normalize(n), sun_dir), 0.0);\n"
-    "  float fog = clamp((dist - fog_range.x) / max(fog_range.y - fog_range.x, 1.0), 0.0, 1.0);\n"
-    "  frag = vec4(mix(c * light, fog_col, fog), 1.0);\n"
-    "}\n";
-/* }}} */
+/* the shader: 080-ground-shader.h (its text and how it blends) */
 
 /* {{{ the texture array, through OpenGL directly
  * Raylib 5.1 has no texture arrays, but the OpenGL loader it is built with
@@ -108,6 +61,7 @@ typedef struct {
     int       has[4];                 /* 0 for a quarter that is all holes */
     Vector3   centre[4];  float radius[4];   /* each quarter's bounding ball, for the sight test */
     Texture2D blend;                  /* the 256 chunks' blend pictures, 16 x 16 of 64 x 64 */
+    Texture2D cells;                  /* a converted map's WC3 cells (033's ground_prep_cell_texels), id 0: none */
     int       used[256];  int nused;  /* the layers this tile holds a reference to */
 } GroundTile;
 struct Ground {
@@ -119,7 +73,7 @@ struct Ground {
     pthread_mutex_t  names_lock;
     Shader           shader;
     Material         material;
-    int              loc_eye, loc_blobs, loc_nblobs;
+    int              loc_eye, loc_blobs, loc_nblobs, loc_has_cells;
     float            blobs[8][4];
     int              nblobs;
     int              ground_orders;   /* draw orders sent since last asked (for the picture report) */
@@ -143,11 +97,14 @@ Ground *ground_new(const GroundPlace *p, const Textures *textures, WWhy *why)
     g->textures = textures;
     pthread_mutex_init(&g->names_lock, NULL);
     g->place = *p;
-    g->shader = LoadShaderFromMemory(VS, FS);
+    g->shader = LoadShaderFromMemory(GROUND_VS, GROUND_FS);
     if (!IsShaderReady(g->shader)) { w_fail(why, W_ERR_GPU, "the ground shader didn't compile (see Raylib's messages above)"); ground_free(g); return NULL; }
     g->shader.locs[SHADER_LOC_MAP_ALBEDO] = GetShaderLocation(g->shader, "blend");   /* Raylib binds the material's first map to it */
+    g->shader.locs[SHADER_LOC_MAP_METALNESS] = GetShaderLocation(g->shader, "cells"); /* and its second (a tile's WC3 cells) to this */
     int unit = ARRAY_UNIT;
     SetShaderValue(g->shader, GetShaderLocation(g->shader, "layers"), &unit, SHADER_UNIFORM_INT);
+    int cells_unit = 1;                                  /* the material's second map's, set again by Raylib when it binds one */
+    SetShaderValue(g->shader, GetShaderLocation(g->shader, "cells"), &cells_unit, SHADER_UNIFORM_INT);
     /* the array: LAYERS layers of LAYER_SIZE square, every smaller copy
      * made room for, smoothed between copies, repeating */
     glad_glGenTextures(1, &g->array_id);
@@ -161,6 +118,7 @@ Ground *ground_new(const GroundPlace *p, const Textures *textures, WWhy *why)
     g->loc_eye = GetShaderLocation(g->shader, "eye");
     g->loc_blobs = GetShaderLocation(g->shader, "blobs");
     g->loc_nblobs = GetShaderLocation(g->shader, "nblobs");
+    g->loc_has_cells = GetShaderLocation(g->shader, "has_cells");
     g->material = LoadMaterialDefault();
     g->material.shader = g->shader;
     return g;
@@ -289,6 +247,16 @@ WErr ground_load_tile(Ground *g, GroundPrep *p, AdtTile **kept, WWhy *why)
     gt->blend = LoadTextureFromImage(im);
     SetTextureFilter(gt->blend, TEXTURE_FILTER_BILINEAR);
     SetTextureWrap(gt->blend, TEXTURE_WRAP_CLAMP);
+    if (p->wc3_lay) {                                 /* a converted map's WC3 cells, by their layers in the array */
+        int layer_of[256] = { 0 };
+        for (int t = 0; t < adt->ntextures; ++t) if (p->needed[t]) layer_of[t] = pic[t];
+        unsigned char *texels = malloc((size_t)2 * WC3_TILE_CELLS * WC3_TILE_CELLS * 4);
+        ground_prep_cell_texels(p, layer_of, texels);
+        Image ci = { .data = texels, .width = 2 * WC3_TILE_CELLS, .height = WC3_TILE_CELLS, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+        gt->cells = LoadTextureFromImage(ci);         /* read texel by texel (texelFetch): never smoothed */
+        SetTextureFilter(gt->cells, TEXTURE_FILTER_POINT);
+        free(texels);
+    }
     *kept = p->adt;
     g->tiles[p->tx * 64 + p->ty] = gt;
     ground_prep_free(p, 1);
@@ -304,6 +272,7 @@ void ground_drop_tile(Ground *g, int tx, int ty)
     if (!gt) return;
     for (int q = 0; q < 4; ++q) if (gt->has[q]) UnloadMesh(gt->mesh[q]);
     UnloadTexture(gt->blend);
+    if (gt->cells.id) UnloadTexture(gt->cells);
     for (int i = 0; i < gt->nused; ++i) let_go(g, gt->used[i]);
     free(gt);
     g->tiles[tx * 64 + ty] = NULL;
@@ -333,6 +302,9 @@ void ground_draw(Ground *g, Vector3 eye, const LightNow *light)
         GroundTile *gt = g->tiles[t];
         if (!gt) continue;
         g->material.maps[MATERIAL_MAP_ALBEDO].texture = gt->blend;
+        g->material.maps[MATERIAL_MAP_METALNESS].texture = gt->cells;   /* id 0: not bound */
+        int has_cells = gt->cells.id != 0;
+        SetShaderValue(g->shader, g->loc_has_cells, &has_cells, SHADER_UNIFORM_INT);
         for (int q = 0; q < 4; ++q) {
             if (!gt->has[q] || !sight_ball(&sight, gt->centre[q], gt->radius[q])) continue;   /* out of sight: not sent */
             DrawMesh(gt->mesh[q], g->material, MatrixIdentity());
