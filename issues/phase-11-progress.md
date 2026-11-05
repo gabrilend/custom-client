@@ -115,5 +115,19 @@ software renderer under a virtual display matched on every checked
 pixel. Real WC3 water art, the tint's byte order and a window
 unchecked. Decisions 70 to 75 in 1109.
 
+2026-11-05: 1109's step 1j. A converted map's own fog, from its
+`war3map.w3i`, is drawn in test-map runs in place of the zone's, over
+the ground, water, doodads and figures alike (`084-map-fog.c`, a new
+file: all of them read the one light each frame). It is on when the
+map's "use terrain fog" flag (0x2000) is set, a reading taken from the
+18 maps at hand whose settings were read: War in the Plaguelands, the only one with the flag,
+is the only one whose fog settings differ from the editor's defaults,
+and it now draws its blue fog from 113.9 to 162.8 yards; Master
+Crafters and the rest keep the zone's. Every style is drawn linear.
+The four shaders drew it on Mesa's software renderer under a virtual
+display, matching on every checked pixel. The map's fog in WC3 itself,
+the exponential styles' look and a window unchecked. Decisions 76 to
+80 in 1109; open question 13 updated.
+
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

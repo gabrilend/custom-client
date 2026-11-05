@@ -612,7 +612,8 @@ converter now copies it:
 
 - **War in the Plaguelands**: its w3i (version 25, tileset Y, flags
   0x1fc7a) tints its water (50, 255, 255, 255 read red first: open
-  question 13); its fog is style 0 (none). Its 5463 wet cells on the
+  question 13); its fog is style 0 (none; since step 1j read as
+  linear, turned on by its flag 0x2000: decision 76). Its 5463 wet cells on the
   grid are exactly WC3's cells with a wet corner (none either side's
   alone), its surface WC3's at every wet corner; 2624 more wet cells
   lie past the grid's south edge at its sea level. Its 223 layers'
@@ -637,8 +638,72 @@ and the game's own water (worst 1). Not checked here: real WC3 water
 frames and sheet (open question 12), a real tint's look (open question
 13), and Raylib drawing it in a window.
 
-Not built yet: the map's own fog (read by 083, not drawn: the world's
-fog is the zone's, 026); a WC3
+**Step 1j is built** (2026-11-05, the same background work): a
+converted map's own fog, from its `war3map.w3i`, drawn in test-map runs
+in place of the zone's, over the ground, the water, the doodads and the
+figures alike. Decisions 76 to 80; open question 13 updated with what
+the repositories hold.
+
+- **Read and turned into yards (084, 083):** a new window-free file,
+  `084-map-fog.c`, reads the map's `war3map.w3i` through the resolver
+  (`map_w3i_read`, which 081 now uses too, so the file is read one way)
+  and makes its fog (`map_fog_from_w3i`): on when the editor's "use
+  terrain fog" flag, 0x2000, is set (083's new `fog_on`, decision 76);
+  its start and end, distances from the eye in WC3 units, times the
+  map's yards per unit (decision 77); its colour red, green, blue over
+  255; every style drawn linear (decision 78).
+- **Drawn (043):** each frame, after the zone's light is read, the
+  map's fog takes its colour and distances, unless the eye is under the
+  water, and the view distance still ends it at the latest
+  (`map_fog_frame`, decision 79). Every drawer takes its fog from that
+  one light (the ground 038/080, the water 040/082, the doodads and
+  their particles 042, the figures 041, the horizon 039, the clear
+  colour), so no shader changed. The start says which fog is used and
+  why.
+- **Kept the zone's fog:** a map whose `war3map.w3i` turns no terrain
+  fog on, a Reign of Chaos file (no fog in it), and a build with no
+  `war3map.w3i`; one 083 can't read stops the run, naming it (decision
+  80).
+- **Fixed on the way (059):** an empty folder as a place handed a null
+  list to `qsort` and `bsearch`, undefined behaviour the
+  undefined-behaviour checker caught in the new test of a map folder
+  with nothing in it; an empty folder now sorts and finds nothing.
+
+Checked (`tests/044-test-client.c`, a section of its own after the
+water, before the archives): made files with the flag and styles 0, 1
+and 2 (on, its distances 3500 to 5000 units as 113.9 to 162.8 yards at
+1/30.72, its colour red first; each style the same distances); without
+the flag, a Reign of Chaos file and no file (the zone's, said why); a
+start before the eye, an end before its start, a scale of 0 and a
+distance that isn't a number; a frame's light out of the water (the
+map's fog, every other field the zone's as it was), under it (the
+zone's, untouched), with a view distance short of the fog (brought in,
+the start by the same share), and with no map fog (as before); the file
+through a resolver from the map's folder (none, read, refused). With
+the real conversions and their real `war3map.w3i`:
+
+- **War in the Plaguelands** (flags 0x1fc7a, the fog's flag set): its
+  own fog, style 0 (linear), 3500 to 5000 units, 113.9 to 162.8 yards,
+  colour 30, 120, 255.
+- **Master Crafters** (flags 0xdc78, no fog flag): the zone's fog.
+
+No memory errors under the address and undefined-behaviour checkers.
+Outside the tests (decision 63's way): the four shaders that fog the
+world compiled and linked on Mesa's software renderer (llvmpipe, GL 4.5
+core) under a virtual X display: the ground's (080) and the water's
+(082) as linked in, the figures' (041) and the doodads' (042) fragment
+shaders read from their source files' text. Each drew two made
+triangles from 40 to 303 yards from the eye, 300 x 80, with War in the
+Plaguelands' fog from its real file through 083 and 084 over a made
+zone light, the five uniforms set as `sky_light_shader` sets them; every
+one of 23404 checked pixels per shader (6554 before the fog, 4368 in
+it, 12482 lost in it) matched the picture's colour faded to the fog's
+as worked out in C (worst 0 of 255), WC3's water, the figures' solid
+and added-light modes and the doodads alike. Not checked here: the
+map's fog as WC3 draws it (open question 13), the exponential styles'
+look (decision 78), and Raylib drawing it in a window.
+
+Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
 its replaceable pictures are left off); 034's prefetch, 040's water and
@@ -794,6 +859,9 @@ return {
 1i. ~~WC3's water drawn, tinted and reconciled (the water plan's steps
    2 to 4).~~ Done (2026-11-05): 082's points and shader, 040 drawing
    them, 083 reading `war3map.w3i`, 081 tinting (decisions 70 to 75).
+1j. ~~The map's own WC3 fog drawn.~~ Done (2026-11-05): 084 reading the
+   map's `war3map.w3i` fog into yards, 043 putting it in each frame's
+   light, under every drawer (decisions 76 to 80).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1289,7 +1357,52 @@ return {
     drawn**: the world's fog is the zone's (026, 037) for the sky,
     ground and water alike, and a converted map's own fog belongs with
     its lighting, a step of its own. Both real maps set fog style 0
-    (none).
+    (none). (Since step 1j drawn, and style 0 read as linear, turned on
+    by the flag 0x2000: decisions 76 to 80.)
+
+## Decisions (2026-11-05, step 1j, answered here; the owner may overturn any)
+
+76. **The map's fog is on when its flag 0x2000 is set, and its style
+    counts from 0** (linear, exponential, exponential squared: the
+    editor's list). The published notes as recalled and
+    world-edit-to-execute's reader and format notes take style 0 for
+    no fog and name no flag for it (0x2000 "purpose unknown"). Of the
+    18 maps at hand whose file was read (world-edit-to-execute's
+    assets: 19 maps, DAoW 6.2's not taken out by the scratch tool), all
+    version 25 and all style 0, War in the Plaguelands alone sets
+    0x2000, and it alone has fog settings other than the editor's
+    defaults (start 3500, density 0.4, colour 30, 120, 255, where 15
+    others keep 3000 to 5000, 0.5 and black, and two keep 3000 to 5000
+    with a magenta colour and density 0.25 but no flag). Read the notes' way, no map
+    here has fog and War in the Plaguelands' settings go unused; read
+    this way, the one map whose author set a fog shows it. The flag's
+    name, "use terrain fog", is recalled rather than read here (open
+    question 13).
+77. **Distances from the eye, in yards by the map's rule; the colour
+    red first.** The file's start and end are WC3 units from the
+    camera, times map.lua's `wc3_scale` (1/30.72 on both maps), as
+    every other WC3 length in a converted map; a start before the eye
+    is at the eye, an end before its start at its start. The colour's
+    bytes read red, green, blue as the tint's do (decision 72); its
+    alpha and the density aren't used.
+78. **Every style drawn linear**, from the start to the end, as every
+    shader here fogs: the exponential styles' density (and how WC3
+    uses it against the distances) isn't matched; one fog formula
+    stays in every shader's text. No map at hand uses them.
+79. **The map's fog replaces the zone's colour and distances in the
+    light each frame, and nothing else.** Every drawer reads that one
+    light, so the ground, water, doodads, their particles, figures,
+    the horizon and the clear colour all take it; the sky dome, the
+    skybox, the sun and the shade stay the zone's. Under the water the
+    zone's underwater light stays (WC3 has no view under its water).
+    The view distance still ends the fog at the latest, after the
+    map's is put in (173b6). It needs no Warcraft III install: it is
+    the map's own data, read in any test-map run.
+80. **A `war3map.w3i` that can't be read stops the test-map run**,
+    naming it, as a broken `war3map.w3e` stops WC3's ground and as 081
+    stops for the same file; with none in the build the zone's fog
+    stays, said at the start. 081 and the fog read the file through
+    one function (084's `map_w3i_read`).
 
 ## Open questions
 
@@ -1398,14 +1511,45 @@ return {
     081 refusing the install's sheet, or a frame not found, says which.
     (Since step 1i also: the frame repeating once a cell, and laid
     columns east and rows south as the game's water is, decision 71.)
-13. **The map's water tint, unseen here.** Which flag turns it on
-    (0x10000, the published notes' and HiveWE's reading as recalled;
-    War in the Plaguelands sets both 0x8000 and 0x10000, so it can't
-    tell), and its byte order (red first by the notes; the Lua reader
-    names the bytes blue first). War in the Plaguelands reads as 50,
-    255, 255: a cyan tint red first, a yellow one blue first. On the
-    owner's machine with WC3: its water's colour in WC3 beside a Test
-    Map run says which.
+13. **The map's water tint and fog, unseen here.** Which flag turns the
+    tint on (0x10000, the published notes' and HiveWE's reading as
+    recalled), which turns the fog on and what style 0 means (0x2000
+    and linear, decision 76; the notes and world-edit-to-execute: style
+    0 none), and both colours' byte order (red first by the notes; the
+    Lua reader names the fog's bytes blue first). War in the
+    Plaguelands reads as a cyan tint (50, 255, 255) and a blue fog (30,
+    120, 255) red first, a yellow tint and an orange fog blue first. On
+    the owner's machine with WC3: its water's colour and its haze in
+    WC3 beside a Test Map run say which.
+    What the repositories hold (since step 1j; world-edit-to-execute
+    read, not changed): its `docs/formats/w3i-map-info.md` gives fog
+    style 0 as none, flags only to 0x8000 (0x2000 to 0x8000 "purpose
+    unknown", nothing past it), and both colours as "BGRA", the fog's
+    as "(BBGGRR00)", which puts its alpha where neither its own writer
+    (fog 0xFF000000, tint 0xFFFFFFFF: alpha the fourth byte) nor any
+    map here does; `src/parsers/w3i.lua` reads the fog's colour as one
+    number and takes its third byte as red (as WC3's region colours,
+    `war3map.w3r`, really are stored blue first, and its w3r reader
+    reads them so), and keeps the tint as one number, unsplit;
+    `src/tests/test_w3i.lua` checks neither colour, nor the fog or
+    flags past being present. The 18 maps read (decision 76): 0x8000
+    is set on all 18 (16 of them with the default white tint and no
+    0x10000), 0x10000 on two (War in the Plaguelands, cyan, and DAoW
+    1.23.1B, white), consistent with 0x10000 for the tint; two maps' magenta
+    fog (255, 0, 255) reads the same either way. So the repositories
+    don't settle the byte order: red first is kept.
+    Follow-ups for world-edit-to-execute (not changed here; for the
+    coordinator): (a) its reader, at versions 28 and later, which it
+    accepts, doesn't pass the game's version (four i32 after the
+    editor's version) or the script-language number after the tint (and
+    version 31's two more), so every field after the editor's version
+    is misread for those maps; none of the 18 maps read here is past
+    25, so no test meets it. (b) Its fog colour's red, green and blue are
+    probably the file's first three bytes (decision 72), not its third,
+    second and first. (c) Its fog style 0 and flag 0x2000 per decision
+    76, and its flags table (0x2000 terrain fog, 0x10000 water tint)
+    in the reader and the format notes. (d) Its test checks no fog,
+    tint or flag values.
 
 ## Related
 
@@ -1432,7 +1576,8 @@ return {
   `src/081-wc3-water.info.md` (WC3's water read). For step 1i:
   `src/082-water-prep.info.md` (the water's points and shader),
   `src/083-w3i.info.md` (the map's settings), `src/040-water.info.md`
-  and 081.
+  and 081. For step 1j: `src/084-map-fog.info.md` (the map's fog), with
+  083, 026 and 059.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

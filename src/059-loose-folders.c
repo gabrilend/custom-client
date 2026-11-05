@@ -111,7 +111,7 @@ WErr fs_index_folder(const char *root, FsIndex **out, WWhy *why)
     FsIndex *ix = calloc(1, sizeof *ix);
     WErr rc = walk(ix, root, "", 0, why);
     if (rc) { fs_index_free(ix); return rc; }
-    qsort(ix->files, (size_t)ix->count, sizeof *ix->files, file_order);
+    if (ix->count > 1) qsort(ix->files, (size_t)ix->count, sizeof *ix->files, file_order);   /* an empty folder has no list to sort (qsort takes no null) */
     for (int i = 1; i < ix->count; ++i)
         if (!strcmp(ix->files[i - 1].key, ix->files[i].key)) {
             w_fail(why, W_ERR_REFUSED, "%s and %s differ only by capitals; a request for %s would have to pick one, so neither is taken: rename one",
@@ -126,7 +126,7 @@ WErr fs_index_folder(const char *root, FsIndex **out, WWhy *why)
 const char *fs_index_find(const FsIndex *ix, const char *logical)
 {
     char key[1024];
-    if (!ix || fs_normalise(logical, key, sizeof key)) return NULL;
+    if (!ix || !ix->count || fs_normalise(logical, key, sizeof key)) return NULL;   /* an empty folder holds nothing (bsearch takes no null) */
     FsFile probe = { key, NULL };
     const FsFile *f = bsearch(&probe, ix->files, (size_t)ix->count, sizeof *ix->files, file_order);
     return f ? f->real : NULL;

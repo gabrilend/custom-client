@@ -71,6 +71,7 @@ WErr w3i_read(const unsigned char *s, size_t len, W3iInfo *out, WWhy *why)
     NEED(bytes4(&w, out->water_rgba), "water tint");
     out->has_environment = 1;
     out->water_tinted = (out->flags & W3I_FLAG_WATER_TINT) != 0;
+    out->fog_on = (out->flags & W3I_FLAG_TERRAIN_FOG) != 0;
     return W_OK;
 }
 /* }}} */

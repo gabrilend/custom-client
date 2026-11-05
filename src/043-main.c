@@ -91,6 +91,7 @@
 #include "075-adt-heights.h"
 #include "078-wc3-ground.h"
 #include "081-wc3-water.h"
+#include "084-map-fog.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -230,6 +231,7 @@ typedef struct {
     ConvertedMap conv;                                /* a test map's map.lua: which map, where she starts (073-converted-map.h) */
     Wc3Ground   *wc3_ground;                          /* a test map's own WC3 ground and tilesets, when found (078-wc3-ground.h) */
     Wc3Water    *wc3_water;                           /* its WC3 water, when found (081-wc3-water.h) */
+    MapFog       map_fog;                             /* its own fog, from its war3map.w3i, when it turns one on (084-map-fog.h) */
     AdtHeights *adt_heights;                          /* a test map's heights from its own ground files, while the server has none (075) */
     char   world_in_map[700];                         /* a test map's default --world: <folder>/world */
 } App;
@@ -733,6 +735,19 @@ int main(int argc, char **argv)
     int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
     if (light_id < 0) printf("light: map %d has no lights in Light.dbc; a plain grey day is used\n", app->map_id);
     else printf("light: %02d:%02d, light %d, fog from %.0f to %.0f yards\n", (int)hours, (int)(fmodf(hours, 1.0f) * 60), light_id, light.fog_start, light.fog_end);
+    /* a test map's own fog, from its war3map.w3i (084, 1109 step 1j), in
+     * place of the zone's over everything drawn, out of the water; a map
+     * that turns none on, or has no war3map.w3i, keeps the zone's */
+    if (app->test_map) {
+        W3iInfo info;
+        WErr w = map_w3i_read(app->assets, &app->chain, &info, &why);
+        if (w && w != W_ERR_NOT_FOUND) return start_failed(app, 1, "%s", why.text);
+        map_fog_from_w3i(w ? NULL : &info, app->conv.wc3_scale, &app->map_fog);
+        if (app->map_fog.on)
+            printf("test map: its own fog drawn, from %.0f to %.0f yards, colour (%.0f, %.0f, %.0f) (war3map.w3i style %d, drawn linear)\n", app->map_fog.start, app->map_fog.end,
+                   app->map_fog.rgb[0] * 255, app->map_fog.rgb[1] * 255, app->map_fog.rgb[2] * 255, app->map_fog.style);
+        else printf("test map: the zone's fog stays: %s\n", app->map_fog.why_off);
+    }
     int eye_m = GetShaderLocation(model_sh, "eye");
     /* the map's creatures (173t): without the generated list, none */
     if (app->world_dir) {
@@ -952,9 +967,9 @@ int main(int argc, char **argv)
         float eye_surface = liquid_surface(app->waters, eye.x + app->ox, eye.y + app->oy, &water_kind);
         int under = eye_surface > -10000 && eye.z < eye_surface;
         int lit = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, under ? LIGHT_UNDERWATER : LIGHT_CLEAR, &light);
-        /* the fog ends by the view distance at the latest (173b6) */
-        float farclip = (float)settings_num(app->settings, "farclip");
-        if (light.fog_end > farclip) { light.fog_start *= farclip / light.fog_end; light.fog_end = farclip; }
+        /* a test map's own fog, when it has one, out of the water (084);
+         * then the fog ends by the view distance at the latest (173b6) */
+        map_fog_frame(&app->map_fog, under, (float)settings_num(app->settings, "farclip"), &light);
         if (lit != light_id) { light_id = lit; printf("light: now light %d\n", lit); }
         sky_light_shader(model_sh, &light);
         ClearBackground((Color){ (unsigned char)(fminf(light.fog[0], 1) * 255), (unsigned char)(fminf(light.fog[1], 1) * 255), (unsigned char)(fminf(light.fog[2], 1) * 255), 255 });

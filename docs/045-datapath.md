@@ -78,6 +78,7 @@ switches with its own issue.
 | `021-wmo.c` | buildings (root + group files) | materials, furniture sets, parts' points and batches, solid flags, pools |
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |
 | `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
+| `084-map-fog.c` | a converted map's `war3map.w3i` (read by `083-w3i.c`, through the resolver) | in a test-map run, the map's own fog (its distances in yards, its colour) put in place of the zone's in that light each frame, out of the water |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
 | `028-collide.c` | models' and buildings' solid shapes, placed | floors, walls and lines of sight (for the mover and camera) |
 
@@ -122,7 +123,9 @@ Each frame, in this order (`043-main.c`):
      breathe in their standing animation;
    - `042-doodads.c` bends moving doodads, poses camera-facing ones per copy,
      and runs particles near the camera.
-4. **Light:** `026-light.c` gives the light at her place and hour. View
+4. **Light:** `026-light.c` gives the light at her place and hour. In a
+   test-map run whose `war3map.w3i` turns terrain fog on, its own fog
+   takes the zone's place (`084-map-fog.c`), except underwater. View
    distance and being underwater adjust the fog. Every shader is handed
    the light (`sky_light_shader`).
 5. **Drawing**, back to front. The processor decides what and where;
