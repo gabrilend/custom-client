@@ -5,7 +5,9 @@
 ## Current behavior
 
 Built (`src/026-light.c`, `src/037-sky.c`): Light.dbc's spheres by
-place, blended, the default per map; the colours and fog by time of day;
+place, blended, the default per map, the tables read through the
+client's tables (074: rows across every place, placeholder rows, 097's
+widths; 1109 step 1t); the colours and fog by time of day;
 the sun's direction; the underwater set under water; the sky dome's five
 colours as shader values; skybox models (Northrend's auroras). Not
 built: weather and the ghost world's light (the sets are read the same
@@ -21,9 +23,12 @@ Measured against the clean-room checklist
   full strength inside the inner radius, a straight fade to the outer;
   fog end ÷ 36 and start as a share of the end.
 - **Not yet the original's:**
-  - lights are laid **farthest first** by distance from the point (two
+  - ~~lights are laid **farthest first** by distance from the point (two
     within 1/3 yard by the smaller inner radius); this client sorts by
-    outer radius;
+    outer radius;~~ Done in 1109 step 1t (decision 146): farthest first,
+    a tie within 1/3 yard laid larger inner radius first, so the smaller
+    is on top (that reading of the note is not checked against the
+    original);
   - after blending between two times, the original cuts each colour
     channel down to a whole step of 255; this client keeps the
     fraction;
@@ -42,10 +47,15 @@ Measured against the clean-room checklist
   - storm sets blended over the normal set by the storm's strength;
     up to 5 zone lights by percentage; override lights with their own
     fades;
-  - a map with no global light uses light record 1. This client instead
+  - ~~a map with no global light uses light record 1. This client instead
     falls back to fixed greys, a fog of 125 to 500 yards and water at
     0.75 when a light or its rows are missing, without saying so: three
-    silent fallbacks, which the house rules count as warnings;
+    silent fallbacks, which the house rules count as warnings;~~ Done in
+    1109 step 1t (decisions 145, 147, 150): a map with no default takes
+    Light's row 1; the grey day stands only when there is no row 1 (said
+    once) or the tables are in no place (said in one line); a missing
+    band or parameter row is a placeholder row the resolver says, where
+    it makes them;
   - **the sky dome** (note 4.4): seven rings of 24 points (single points
     at top and bottom) at 0°, 30.6°, 36°, 41.4°, 43.2°, 45° (the horizon,
     sky colour 6, the fog colour) and 180° from straight up, taking sky

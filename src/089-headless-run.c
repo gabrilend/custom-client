@@ -23,6 +23,9 @@
 #include "088-figure-model.h"
 #include "091-model-solids.h"
 #include "098-wdt.h"
+#include "026-light.h"
+#include "084-map-fog.h"
+#include "014-settings.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -360,6 +363,9 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "pathing", r->pathing }, { "pathing_cells", r->pathing_cells }, { "pathing_closed", r->pathing_closed },
         { "steps_walled_pathing", r->steps_walled_pathing }, { "steps_on_closed", r->steps_on_closed },
         { "looks_placeholder", r->looks_placeholder }, { "table_placeholders", r->table_placeholders },
+        { "light", r->light }, { "light_tables", r->light_tables }, { "light_hours", r->light_hours }, { "fog_from_map", r->fog_from_map },
+        { "fog_start", r->fog_start }, { "fog_end", r->fog_end }, { "fog_red", r->fog_red }, { "fog_green", r->fog_green }, { "fog_blue", r->fog_blue },
+        { "sky_red", r->sky_red }, { "sky_green", r->sky_green }, { "sky_blue", r->sky_blue },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -522,6 +528,39 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             r.models, r.buildings, r.model_copies, r.models_wc3, r.model_stand_ins, r.models_left_out, r.solid_copies, r.solid_triangles, r.building_pools);
     fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground, %d on models' floors, %d against their walls, %d against the pathing's\n",
             r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground, r.steps_on_models, r.steps_walled, r.steps_walled_pathing);
+    /* {{{ the light where she ends (026 through the tables; 1109 step 1t):
+     * what the window would clear its picture to and fog by, at the run's
+     * hour, the camera out of the water; a test map's own fog over it (084) */
+    WErr light_rc;
+    WWhy lw;
+    {
+        LightTables lt;
+        r.light = -1;
+        r.light_hours = in->hours;
+        if ((light_rc = light_open(&lt, ws.tables, log, &lw)) == W_OK) {
+            LightNow now;
+            r.light_tables = !lt.none;
+            r.light = light_at(&lt, in->start.map_id, (float)m.x, (float)m.y, (float)m.z, in->hours, LIGHT_CLEAR, &now);
+            MapFog mf = { 0 };
+            if (in->start.test_map && in->start.conv) {
+                W3iInfo info;
+                WWhy fwhy;
+                WErr fw = map_w3i_read(ws.assets, &ws.chain, &info, &fwhy);
+                map_fog_from_w3i(fw ? NULL : &info, in->start.conv->wc3_scale, &mf);
+            }
+            /* as 043 each frame: the map's fog, then the view distance ends it at the latest */
+            float farclip = in->start.settings ? (float)settings_num(in->start.settings, "farclip") : 0;
+            r.fog_from_map = farclip > 0 ? map_fog_frame(&mf, 0, farclip, &now) : map_fog_apply(&mf, &now);
+            r.fog_start = now.fog_start; r.fog_end = now.fog_end;
+            r.fog_red = now.fog[0]; r.fog_green = now.fog[1]; r.fog_blue = now.fog[2];
+            r.sky_red = now.sky[0][0]; r.sky_green = now.sky[0][1]; r.sky_blue = now.sky[0][2];
+            fprintf(log, "headless: the light at %.2f hours where she ends: %s%d, fog from %.1f to %.1f yards%s, colour (%.3f, %.3f, %.3f), sky overhead (%.3f, %.3f, %.3f)\n",
+                    in->hours, r.light < 0 ? "none (the grey day) " : "light ", r.light, r.fog_start, r.fog_end, r.fog_from_map ? " (the map's own)" : "",
+                    r.fog_red, r.fog_green, r.fog_blue, r.sky_red, r.sky_green, r.sky_blue);
+            light_close(&lt);
+        } else fprintf(log, "headless: the light: %s\n", lw.text);   /* a light table there but broken: the run's error, after the rest is let go */
+    }
+    /* }}} */
     r.table_placeholders = tables_placeholders(ws.tables);
     if (r.table_placeholders) fprintf(log, "headless: %d placeholder rows stood in for rows no place has (%d looks)\n", r.table_placeholders, r.looks_placeholder);
     wc3_pathing_free(h->pathing);
@@ -533,6 +572,7 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     world_start_close(&ws);
     /* }}} */
 
+    if (light_rc) { w_fail(why, light_rc, "%s", lw.text); return ended(bye, light_rc, why); }
     if (out) *out = r;
     if ((rc = counted(bye, &r, why))) return ended(bye, rc, why);
     return goodbye_end(bye, GOODBYE_CLOSED, NULL, why);

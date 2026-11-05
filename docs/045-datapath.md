@@ -96,7 +96,7 @@ stand-in figure stands in her place.
 | `024-particles.c` | the same models | particle emitters, and their particles run over time |
 | `021-wmo.c` | buildings (root + group files) | materials, furniture sets, parts' points and batches, solid flags, pools |
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |
-| `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
+| `026-light.c` | the light tables, through the client's tables (074: every place's rows, placeholder rows) | the light here and now: sun, shade, sky, fog, water colours, skybox; the grey day, said, when the tables are in no place |
 | `087-world-start.c` | the archives (none in a test map), the resolver, the tables, the map's `Map` row, the server's or the map's own heights, the navigation tiles | the start before the window: the map's folder, her height at the start and the steepest walkable slope |
 | `089-headless-run.c` | a test map's start (087), her figure and the creatures' looks (025, 088), a moves file (Lua data, `tests/090-test-map-moves.lua`; a map's own routes, `tests/092`, `093`, `095`, `096`) | with `--headless`, no window: her path over the map's ground, its placed models' floors and walls and its WC3 pathing's walls (091, 094) and its water step by step, and the counts in the goodbye receipt (068) |
 | `091-model-solids.c` | a tile's placed doodads and buildings (020), their files through 076 | with no window: each model's and building part's solid shape (also for `042-doodads.c`), placed into `028-collide.c`, buildings' pools into `027-liquid.c`; the mover's floor and wall rule (for 043 and 089) |

@@ -31,8 +31,19 @@
  *     starts, as a share of that.
  *
  * Inside a sphere's inner radius its light is used whole; between inner
- * and outer it blends into whatever lies beyond (the default, or a
- * larger sphere), by distance.
+ * and outer it blends into whatever lies beyond, by distance: the
+ * default first, then the spheres reaching here farthest first (their
+ * centres from here; two within a third of a yard of each other, the
+ * larger inner radius first), so the nearest is laid on top (306's
+ * notes on the original; 1109 step 1t, decision 146). A map with no
+ * default of its own takes Light's row 1 (306's notes: the original's),
+ * and with no row 1 either, the plain grey day, said once at light_open (decision 147).
+ *
+ * Read through the client's tables (074, 1109 step 1t): a converted
+ * map's own Light rows are met before the archives', and a band, set or
+ * skybox row no place has is a placeholder row in a test-map run. With
+ * any of the four tables in no place, the plain grey day everywhere,
+ * said once.
  *
  * A LightNow, field by field (colours are red, green, blue, 0 to 1):
  *   sun[3], shade[3]     the sun's light and the light in shadow
@@ -53,8 +64,11 @@
 #include "013-errors.h"
 
 #include "016-dbc.h"
-#include "015-mpq.h"
 #include "060-resolver.h"
+#include "074-tables.h"
+
+#include <stdint.h>
+#include <stdio.h>
 
 typedef struct {
     float sun[3], shade[3];
@@ -67,19 +81,53 @@ typedef struct {
     char  skybox[128];
 } LightNow;
 
+/* One of Light's rows, read once: its id and map, where it stands in
+ * world axes (yards), its inner and outer radius (yards), and its five
+ * parameter sets (Light's fields 8-12). */
 typedef struct {
-    unsigned char *files[5];          /* the tables' bytes, kept while open */
-    AssetSource    from[5];           /* where each came from (060): Light, LightIntBand, LightFloatBand, LightParams, LightSkybox */
-    Dbc light, ints, floats, params, skyboxes;
+    int      id, map;
+    float    x, y, z;
+    float    inner, outer;
+    uint32_t set[5];
+    int      fallback;                /* 1: at 0, 0, 0, the map's default light */
+} LightSphere;
+
+/* The light tables, read through the client's tables (074): Light's rows
+ * from every place that has it, a map's own first (a search: a converted
+ * map's lights beside the archives'), the bands, parameter sets and
+ * skyboxes looked up by number as each light needs them, a row no place
+ * has a placeholder row where the tables have a resolver (074: said and
+ * counted; strict mode refuses it), its band then the plain grey day's.
+ * `none` 1: Light, LightParams, LightIntBand or LightFloatBand is in no
+ * place, so every place has the plain grey day (said once, at open). */
+typedef struct {
+    Tables      *tables;              /* not owned: the start's (087's ws.tables, 043's) */
+    LightSphere *lights;
+    int          nlights;
+    int          none;
+    int          ncopies;             /* Light's copies (074), 0 with none */
+    AssetSource  from;                /* where Light's first copy came from (060) */
+    int          skyboxes;            /* 1: LightSkybox is in some place */
+    int          record1;             /* the index of Light's row 1 (any map's), -1 none: a map with no default of its own takes it */
 } LightTables;
 
-/* Reads the five light tables, each the first copy a place has (060's
- * asset_read: through `assets` when a resolver is open, else `chain`; the
- * baseline set's are empty, so with no install there is no light anywhere
- * and light_at gives its plain grey day). W_ERR_NOT_FOUND naming one no
- * place has; W_ERR_CORRUPT for tables narrower than 3.3.5a's. */
-WErr  light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why);
+/* Reads Light's rows through `tables` and checks the other four are in
+ * some place. W_OK, saying on `log` (may be NULL) when one is missing:
+ * then `none` is 1 and light_at gives the plain grey day. A table that is
+ * there but can't be read (074: not a table, narrower than the columns
+ * read here, copies of different widths) is its error, naming it. */
+WErr  light_open(LightTables *t, Tables *tables, FILE *log, WWhy *why);
 void light_close(LightTables *t);
+
+/* The plain grey day: a map with no lights, or no light tables at all
+ * (the fixed sky and fog this client draws without them); also each
+ * band of a light whose row no place has. */
+#define LIGHT_GREY_SUN    0.8f
+#define LIGHT_GREY_SHADE  0.4f
+#define LIGHT_GREY_SKY    0.6f
+#define LIGHT_GREY_FOG    0.6f
+#define LIGHT_GREY_FOG_END   500.0f   /* yards */
+#define LIGHT_GREY_FOG_SHARE 0.25f    /* where it starts, as a share of its end */
 
 /* Which of a light's parameter sets is used (Light's fields 8 on). */
 enum { LIGHT_CLEAR = 0, LIGHT_UNDERWATER = 1 };

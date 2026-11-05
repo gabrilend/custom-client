@@ -252,3 +252,14 @@ no window now take the WDT's list as the map's tiles, so a tile it
 doesn't list is open sea without asking for a file. World-edit-to-
 execute's own WDT writer and five maps it converted agree with the
 reader tile for tile. Decisions 140 to 144 in 1109.
+
+2026-11-05: 1109's step 1t, the sky and fog from the light tables.
+`026-light.c` now reads Light, its colour and distance bands, its
+parameters and skyboxes through the client's tables, so a converted
+map's lights and the install's are one list, and a band no place has is
+a placeholder row the resolver says. Lights are laid farthest first, so
+the nearest shows, and a map with no default light takes Light's row 1,
+as the original's notes say (not run against it). With the tables in no
+place the fixed grey sky and fog stand, said in one line. The run with
+no window takes the light where she ends at noon and counts its fog and
+sky in the receipt. Decisions 145 to 150 in 1109.

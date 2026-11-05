@@ -22,7 +22,7 @@
  *   --turn DEG        (pictures) the camera turned DEG degrees round her, held there
  *   --pitch DEG       (pictures) the camera raised DEG degrees (up to 83)
  *   --clock MS        (pictures) start the world's animations MS milliseconds in
- *   --hour H          the time of day, 0 to 24 (default: this machine's clock)
+ *   --hour H          the time of day, 0 to 24 (default: this machine's clock; a --test-map run with no window: noon)
  *   --face DEG        her start facing turned DEG degrees (left)
  *   --walk S          (pictures) hold forward for S world-seconds
  *   --walking         walk toggled on from the start (173i), as the keypad's / does
@@ -466,6 +466,7 @@ int main(int argc, char **argv)
     time_t now = time(NULL);
     struct tm *lt = localtime(&now);
     float hours = (float)lt->tm_hour + (float)lt->tm_min / 60.0f;
+    int hour_given = 0;                                   /* --hour given: a headless run lights by it, else noon (1109 step 1t) */
     float pose_ms = 0;
     /* {{{ a map handed in by the editor (1109): read first, so anything that
      * stops the start from here on is written in its receipt; the password
@@ -497,7 +498,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--pitch") && i + 1 < argc) app->view.pitch = (float)(atof(argv[++i]) * DEG2RAD);
         else if (!strcmp(argv[i], "--pose") && i + 2 < argc) { pose_id = atoi(argv[++i]); pose_ms = (float)atof(argv[++i]); }
         else if (!strcmp(argv[i], "--clock") && i + 1 < argc) start_ms = atof(argv[++i]);
-        else if (!strcmp(argv[i], "--hour") && i + 1 < argc) hours = (float)atof(argv[++i]);
+        else if (!strcmp(argv[i], "--hour") && i + 1 < argc) { hours = (float)atof(argv[++i]); hour_given = 1; }
         else if (!strcmp(argv[i], "--face") && i + 1 < argc) face_deg = atof(argv[++i]);
         else if (!strcmp(argv[i], "--walk") && i + 1 < argc) walk_s = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--walking")) walking = 1;
@@ -560,7 +561,7 @@ int main(int argc, char **argv)
         if (shot) return start_failed(app, 2, "--shot draws a picture, and --headless opens no window: give one or the other");
         HeadlessMoves *moves;
         if (headless_moves_read(test_map_headless(app->test_map), &moves, &why)) return start_failed(app, 2, "--headless: %s", why.text);
-        HeadlessIn hin = { .start = wsi, .moves = moves, .world_dir = app->world_dir };
+        HeadlessIn hin = { .start = wsi, .moves = moves, .world_dir = app->world_dir, .hours = hour_given ? hours : HEADLESS_HOURS };
         WErr ran = headless_run(&hin, app->bye, NULL, &why);
         headless_moves_free(moves);
         if (ran) fprintf(stderr, "%s\n", why.text);
@@ -701,11 +702,11 @@ int main(int argc, char **argv)
     app->horizon = horizon_new(&app->ws.chain, app->ws.assets, app->ws.map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
-    if (light_open(&lights, app->ws.assets, &app->ws.chain, &why)) return start_failed(app, 1, "%s", why.text);
+    if (light_open(&lights, app->ws.tables, stdout, &why)) return start_failed(app, 1, "%s", why.text);   /* through the tables (074, 1109 step 1t) */
     app->sky = sky_new();
     LightNow light;
     int light_id = light_at(&lights, app->map_id, (float)app->elf.x, (float)app->elf.y, (float)app->elf.z, hours, LIGHT_CLEAR, &light);
-    if (light_id < 0) printf("light: map %d has no lights in Light.dbc; a plain grey day is used\n", app->map_id);
+    if (light_id < 0 && !lights.none) printf("light: map %d has no lights in Light.dbc; a plain grey day is used\n", app->map_id);
     else printf("light: %02d:%02d, light %d, fog from %.0f to %.0f yards\n", (int)hours, (int)(fmodf(hours, 1.0f) * 60), light_id, light.fog_start, light.fog_end);
     /* a test map's own fog, from its war3map.w3i (084, 1109 step 1j), in
      * place of the zone's over everything drawn, out of the water; a map

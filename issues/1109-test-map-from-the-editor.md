@@ -1289,6 +1289,69 @@ run on the owner's machine); a one-building map's MWMO and MODF and
 MPHD's 0x1 (recalled, as in 303); the windowed run's tile count line
 (raylib isn't here; 043 compiles under gcc and clang -Werror).
 
+**Step 1t is built** (2026-11-05, the same background work): the sky
+and fog from the light tables, read through the client's tables.
+Decisions 145 to 150.
+
+- **Reading (026 on 074):** Light, LightParams, LightIntBand,
+  LightFloatBand and LightSkybox are read through 074 like every other
+  table: one list of rows across every place (the map's own first),
+  each copy's width checked against its 097 layout, and a placeholder
+  row where a band or parameter row is in no place (the resolver says
+  it; a band with no moments takes the grey day's value for its slot). 026's own file reading, row search and width check are
+  gone (decision 145).
+- **Picking (026):** a map's default light (position 0, 0, 0) is laid
+  first, then each of its lights that reaches the point, farthest first
+  by distance from its centre (two within a third of a yard: the larger
+  inner radius first), each full inside its inner radius and fading in
+  a straight line to its outer; the nearest is laid last, on top
+  (decision 146). A map with no default of its own takes Light's row 1;
+  with no row 1, the grey day, said once (decision 147). The colour
+  bands and fog distances are blended in straight lines between their
+  moments by the time of day, across midnight, as before.
+- **Missing tables:** when any of the four is in no place, the fixed grey
+  sky and fog (fog 125 to 500 yards, water 0.75) stand everywhere, said
+  in one line naming them; LightSkybox in no place means no skybox,
+  said (decisions 145, 150). A copy that is there but broken is an
+  error, named, as before.
+- **Drawing (043):** the window's clear colour is the light's fog colour
+  and its fog distances and sky colours go to the shaders, as before,
+  now from 074's rows. Its "no lights" line is not said when the tables
+  aren't there (the one line above says it).
+- **With no window (089):** the run takes the light where she ends, at
+  noon unless 043 is given `--hour` (decision 148), with a test map's own
+  war3map.w3i fog laid over it and held to the far clip as the window
+  does (084), logs it, and counts it in the receipt: `light`,
+  `light_tables`, `light_hours`, `fog_from_map`, `fog_start`, `fog_end`,
+  `fog_red/green/blue`, `sky_red/green/blue`.
+
+Checked (`tests/044-test-client.c`): made Light, LightIntBand,
+LightFloatBand, LightParams and LightSkybox tables in two places with
+known values: seven lights merged, the map's first; away from every
+sphere at noon the map's default (not the later place's), its red fog
+from 500 to 1000 yards, blue sky, water alphas and skybox; the fog's
+colour at midnight, 6:00 and 18:00 (half way each side); inside a
+sphere's inner radius the sphere whole; half way between its radii half
+of each; two spheres both holding a point, the nearer laid on top though
+it comes a row earlier (laying them in row order fails the check); a map
+with no lights, and one whose only sphere doesn't reach, taking row 1;
+inside that map's sphere, the sphere over row 1; an underwater set no
+place has: every band a placeholder, the grey day, the resolver naming
+LightIntBand; Light.dbc alone: the grey day and one line naming the
+other three; no table at all: the same. On the converter builds (whose
+sets hold the four tables empty): no light and no row 1, said, so the
+grey day; the run with no window at noon on each, twice the same, its
+fog War in the Plaguelands' own (113.9 to 162.8 yards, its colour) and
+Master Crafters' the grey day's (125 to 500; its w3i turns no fog on).
+With the original's archives (not here): the install's lights read
+through 074.
+
+Not checked: the farthest-first order, its third-of-a-yard tie and
+which inner radius goes first in a tie, and the row-1 fallback against
+the original (from 306's clean-room notes, not run); any real 3.3.5a
+light table (none here); the window's sky and fog (raylib isn't here;
+043 compiles under gcc and clang -Werror).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1297,7 +1360,10 @@ stock art and the rest of the client's tables (decisions 88, 97), and
 the asset forge's real set;
 a placeholder row for tables other than a creature's (step 1r gives
 every table the client reads a layout, but only 041 and 088 ask for
-one); the layouts written out for the converter (decision 134); the light tables searched across places (026); logging in, and the `lost-connection` ending
+one); the layouts written out for the converter (decision 134); the
+light's other differences from the original (306: rounding each colour
+to a 255th, fog end held to 10 yards and the far clip, the second fog
+mode, storms, zone and override lights); logging in, and the `lost-connection` ending
 (Phase 5's 609).
 
 ## Intended behavior
@@ -1486,6 +1552,12 @@ return {
    reader library, the ground (033, 034), heights (075) and the run with
    no window (089) asking its list, checked against the converter's own
    WDTs (decisions 140 to 144).
+1t. ~~The sky and fog from the light tables.~~ Done (2026-11-05): 026
+   through 074 (rows across places, placeholder rows, 097's widths),
+   farthest-first laying and Light's row 1 for a map with no default,
+   the grey day said when the tables are missing, and the light where
+   she ends in the run with no window and its receipt (decisions 145
+   to 150).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2540,6 +2612,45 @@ return {
     is one whose MPHD has 0x1 or that names a building and lists no
     tile (both unchecked: neither project has one).
 
+## Decisions (2026-11-05, step 1t, answered here; the owner may overturn any)
+
+145. **The light tables go through 074 like the rest.** One list of
+    Light rows across every place, the map's own place first, so a
+    converted map's lights and the install's are both seen; each copy's
+    width checked against 097's layout. A band or parameter row no
+    place has is a placeholder row where the resolver makes them (said
+    and counted by it, as 1q's); where it makes none (or refuses, in
+    strict mode) the band is simply absent. Either way a band with no
+    moments takes the grey day's value for its slot, so a light with
+    half its bands missing still draws. When any of Light, LightParams, LightIntBand or
+    LightFloatBand is in no place, the fixed grey day stands everywhere
+    and one line names the missing ones: not an error, as a map with no
+    lights should still start.
+146. **Lights are laid farthest first.** The default first, then the
+    lights that reach the point by distance from their centre, farthest
+    first, so the nearest ends on top; two within a third of a yard are
+    laid larger inner radius first. From 306's clean-room notes on the
+    original ("two within 1/3 yard by the smaller inner radius", read
+    as the smaller one on top); not run against it. The light the run
+    names is the one whose weight is greatest, the last laid on a tie.
+147. **A map with no default light takes Light's row 1.** From 306's
+    notes; not run against the original. Row 1 is found by its number,
+    whatever map it names. With no row 1 either, the grey day; said once
+    when the tables are opened, not at each frame.
+148. **The run with no window lights at noon.** The window lights by the
+    machine's clock (or `--hour`); the run's receipt has to be the same
+    twice, so it takes noon unless `--hour` is given, at the point where
+    she ends, under the open sky (the clear set; under water is left to
+    the window). A test map's own fog is laid over it and held to the
+    far clip as 043 does, and `fog_from_map` says so. The receipt counts
+    are the window's values (yards, 0-1 colours), not the table's.
+149. **No new numbered file.** 026 is rewritten in place; 089, 043 and
+    044 gain the rest. `.file-index-counter` stays at 98.
+150. **LightSkybox in no place means no skybox.** Said once; the sky
+    dome and fog still come from the other four. A skybox row that a
+    parameter row names and no place has is no skybox for that light
+    (no placeholder row is asked for: it would have no model to name).
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -2734,7 +2845,10 @@ return {
   (the tables' layouts), 074, 026, 041 and 085;
   [106](./106-dbc-parser.md) (layouts). For step 1s:
   `src/098-wdt.info.md` (a map's tile list), 020, 033, 034, 075, 089
-  and 043; [303](./303-wdt-and-streaming.md) (the WDT parser).
+  and 043; [303](./303-wdt-and-streaming.md) (the WDT parser). For
+  step 1t: `src/026-light.info.md` (the light through the tables), 074,
+  097, 089, 043 and 084; [306](./306-light-and-sky.md) (the light and
+  sky, and the original's notes).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch
