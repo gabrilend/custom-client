@@ -1710,6 +1710,63 @@ static void loading_screen_tests(const char *dir)
 }
 /* }}} */
 
+/* {{{ static wdl_matches_ground: a converted map's far-off ground (its
+ * .wdl, which the window's horizon draws, 039) against its own ground
+ * files (075), by the converter's rule (world-edit-to-execute's
+ * adt.wdl_bytes: each tile's 17 x 17 chunk corners, the height grid
+ * every 8 points, rounded to whole yards; holes none). Its tiles are the
+ * WDT's (098), filed as the horizon reads them (adt_wdl_index), and each
+ * corner, placed as the horizon places it (adt_wdl_corner_at), is within
+ * the rounding of the ground there (1109 step 1z). */
+static void wdl_matches_ground(Resolver *r, const ConvertedMap *m, MapWorld *w)
+{
+    char path[300], line[400];
+    WWhy why;
+    AssetAnswer fa, la;
+    snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m->directory, m->directory);
+    WErr e = asset_read(r, NULL, path, ASSET_GROUND, &fa, &why);
+    if (e) { check(0, why.text); return; }
+    Wdt *wdt = malloc(sizeof *wdt);
+    e = wdt_read(fa.data, fa.len, wdt, &why);
+    asset_answer_free(&fa);
+    snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdl", m->directory, m->directory);
+    AdtWdl *wdl = malloc(sizeof *wdl);
+    WErr le = e ? e : asset_read(r, NULL, path, ASSET_GROUND, &la, &why);
+    if (!le) { le = adt_wdl_read(la.data, la.len, wdl, &why); snprintf(line, sizeof line, "%s", asset_source_name(la.source)); asset_answer_free(&la); }
+    check(!e && !le, (e || le) ? why.text : "its far-off ground (.wdl) is in its folder and reads (020)");
+    if (!e && !le) {
+        int same = 1, tiles = 0, corners = 0, near_ = 0, holes = 0, nwdl = 0;
+        float worst = 0;
+        for (int i = 0; i < 4096; ++i) nwdl += wdl->have[i];
+        for (int tx = 0; tx < 64; ++tx)
+            for (int ty = 0; ty < 64; ++ty) {
+                int i = adt_wdl_index(tx, ty), want = wdt_has_tile(wdt, tx, ty);
+                if (want != wdl->have[i]) same = 0;
+                if (!want || !wdl->have[i]) continue;
+                ++tiles;
+                for (int k = 0; k < 16; ++k) holes += wdl->holes[i][k] != 0;
+                for (int rr = 0; rr <= 16; ++rr)
+                    for (int cc = 0; cc <= 16; ++cc) {
+                        double x, y;
+                        adt_wdl_corner_at(tx, ty, rr, cc, &x, &y);
+                        if (rr == 16) x += 0.01;                 /* the tile's own far edge, not the next tile's */
+                        if (cc == 16) y += 0.01;
+                        float gx, gy, z = maps_world_height(w, (float)x, (float)y, &gx, &gy);
+                        float d = fabsf(z - wdl->heights[i][rr * 17 + cc]);
+                        ++corners;
+                        if (z > -10000 && d <= 0.51f) ++near_;
+                        if (z > -10000 && d > worst) worst = d;
+                    }
+            }
+        snprintf(line, sizeof line, "its .wdl has the WDT's %d tiles and no others (%d), filed as the horizon reads them; %d of its %d corners within the rounding of its own ground (worst %.3f yards), no holes (%d)",
+                 wdt->ntiles, nwdl, near_, corners, worst, holes);
+        check(same && tiles == wdt->ntiles && tiles > 0 && near_ == corners && holes == 0, line);
+    }
+    free(wdl);
+    free(wdt);
+}
+/* }}} */
+
 static void converted_tests(const char *dir, const char *build)
 {
     char root[400], path[900], line[1000];
@@ -2539,6 +2596,7 @@ static void converted_tests(const char *dir, const char *build)
         snprintf(line, sizeof line, "its ground tile %d_%d prepared with no archives: the %d ground pictures it names each stand in as the checker (%d)", ga, gb, need, checkers);
         check(!e && need > 0 && checkers == need, e ? why.text : line);
         if (gpr) ground_prep_free(gpr, 0);
+        wdl_matches_ground(r, &m, w);
         maps_world_free(w);
         free(w);
         adt_heights_free(h);

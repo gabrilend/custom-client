@@ -215,6 +215,21 @@ typedef struct {
     uint8_t  have[4096];
 } AdtWdl;
 WErr adt_wdl_read(const unsigned char *s, size_t len, AdtWdl *out, WWhy *why);
+/* The entry of the tile whose ground file is <map>_<ty>_<tx> (ty the
+ * file's first number, west to east; tx its second, north to south):
+ * tx * 64 + ty, as the WDT's (098) and as the horizon (039) draws it.
+ * World-edit-to-execute's writer files the same tile at "ty * 64 + tx"
+ * in its own names (its tx the file's first number); 044 holds a
+ * converted map's WDL to its own ground by this (1109 step 1z). */
+static inline int adt_wdl_index(int tx, int ty) { return tx * 64 + ty; }
+/* Corner (row r south, column c east, 0-16) of that tile's grid, in world
+ * yards as the horizon places it: the tile's north-west corner is
+ * ((32 - tx) * 533.33, (32 - ty) * 533.33), each step 533.33 / 16. */
+static inline void adt_wdl_corner_at(int tx, int ty, int r, int c, double *x, double *y)
+{
+    *x = (32 - tx) * 533.33333 - r * (533.33333 / 16);
+    *y = (32 - ty) * 533.33333 - c * (533.33333 / 16);
+}
 
 /* MCVT index of corner (row 0-8, col 0-8) and centre (row 0-7, col 0-7). */
 static inline int adt_corner(int row, int col) { return row * 17 + col; }
