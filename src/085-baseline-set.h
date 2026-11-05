@@ -52,11 +52,22 @@
 #define BASELINE_STAND_IN_PICTURE "Baseline\\StandIn.blp"            /* the set's own name, not the original game's */
 #define BASELINE_STAND_IN_MODEL   "baseline/standin.m2"              /* the models' shared files in the folder */
 #define BASELINE_STAND_IN_SKIN    "baseline/standin00.skin"
+#define BASELINE_FIGURE_MODEL     "Baseline\\StandInFigure.m2"      /* the stand-in figure, under the set's own names (1109 step 1l) */
+#define BASELINE_FIGURE_SKIN      "Baseline\\StandInFigure00.skin"
+#define BASELINE_FIGURE_PICTURE   "Baseline\\StandInFigure.blp"
+#define BASELINE_LIQUID_FIELDS    45                                 /* LiquidType's width in 3.3.5a */
+
+/* The tables the set holds, by name (DBFilesClient\NAME.dbc), NULL-ended:
+ * LiquidType (one row, water, naming BASELINE_WATER_PATTERN) and the five
+ * light tables, empty (026: no light, a plain grey day). */
+extern const char *const BASELINE_TABLES[];
 
 /* What a make wrote, counted:
  *   grounds        ground pictures (one a different path)
  *   models         doodad paths given the stand-in (each its .m2 and 00.skin)
  *   water_frames   frames of the water's run
+ *   tables         tables written (BASELINE_TABLES); the stand-in figure's
+ *                  three files are counted in files and entries alone
  *   files, entries files written (the manifest left out) and manifest entries
  *   same_path      rows naming a path an earlier row named (the first's colour kept)
  *   buildings      .wmo rows left out
@@ -65,6 +76,7 @@
 typedef struct {
     int grounds, models, water_frames, files, entries;
     int same_path, buildings, units, other;
+    int tables;                       /* tables written (BASELINE_TABLES) */
 } BaselineMade;
 
 /* Makes the set in `folder` (made when it isn't there) from the
@@ -89,6 +101,13 @@ unsigned char *baseline_water_frame(int frame, size_t *len);
 unsigned char *baseline_stand_in_picture(size_t *len);
 unsigned char *baseline_stand_in_model(size_t *len);
 unsigned char *baseline_stand_in_skin(size_t *len);
+/* The stand-in figure (BASELINE_FIGURE_MODEL): an M2 of version 264 with
+ * one still bone and one animation, Stand, its .skin and its picture; and
+ * a table the set holds, by name (NULL for a name it doesn't). */
+unsigned char *baseline_figure_model(size_t *len);
+unsigned char *baseline_figure_skin(size_t *len);
+unsigned char *baseline_figure_picture(size_t *len);
+unsigned char *baseline_table(const char *name, size_t *len);
 
 /* SHA-256 of `len` bytes as 64 small hex digits (a manifest entry's id). */
 void baseline_sha256_hex(const void *data, size_t len, char out[65]);

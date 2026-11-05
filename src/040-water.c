@@ -40,7 +40,7 @@ struct Water {
     MpqChain *chain;
     Resolver *assets;                /* a test-map run's resolver for the pictures, or NULL */
     const Textures *textures;        /* how pictures go to the card (036-texture.h) */
-    Dbc       table;      unsigned char *table_bytes;
+    Tables   *tables;                /* LiquidType, per row (074-tables.h) */
     Shader    shader;
     Material  material;
     int       loc_eye, loc_near, loc_deep, loc_opacity, loc_raw, loc_wc3;
@@ -57,22 +57,19 @@ void water_free(Water *w)
     for (int i = 0; i < w->nkinds; ++i) for (int f = 0; f < w->kinds[i].nframes; ++f) UnloadTexture(w->kinds[i].frames[f]);
     for (int f = 0; f < w->nwc3_frames; ++f) UnloadTexture(w->wc3_frames[f]);
     free(w->layers);
-    free(w->table_bytes);
     if (IsShaderReady(w->shader)) UnloadShader(w->shader);
     free(w);
 }
-Water *water_new(MpqChain *c, Resolver *assets, const Textures *textures, WWhy *why)
+Water *water_new(MpqChain *c, Resolver *assets, Tables *tables, const Textures *textures, WWhy *why)
 {
     Water *w = calloc(1, sizeof *w);
     w->textures = textures;
     w->chain = c;
     w->assets = assets;
-    size_t len;
-    const char *from;
-    w->table_bytes = mpq_chain_read(w->chain, "DBFilesClient\\LiquidType.dbc", &len, &from);
-    if (!w->table_bytes) { w_fail(why, W_ERR_NOT_FOUND, "LiquidType.dbc is in none of the client's archives"); water_free(w); return NULL; }
+    w->tables = tables;
+    TableRow first;                                       /* the table must be somewhere: water (1) is in every copy */
     WWhy inner;
-    if (dbc_open(&w->table, w->table_bytes, len, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); water_free(w); return NULL; }
+    if (tables_row(tables, "LiquidType", 1, &first, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); water_free(w); return NULL; }
     w->shader = LoadShaderFromMemory(WATER_VS, WATER_FS);
     if (!IsShaderReady(w->shader)) { w_fail(why, W_ERR_GPU, "the water shader didn't compile (see Raylib's messages above)"); water_free(w); return NULL; }
     w->loc_eye = GetShaderLocation(w->shader, "eye");
@@ -123,8 +120,9 @@ static int kind_of(Water *w, int id)
     memset(k, 0, sizeof *k);
     k->id = id;
     const char *pattern = NULL;
-    for (uint32_t r = 0; r < w->table.rows; ++r)
-        if ((int)dbc_u32(&w->table, r, 1) == id) { k->type = (int)dbc_u32(&w->table, r, 4); pattern = dbc_text(&w->table, r, 16); break; }
+    TableRow row;
+    WWhy no_row;
+    if (!tables_row(w->tables, "LiquidType", (uint32_t)id, &row, &no_row)) { k->type = (int)dbc_u32(row.dbc, row.row, 4); pattern = dbc_text(row.dbc, row.row, 16); }
     if (!pattern || !pattern[0]) fprintf(stderr, "water: liquid kind %d has no pictures in LiquidType.dbc; drawn plain\n", id);
     for (int f = 1; pattern && pattern[0] && f <= MAX_FRAMES; ++f) {
         char name[300];

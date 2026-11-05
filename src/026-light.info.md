@@ -54,7 +54,12 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1):
 
 - `type LightNow`
 - `type LightTables`
-- `WErr light_open(LightTables *t, MpqChain *chain, WWhy *why);`
+- `WErr light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why);`
+  Reads the five light tables, each the first copy a place has (060's
+  asset_read: through `assets` when a resolver is open, else `chain`; the
+  baseline set's are empty, so with no install there is no light anywhere
+  and light_at gives its plain grey day). W_ERR_NOT_FOUND naming one no
+  place has; W_ERR_CORRUPT for tables narrower than 3.3.5a's.
 - `void light_close(LightTables *t);`
 - `int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out);`
   The light at world (x, y, z) on map `map` at `hours` since midnight

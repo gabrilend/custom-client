@@ -14,19 +14,20 @@
 #include <string.h>
 
 /* {{{ light_open, light_close */
-WErr light_open(LightTables *t, MpqChain *chain, WWhy *why)
+WErr light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why)
 {
     memset(t, 0, sizeof *t);
     static const char *const NAMES[5] = { "DBFilesClient\\Light.dbc", "DBFilesClient\\LightIntBand.dbc", "DBFilesClient\\LightFloatBand.dbc",
                                           "DBFilesClient\\LightParams.dbc", "DBFilesClient\\LightSkybox.dbc" };
     Dbc *dbcs[5] = { &t->light, &t->ints, &t->floats, &t->params, &t->skyboxes };
     for (int i = 0; i < 5; ++i) {
-        size_t len;
-        const char *from;
-        t->files[i] = mpq_chain_read(chain, NAMES[i], &len, &from);
+        AssetAnswer a;                                    /* the first place that has it (1109 step 1l: the baseline set's, empty, with no install) */
         WWhy inner;
-        if (!t->files[i]) { w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the client's archives", NAMES[i]); light_close(t); return why->code; }
-        if (dbc_open(dbcs[i], t->files[i], len, &inner)) { w_fail(why, inner.code, "%s: %s", NAMES[i], inner.text); light_close(t); return why->code; }
+        WErr rc = asset_read(assets, chain, NAMES[i], ASSET_TABLE, &a, &inner);
+        if (rc) { w_fail(why, rc, "%s", inner.text); light_close(t); return why->code; }
+        t->files[i] = a.data;
+        t->from[i] = a.source;
+        if (dbc_open(dbcs[i], t->files[i], a.len, &inner)) { w_fail(why, inner.code, "%s: %s", NAMES[i], inner.text); light_close(t); return why->code; }
     }
     if (t->light.fields < 8 || t->ints.fields < 34 || t->floats.fields < 34) {
         w_fail(why, W_ERR_CORRUPT, "the light tables have %u, %u and %u fields; 3.3.5a's have 15, 34 and 34", t->light.fields, t->ints.fields, t->floats.fields);

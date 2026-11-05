@@ -67,6 +67,8 @@
 #include "../src/083-w3i.h"
 #include "../src/084-map-fog.h"
 #include "../src/085-baseline-set.h"
+#include "../src/087-world-start.h"
+#include "../src/088-figure-model.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -4393,16 +4395,16 @@ static void baseline_tests(const char *dir, const char *build, const char *table
     snprintf(set, sizeof set, "%s/assets/baseline", root);
     BaselineMade made;
     e = baseline_set_make(set, gt, mt, &made, &why);
-    snprintf(line, sizeof line, "made: %d grounds (4), %d models (3), %d water frames (%d), %d files (37) and %d entries (41); left out %d buildings (1), %d units (2), %d other (1), %d named twice (2)",
-             made.grounds, made.models, made.water_frames, BASELINE_WATER_FRAMES, made.files, made.entries, made.buildings, made.units, made.other, made.same_path);
-    check(!e && made.grounds == 4 && made.models == 3 && made.water_frames == BASELINE_WATER_FRAMES && made.files == 37 && made.entries == 41
+    snprintf(line, sizeof line, "made: %d grounds (4), %d models (3), %d water frames (%d), %d tables (6), %d files (46: the stand-in figure's 3 among them) and %d entries (50); left out %d buildings (1), %d units (2), %d other (1), %d named twice (2)",
+             made.grounds, made.models, made.water_frames, BASELINE_WATER_FRAMES, made.tables, made.files, made.entries, made.buildings, made.units, made.other, made.same_path);
+    check(!e && made.grounds == 4 && made.models == 3 && made.water_frames == BASELINE_WATER_FRAMES && made.tables == 6 && made.files == 46 && made.entries == 50
           && made.buildings == 1 && made.units == 2 && made.other == 1 && made.same_path == 2, e ? why.text : line);
     PackManifest *pm = NULL;
     snprintf(path, sizeof path, "%s/manifest.lua", set);
     e = pack_manifest_read(path, &pm, &why);
     int hand = 1;
     for (int i = 0; !e && i < pm->count; ++i) hand &= pm->entries[i].route == PACK_ROUTE_HAND && pm->entries[i].lineage == PACK_LINEAGE_INDEPENDENT && !pm->entries[i].nscores;
-    check(!e && pm->count == 41 && hand, e ? why.text : "its manifest reads as a pack's (059): every entry made by hand here, independent of the original, unscored");
+    check(!e && pm->count == 50 && hand, e ? why.text : "its manifest reads as a pack's (059): every entry made by hand here, independent of the original, unscored");
     if (!e) {
         snprintf(line, sizeof line, "every file it lists is there and hashes to its entry's id (%d wrong)", t_baseline_ids(set, pm));
         check(t_baseline_ids(set, pm) == 0, line);
@@ -4414,7 +4416,7 @@ static void baseline_tests(const char *dir, const char *build, const char *table
     snprintf(path, sizeof path, "%s/%s", set, BASELINE_STAND_IN_MODEL);
     check(at_name && !stat(path, &sb), "each picture at its own name, folded; the models share one file pair");
     e = baseline_set_make(set, gt, mt, &made, &why);
-    check(!e && made.entries == 41, e ? why.text : "made again over a set it made: the same");
+    check(!e && made.entries == 50, e ? why.text : "made again over a set it made: the same");
 
     /* refusals */
     snprintf(path, sizeof path, "%s/elsewhere", root);
@@ -4541,6 +4543,39 @@ static void baseline_tests(const char *dir, const char *build, const char *table
             check(table && strstr(table, "blizzard  baseline  placeholder"), "the counts table has a baseline column, between the installs and the placeholder");
             free(table);
             resolver_free(r);
+        }
+        /* a creature whose model only the set answers (its skeleton-less
+         * post): 088 gives the stand-in figure instead, said */
+        {
+            char over[520];
+            snprintf(over, sizeof over, "%s/creature-rows", root);
+            unsigned char dbc[20 + 28 * 4 + 64];
+            uint32_t info[16] = { 7, 3 };
+            float one = 1;
+            memcpy(&info[4], &one, 4);
+            const char lamp[] = "\0World\\Generic\\Human\\Passive Doodads\\Lampposts\\Lamppost.mdx";
+            t_write(over, "DBFilesClient/CreatureDisplayInfo.dbc", dbc, t_dbc(dbc, 1, 16, info, "", 1));
+            uint32_t model[28] = { 3, 0, 1 };
+            t_write(over, "DBFilesClient/CreatureModelData.dbc", dbc, t_dbc(dbc, 1, 28, model, lamp, sizeof lamp));
+            ResolverPlace cp = { .noverlays = 1, .distinctness = 0.5 };
+            snprintf(cp.overlays[0], sizeof cp.overlays[0], "%s", over);
+            snprintf(cp.baseline, sizeof cp.baseline, "%s", set);
+            char *clog = NULL;
+            size_t clog_len = 0;
+            cp.log = open_memstream(&clog, &clog_len);
+            Resolver *cr = NULL;
+            e = resolver_open(&cp, &cr, &why);
+            if (!e) {
+                Tables *ts = tables_new(cr, NULL);
+                FigureModel fm;
+                e = figure_model_for_display(cr, NULL, ts, 7, &fm, &why);
+                check(!e && fm.kind == FIGURE_MODEL_STAND_IN && fm.model.source == ASSET_FROM_BASELINE && strstr(fm.stood_in_for, "only the baseline set's post"),
+                      e ? why.text : "a creature whose model only the set's post answers (no skeleton to stand with): the stand-in figure instead (088), said");
+                if (!e) figure_model_free(&fm);
+                tables_free(ts);
+                resolver_free(cr);
+            } else check(0, why.text);
+            fclose(cp.log); free(clog);
         }
         fclose(place.log); free(log);
 
@@ -4693,6 +4728,306 @@ static void baseline_tests(const char *dir, const char *build, const char *table
         resolver_free(r);
     }
     fclose(place.log); free(log);
+    /* }}} */
+    t_remove_tree(root);
+}
+/* }}} */
+
+/* {{{ a test-map start with no install (087, 088; 1109 step 1l): the
+ * baseline set's tables and stand-in figure, 074's rule for a set's table
+ * of another width, and 043's start, as far as it runs without a window,
+ * on the converted maps with no archives and no server files at all.
+ * Everything is made under DIR/tmp/shared-memory/test-no-install. */
+static void no_install_tests(const char *dir, const char *build, const char *tables)
+{
+    char root[400], line[1200], path[900], set[520], assets[520];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-no-install", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the no-install fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the set's tables */
+    {
+        static const uint32_t WIDTH[] = { 45, 15, 34, 34, 9, 3 };
+        int good = 0, n = 0;
+        for (; BASELINE_TABLES[n]; ++n) {
+            size_t len;
+            unsigned char *s = baseline_table(BASELINE_TABLES[n], &len);
+            Dbc d;
+            if (s && !dbc_open(&d, s, len, &why) && d.fields == WIDTH[n] && d.row_len == WIDTH[n] * 4 && len == 20 + (size_t)d.rows * d.row_len + d.text_len
+                && d.rows == (n == 0 ? 1u : 0u)) ++good;
+            if (n == 0 && s && !dbc_open(&d, s, len, &why))
+                check(dbc_u32(&d, 0, 1) == 1 && !strcmp(dbc_text(&d, 0, 2), "Water") && dbc_u32(&d, 0, 4) == 0 && !strcmp(dbc_text(&d, 0, 16), BASELINE_WATER_PATTERN),
+                      "its LiquidType: one row, 1 \"Water\", type 0, its pictures the set's own run (field 16)");
+            free(s);
+        }
+        size_t len;
+        check(n == 6 && good == 6 && !baseline_table("Map", &len), "six tables as wide as 3.3.5a's (LiquidType 45 fields; Light 15, its bands 34 and 34, LightParams 9, LightSkybox 3, those empty); a table it hasn't: none");
+
+        unsigned char *m2 = baseline_figure_model(&len), *skin;
+        size_t klen;
+        skin = baseline_figure_skin(&klen);
+        M2Model fig;
+        e = m2_read(m2, len, skin, klen, &fig, &why);
+        check(!e && fig.nvertices == 41 && fig.nindices == 72 && fig.nunits == 1 && fig.ntextures == 1 && !strcmp(fig.textures[0].file, BASELINE_FIGURE_PICTURE),
+              e ? why.text : "the stand-in figure is an M2 the model reader takes, with its own picture");
+        if (!e) {
+            float hi = 0, wide = 0;
+            for (uint32_t i = 0; i < fig.nvertices; ++i) { if (fig.vertices[i].z > hi) hi = fig.vertices[i].z; if (fabsf(fig.vertices[i].y) > wide) wide = fabsf(fig.vertices[i].y); }
+            int front = 0;            /* the face whose picture is the blue strip (u under 1/8) faces +x */
+            for (uint32_t i = 0; i < 32; ++i) front += fig.vertices[i].u <= 0.125f + 1e-6f && fig.vertices[i].nx > 0.9f;
+            snprintf(line, sizeof line, "a person's height (%.2f yards), %.2f across, its blue face looking along +x, the way a model faces (%d of its 4 corners)", hi, 2 * wide, front);
+            check(near(hi, 1.8, 1e-5) && wide <= 0.3f && front == 4, line);
+            m2_free(&fig);
+        }
+        Anim an;
+        e = anim_read(m2, len, &an, &why);
+        check(!e && an.nbones == 1 && an.nseqs == 1 && an.seqs[0].id == 0 && anim_find(&an, 0, 0) == 0 && !anim_needs_file(&an, 0) && an.npoints == 41,
+              e ? why.text : "its skeleton reads (023): one bone, one animation, Stand, its moments in the .m2 (no .anim file asked for)");
+        if (!e) {
+            MovesState ms;
+            moves_init(&ms, &an);
+            float poses[1][16], scratch[1][16];
+            moves_advance(&ms, &an, 0.5f);
+            moves_pose(&ms, &an, 500, poses, scratch);
+            int still = 1;
+            for (int k = 0; k < 16; ++k) still &= near(poses[0][k], k % 5 == 0 ? 1 : 0, 1e-6);
+            check(ms.seq == 0 && still, "standing, half a second on: its one bone at rest (030 poses it)");
+            anim_free(&an);
+        }
+        free(m2); free(skin);
+        unsigned char *pic = baseline_figure_picture(&len);
+        BlpImage img = { 0 };
+        e = blp_decode(pic, len, &img, &why);
+        check(!e && img.width == 64 && img.rgba[2] > img.rgba[0] && img.rgba[(32 * 64 + 40) * 4] > img.rgba[(32 * 64 + 40) * 4 + 2],
+              e ? why.text : "its picture: sand, with the set's blue down the face it looks out of");
+        if (!e) blp_free(&img);
+        free(pic);
+    }
+    /* }}} */
+
+    /* {{{ 074: the set's copy of a table, last; of another width, left out */
+    {
+        snprintf(set, sizeof set, "%s/set", root);
+        char over[520];
+        snprintf(over, sizeof over, "%s/overlay", root);
+        /* a set holding LiquidType alone, and an overlay's LiquidType of 45 fields (row 2) */
+        size_t len;
+        unsigned char *liq = baseline_table("LiquidType", &len);
+        char id[65], text[1200];
+        baseline_sha256_hex(liq, len, id);
+        t_write(set, "DBFilesClient/LiquidType.dbc", liq, len);
+        snprintf(text, sizeof text, "return { format = 1, name = 'set', entries = { { replaces = [[DBFilesClient\\LiquidType.dbc]], file = [[DBFilesClient/LiquidType.dbc]], kind = 'table', id = '%s', route = 'hand', lineage = 'independent' } } }\n", id);
+        t_write_text(set, "manifest.lua", text);
+        liq[20] = 2;                                         /* its one row, numbered 2 */
+        t_write(over, "DBFilesClient/LiquidType.dbc", liq, len);
+        ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", over);
+        snprintf(place.baseline, sizeof place.baseline, "%s", set);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            Tables *ts = tables_new(r, NULL);
+            TableRow one, two;
+            WErr e1 = tables_row(ts, "LiquidType", 1, &one, &why), e2 = tables_row(ts, "LiquidType", 2, &two, &why);
+            check(!e1 && !e2 && one.source == ASSET_FROM_BASELINE && two.source == ASSET_FROM_OVERLAY,
+                  "a table per row: the map's own rows first, the set's after them (a row only the set has from the set)");
+            tables_free(ts);
+            resolver_free(r);
+        } else check(0, why.text);
+        fclose(place.log); free(log);
+        /* the overlay's copy 44 fields wide: the set's (45) is left out, said, and the overlay's answers */
+        unsigned char *narrow = calloc(1, 20 + 44 * 4 + 1);
+        memcpy(narrow, "WDBC", 4);
+        narrow[4] = 1; narrow[8] = 44; narrow[12] = 44 * 4; narrow[16] = 1;
+        narrow[20] = 2;
+        t_write(over, "DBFilesClient/LiquidType.dbc", narrow, 20 + 44 * 4 + 1);
+        free(narrow);
+        place.log = open_memstream(&log, &log_len);
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            Tables *ts = tables_new(r, NULL);
+            TableRow two;
+            WErr e2 = tables_row(ts, "LiquidType", 2, &two, &why), e1 = tables_row(ts, "LiquidType", 1, &two, &why);
+            check(!e2 && e1 == W_ERR_NOT_FOUND, "the set's copy of another width than the first: left out (said on the terminal), the places before it still answer");
+            tables_free(ts);
+            resolver_free(r);
+        } else check(0, why.text);
+        fclose(place.log); free(log);
+        free(liq);
+    }
+    /* }}} */
+
+    /* {{{ an ordinary run with no archives still stops, named */
+    {
+        Settings *st = settings_new();
+        WorldStartIn in = { .client = "/nowhere/Data", .maps = "/nowhere/maps", .settings = st, .map_id = 1, .start_x = 2717, .start_y = -400, .log = NULL };
+        WorldStart ws;
+        char *log = NULL;
+        size_t log_len = 0;
+        in.log = open_memstream(&log, &log_len);
+        e = world_start_open(&in, &ws, &why);
+        check(e == W_ERR_NOT_FOUND && strstr(why.text, "no MPQ archives"), "an ordinary run (no test map) with no install: refused, as before, naming the folder");
+        fclose(in.log); free(log);
+        settings_free(st);
+    }
+    /* }}} */
+
+    /* {{{ the converted map's start, with no install and no server files */
+    char rg[700], rm[700], conv_file[700];
+    snprintf(rg, sizeof rg, "%s/ground_textures.lua", tables);
+    snprintf(rm, sizeof rm, "%s/models.lua", tables);
+    snprintf(conv_file, sizeof conv_file, "%s/map.lua", build);
+    struct stat sb;
+    if (stat(rg, &sb) || stat(rm, &sb) || stat(conv_file, &sb)) {
+        printf("  (no converter tables at %s or no converted build at %s: the start with no install is skipped)\n", tables, build);
+        t_remove_tree(root);
+        return;
+    }
+    ConvertedMap m;
+    e = converted_map_read(build, &m, &why);
+    if (e) { check(0, why.text); t_remove_tree(root); return; }
+    snprintf(assets, sizeof assets, "%s/assets", root);
+    snprintf(set, sizeof set, "%.500s/baseline", assets);
+    BaselineMade made;
+    e = baseline_set_make(set, rg, rm, &made, &why);
+    check(!e && made.tables == 6, e ? why.text : "the baseline set made from the converter's tables, with its tables and stand-in figure");
+    snprintf(path, sizeof path, "%s/receipt", root);
+    TestMap *tm = NULL;
+    e = t_parse("pw", &tm, &why, "--test-map", build, "--receipt", path, NULL);
+    Settings *st = settings_new();
+    char *log = NULL;
+    size_t log_len = 0;
+    FILE *lf = open_memstream(&log, &log_len);
+    WorldStartIn in = { .client = "/nowhere/Data", .maps = "/nowhere/server-data/maps", .assets_dir = assets, .settings = st, .test_map = tm,
+                        .conv = &m, .map_id = m.id, .start_x = m.start_x, .start_y = m.start_y, .log = lf };
+    WorldStart ws;
+    e = e ? e : world_start_open(&in, &ws, &why);
+    fflush(lf);
+    snprintf(line, sizeof line, "043's start (087) with no install and no server files: map %d's folder %s from its own Map row, its heights from its own ground files, the ground at the start %.3f yards (map.lua %.3f), the steepest walkable %.0f degrees (%s)",
+             m.id, e ? "?" : ws.map_name, e ? 0.0 : ws.z, m.has_z ? m.start_z : 0.0, e ? 0.0 : ws.max_slope, e ? "?" : ws.slope_from);
+    check(!e && !ws.install && ws.assets && resolver_baseline(ws.assets) && !strcasecmp(ws.map_name, m.directory) && ws.adt_heights
+          && (!m.has_z || near(ws.z, m.start_z, 0.5)) && ws.max_slope == WORLD_START_SLOPE && strstr(log, "no WoW install"), e ? why.text : line);
+    if (!e) {
+        /* the light: the set's empty tables, so the plain grey day */
+        LightTables lights;
+        e = light_open(&lights, ws.assets, &ws.chain, &why);
+        LightNow now;
+        int lid = e ? 0 : light_at(&lights, m.id, (float)m.start_x, (float)m.start_y, ws.z, 12, LIGHT_CLEAR, &now);
+        check(!e && lights.from[0] == ASSET_FROM_BASELINE && lights.from[4] == ASSET_FROM_BASELINE && lid < 0,
+              e ? why.text : "the light tables (026) from the set, empty: no light, so 043's plain grey day");
+        if (!e) light_close(&lights);
+        /* the water: LiquidType's water row from the set, naming frames the set has */
+        TableRow lr;
+        e = tables_row(ws.tables, "LiquidType", 1, &lr, &why);
+        int frames = 0;
+        for (int f = 1; !e && f <= BASELINE_WATER_FRAMES + 1; ++f) {
+            char frame[200];
+            AssetAnswer a;
+            snprintf(frame, sizeof frame, dbc_text(lr.dbc, lr.row, 16), f);
+            if (!asset_read(ws.assets, &ws.chain, frame, ASSET_TEXTURE, &a, &why)) { ++frames; asset_answer_free(&a); }
+        }
+        snprintf(line, sizeof line, "the water (040): LiquidType 1 from the set (through the tables, per row), its run of %d frames found and no more", frames);
+        check(!e && lr.source == ASSET_FROM_BASELINE && frames == BASELINE_WATER_FRAMES, e ? why.text : line);
+        /* her: no character can be made (CharStartOutfit is the game's), so the stand-in */
+        int outfit[SLOT_COUNT] = { 0 };
+        e = character_start_outfit(&ws.chain, 4, 3, 1, outfit, &why);
+        check(e == W_ERR_NOT_FOUND && strstr(why.text, "CharStartOutfit"), "her character can't be made with no install (025 needs CharStartOutfit and the game's models)");
+        FigureModel her;
+        e = figure_model_stand_in(ws.assets, &ws.chain, "her", &her, &why);
+        Anim an = { 0 };
+        WErr ae = e ? e : anim_read(her.model.data, her.model.len, &an, &why);
+        check(!ae && her.kind == FIGURE_MODEL_STAND_IN && her.model.source == ASSET_FROM_BASELINE && !strcmp(her.base, "Baseline\\StandInFigure") && anim_find(&an, 0, 0) == 0,
+              ae ? why.text : "so the set's stand-in figure stands in her place, its skeleton and Stand read from it (043: figure_stand_in)");
+        if (!ae) anim_free(&an);
+        if (!e) figure_model_free(&her);
+        /* the creatures: every display the creature list names */
+        SpawnList sl = { 0 };
+        snprintf(path, sizeof path, "%s/%s", build, m.creatures[0] ? m.creatures : "world/creatures.tsv");
+        e = creatures_read(path, &sl, &why);
+        int looks = 0, wc3 = 0, game = 0, stood = 0, human = 0, bad = 0, readable = 0, spawns_shown = 0;
+        int seen[512], nseen = 0;
+        char first_bad[300] = "";
+        for (int i = 0; !e && i < sl.n; ++i) {
+            int known = 0;
+            for (int q = 0; q < nseen && !known; ++q) known = seen[q] == sl.spawns[i].display;
+            if (known) { ++spawns_shown; continue; }
+            if (nseen < 512) seen[nseen++] = sl.spawns[i].display;
+            ++looks;
+            FigureModel fm;
+            if (figure_model_for_display(ws.assets, &ws.chain, ws.tables, sl.spawns[i].display, &fm, &why)) { ++bad; if (!first_bad[0]) snprintf(first_bad, sizeof first_bad, "%.290s", why.text); continue; }
+            ++spawns_shown;
+            if (fm.kind == FIGURE_MODEL_WC3) {
+                ++wc3;
+                MdxModel x;
+                if (!mdx_read(fm.model.data, fm.model.len, &x, &why)) { ++readable; mdx_free(&x); }
+            } else if (fm.kind == FIGURE_MODEL_HUMANOID) ++human;
+            else {
+                fm.kind == FIGURE_MODEL_STAND_IN ? ++stood : ++game;
+                M2Model mm;
+                Anim a2;
+                int ok = 0;
+                if (!m2_read(fm.model.data, fm.model.len, fm.skin.data, fm.skin.len, &mm, &why)) {
+                    if (!anim_read(fm.model.data, fm.model.len, &a2, &why)) { ok = 1; anim_free(&a2); }
+                    m2_free(&mm);
+                }
+                if (ok) ++readable;
+                else if (!first_bad[0]) snprintf(first_bad, sizeof first_bad, "%.120s: %.160s", fm.named, why.text);
+            }
+            figure_model_free(&fm);
+        }
+        snprintf(line, sizeof line, "its %d creatures' %d looks (088, as 041 asks): %d its own WC3 models, %d the game's, %d the stand-in figure, %d character looks; %d unreadable, %d with no model%s%s",
+                 sl.n, looks, wc3, game, stood, human, looks - bad - readable - human, bad, first_bad[0] ? ": " : "", first_bad);
+        if (!e && sl.n == 0) printf("  (its creature list is empty: a map with no units; the creatures' check is skipped)\n");
+        else check(!e && looks > 0 && bad == 0 && readable + human == looks && spawns_shown == sl.n, e ? why.text : line);
+        creatures_free(&sl);
+        /* its own fog, and no WC3 install: the converter's ground pictures stay (said, not a failure) */
+        W3iInfo info;
+        WErr fe = map_w3i_read(ws.assets, &ws.chain, &info, &why);
+        Wc3Ground *g = NULL;
+        WErr ge = wc3_ground_open(ws.assets, &ws.chain, m.wc3_scale, m.wc3_x0, m.wc3_y0, &g, &why);
+        check((fe == W_OK || fe == W_ERR_NOT_FOUND) && ge == W_ERR_NOT_FOUND && !g, "its war3map.w3i read (084) and, with no WC3 install, WC3's ground not found: the converter's pictures stay (043 says so and goes on)");
+        if (g) wc3_ground_free(g);
+        /* the ground at the start: its tile prepared, every picture it needs the set's (no checker) */
+        int tx, ty;
+        maps_tile_of((float)m.start_x, (float)m.start_y, &tx, &ty);
+        GroundPlace gp;
+        GroundPrep *gpr = NULL;
+        e = ground_place_init(&gp, &ws.chain, ws.assets, ws.map_name, &ws.world, floor(m.start_x), floor(m.start_y), &why);
+        if (!e) e = ground_prep_tile(&gp, tx, ty, NULL, NULL, &gpr, &why);
+        int need = 0, checkers = 0;
+        for (int k = 0; !e && k < gpr->adt->ntextures; ++k) {
+            if (!gpr->needed[k]) continue;
+            ++need;
+            if (gpr->pixels[k].rgba && gpr->pixels[k].width == 8 && gpr->pixels[k].rgba[0] == 255 && gpr->pixels[k].rgba[1] == 0) ++checkers;
+        }
+        snprintf(line, sizeof line, "the ground under her (tile %d, %d) prepared (033): %d pictures, %d of them the checker", tx, ty, need, checkers);
+        check(!e && need > 0 && checkers == 0, e ? why.text : line);
+        if (gpr) ground_prep_free(gpr, 0);
+        world_start_close(&ws);
+    }
+    /* with no install and no baseline set: the start opens on the map's own files, and the light is what stops */
+    if (tm) {
+        settings_set(st, "assetBaseline", "", &why);
+        fclose(lf); free(log); log = NULL;
+        lf = open_memstream(&log, &log_len);
+        in.log = lf;
+        e = world_start_open(&in, &ws, &why);
+        fflush(lf);
+        LightTables lights;
+        WErr le = e ? e : light_open(&lights, ws.assets, &ws.chain, &why);
+        check(!e && strstr(log, "no install and no baseline set") && le == W_ERR_NOT_FOUND && strstr(why.text, "Light.dbc"),
+              "with no install and no baseline set, the start opens on the map's own files, then the light tables stop it, named");
+        if (!le) light_close(&lights);
+        if (!e) world_start_close(&ws);
+    }
+    fclose(lf); free(log);
+    settings_free(st);
+    test_map_free(tm);
     /* }}} */
     t_remove_tree(root);
 }
@@ -4891,6 +5226,18 @@ int main(int argc, char **argv)
         if (argc > 5 && strcmp(argv[5], "-")) snprintf(tables, sizeof tables, "%s", argv[5]);
         else snprintf(tables, sizeof tables, "%s", "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/src/wowbuild");
         baseline_tests(dir, build, tables);
+    }
+    /* }}} */
+
+    /* {{{ a test-map start with no install (087, 088; 1109 step 1l): no game data, so before the archives */
+    printf("a test-map start with no install\n");
+    {
+        char build[700], tables[700];
+        if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        if (argc > 5 && strcmp(argv[5], "-")) snprintf(tables, sizeof tables, "%s", argv[5]);
+        else snprintf(tables, sizeof tables, "%s", "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/src/wowbuild");
+        no_install_tests(dir, build, tables);
     }
     /* }}} */
 
@@ -6140,7 +6487,7 @@ particles_done:
     {
         MpqChain lc;
         LightTables lt;
-        if (mpq_chain_open(&lc, client, "enUS", &why) || light_open(&lt, &lc, &why)) { check(0, why.text); goto light_done; }
+        if (mpq_chain_open(&lc, client, "enUS", &why) || light_open(&lt, NULL, &lc, &why)) { check(0, why.text); goto light_done; }
         LightNow noon, night, far;
         int id = light_at(&lt, 1, 2717, -400, 110, 12, LIGHT_CLEAR, &noon);
         light_at(&lt, 1, 2717, -400, 110, 0.5f, LIGHT_CLEAR, &night);

@@ -23,7 +23,11 @@
  * A table's copies must agree on its width (fields a row): a copy of
  * another width was written for another client build, and reading its
  * columns as this one's would misread every row, so it is refused,
- * naming both widths (106's acceptance).
+ * naming both widths (106's acceptance). The one exception is the
+ * baseline set's copy (always the last): its widths are recalled, not
+ * read from a client, so one that differs from the first copy's is left
+ * out, said on the terminal, and the places before it answer (1109 step
+ * 1l, decision 91).
  *
  * Window-free: in the test program and the executable.
  */
@@ -64,7 +68,7 @@ typedef struct {
  *   W_ERR_NOT_FOUND  no copy has that row, or no place has the table
  *                    (`why` says which, naming the table and the id)
  *   W_ERR_CORRUPT    a copy that isn't a table (dbc_open's sentence, with its place)
- *   W_ERR_REFUSED    copies of different widths, or a name too long
+ *   W_ERR_REFUSED    copies of different widths (the baseline set's aside), or a name too long
  * A table that failed fails the same way each time it is asked. */
 WErr tables_row(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *why);
 

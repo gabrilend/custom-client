@@ -117,9 +117,11 @@ Not built yet:
   them is found and another isn't). A box stands in as a magenta
   wire-frame (step 4's wire-frames, for doodads; a missing building is
   the box at the size its placement gives). Still reading the archives
-  directly (`mpq_chain_read`): 034's prefetch and 041's pictures and
-  models for the game's own creatures; each is the next slice (040's
-  water pictures ask it since 1109's step 1k, through `asset_read`).
+  directly (`mpq_chain_read`): 034's prefetch and 025's character
+  tables; each is the next slice (040's water pictures ask it since
+  1109's step 1k, through `asset_read`; 041's models, views, `.anim`
+  files and pictures, 026's light tables and 040's `LiquidType`, per
+  row through 074, since step 1l).
   Since 1109's step 1k (2026-11-05) the **baseline set** is the fifth
   place, after the Blizzard installs and before the placeholder: a
   folder laid out as a pack, named by the setting `assetBaseline`
@@ -164,7 +166,8 @@ delivered assets added as the second place, from docs/012):
 4. **The MPQ chain** ([105](./105-mpq-reader.md)), then the player's
    Warcraft III install (`assetWc3`, 1109's decision 32).
 5. **The baseline set** (`assetBaseline`, 1109's decisions 81 to 88):
-   the project's own stand-ins, laid out as a pack (added 2026-11-05).
+   the project's own stand-ins, laid out as a pack (added 2026-11-05;
+   its tables and stand-in figure since step 1l, decisions 89 to 97).
 6. **Placeholder**, chosen by kind: magenta checker texture, box model
    (drawn as a wireframe by whoever draws it), short beep. A warning
    each time (named, counted); an error when `assetsStrict` is on.

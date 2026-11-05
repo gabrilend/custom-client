@@ -6,6 +6,7 @@
  * its animation and draws it.
  */
 #include "041-figure.h"
+#include "088-figure-model.h"
 #include "013-errors.h"
 #include "017-blp.h"
 #include "016-dbc.h"
@@ -140,9 +141,10 @@ static WErr load_picture_from(Figures *fs, const char *name, int wc3, Texture2D 
         if (rc) return rc;
         s = a.data; len = a.len;                         /* the answer's bytes, freed below */
     } else {
-        const char *from;
-        s = mpq_chain_read(fs->chain, name, &len, &from);
-        if (!s) { w_fail(why, W_ERR_NOT_FOUND, "the picture %.200s is in none of the client's archives", name); return why->code; }
+        AssetAnswer a;                                   /* the first place that has it, never a placeholder (1109 step 1l) */
+        WErr rc = asset_read(fs->assets, fs->chain, name, ASSET_TEXTURE, &a, why);
+        if (rc) return rc;
+        s = a.data; len = a.len;
     }
     WWhy inner;
     int bad = texture_from_blp(fs->textures, s, len, out, &inner);   /* sent compressed when stored so (173u) */
@@ -223,24 +225,20 @@ static WErr build(Figure *f, Figures *fs, const M2Model *mod, const uint8_t *sho
     }
     /* the skeleton, and any animation kept in a .anim file */
     char path[300];
-    size_t len;
-    const char *from;
-    if (base) {
+    if (base) {                                          /* through the resolver when one is open (1109 step 1l) */
         snprintf(path, sizeof path, "%s.m2", base);
-        unsigned char *m2 = mpq_chain_read(fs->chain, path, &len, &from);
+        AssetAnswer m2;
         WWhy inner;
-        if (!m2 || anim_read(m2, len, &f->anim, &inner)) {
-            w_fail(why, m2 ? inner.code : W_ERR_NOT_FOUND, "%s's skeleton (%s): %s", f->name, path, m2 ? inner.text : "not in the archives");
-            free(m2);
-            return why->code;
-        }
-        free(m2);
+        WErr rc = asset_read(fs->assets, fs->chain, path, ASSET_MODEL, &m2, &inner);
+        if (!rc && anim_read(m2.data, m2.len, &f->anim, &inner)) rc = inner.code;
+        asset_answer_free(&m2);
+        if (rc) { w_fail(why, rc, "%s's skeleton (%s): %s", f->name, path, inner.text); return why->code; }
         for (int i = 0; i < f->anim.nseqs; ++i) {
             if (!anim_needs_file(&f->anim, i)) continue;
             snprintf(path, sizeof path, "%s%04d-%02d.anim", base, f->anim.seqs[i].id, f->anim.seqs[i].variation);
-            unsigned char *a = mpq_chain_read(fs->chain, path, &len, &from);
-            if (!a) { fprintf(stderr, "%s: %s is in none of the archives; that animation leaves it at rest\n", f->name, path); continue; }
-            anim_attach_file(&f->anim, i, a, len);
+            AssetAnswer a;
+            if (asset_read(fs->assets, fs->chain, path, ASSET_ANIMATION, &a, &inner)) { fprintf(stderr, "%s: %s is in no place; that animation leaves it at rest\n", f->name, path); continue; }
+            anim_attach_file(&f->anim, i, a.data, a.len);   /* taken by the skeleton */
         }
     }
     if (f->anim.npoints != f->nrest) {
@@ -362,16 +360,14 @@ WErr figure_from_item(Figures *fs, Figure *f, const char *model, const char *pic
     char *dot = strrchr(base, '.');
     if (dot) *dot = '\0';
     snprintf(f->name, sizeof f->name, "%.63s", strrchr(base, '\\') ? strrchr(base, '\\') + 1 : base);
-    size_t mlen, slen;
-    const char *from;
+    AssetAnswer m2 = { 0 }, skin = { 0 };               /* through the resolver when one is open (1109 step 1l) */
     snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(fs->chain, path, &mlen, &from);
-    snprintf(path, sizeof path, "%s00.skin", base);
-    unsigned char *skin = mpq_chain_read(fs->chain, path, &slen, &from);
-    if (!m2 || !skin) { w_fail(why, W_ERR_NOT_FOUND, "%.200s is in none of the archives", !m2 ? model : path); free(m2); free(skin); return why->code; }
+    WErr rc = asset_read(fs->assets, fs->chain, path, ASSET_MODEL, &m2, &inner);
+    if (!rc) { snprintf(path, sizeof path, "%s00.skin", base); rc = asset_read(fs->assets, fs->chain, path, ASSET_MODEL, &skin, &inner); }
+    if (rc) { w_fail(why, rc, "%.250s", inner.text); asset_answer_free(&m2); return why->code; }
     M2Model mod;
-    int bad = m2_read(m2, mlen, skin, slen, &mod, &inner);
-    free(m2); free(skin);
+    int bad = m2_read(m2.data, m2.len, skin.data, skin.len, &mod, &inner);
+    asset_answer_free(&m2); asset_answer_free(&skin);
     if (bad) { w_fail(why, inner.code, "%.100s: %.200s", f->name, inner.text); return why->code; }
     Texture2D pics[64] = { 0 };
     for (uint32_t t = 0; t < mod.ntextures && t < 64; ++t) {
@@ -431,12 +427,43 @@ static WErr row(Figures *fs, int display_id, const char *table, uint32_t id, Tab
 }
 /* }}} */
 
+/* {{{ static from_model: a game model's (or the stand-in's) files, found
+ * by 088: its pictures (kind 0 named inside it, 11 to 13 the display's
+ * skins in its folder), its pieces (the body group and every other
+ * group's first variant) and its skeleton from base.m2 */
+static WErr from_model(Figures *fs, Figure *f, const FigureModel *fm, WWhy *why)
+{
+    M2Model mod;
+    WWhy inner;
+    if (m2_read(fm->model.data, fm->model.len, fm->skin.data, fm->skin.len, &mod, &inner)) { w_fail(why, inner.code, "%s: %s", f->name, inner.text); return why->code; }
+    char path[300];
+    Texture2D pics[64] = { 0 };
+    for (uint32_t t = 0; t < mod.ntextures && t < 64; ++t) {
+        uint32_t kind = mod.textures[t].kind;
+        if (kind == 0 && mod.textures[t].file[0]) snprintf(path, sizeof path, "%s", mod.textures[t].file);
+        else if (kind >= 11 && kind <= 13 && fm->skins[kind - 11][0]) snprintf(path, sizeof path, "%s%s.blp", fm->folder, fm->skins[kind - 11]);
+        else continue;                                     /* a slot this display doesn't fill */
+        if (load_picture(fs, path, &pics[t], &inner)) {
+            w_fail(why, inner.code, "%s: %s", f->name, inner.text);
+            m2_free(&mod);
+            return why->code;
+        }
+    }
+    uint8_t *shown = calloc(mod.npieces ? mod.npieces : 1, 1);
+    for (uint32_t i = 0; i < mod.npieces; ++i) shown[i] = mod.pieces[i].id < 100 || mod.pieces[i].id % 100 == 1;
+    WErr bad = build(f, fs, &mod, shown, pics, fm->base, why);
+    free(shown);
+    m2_free(&mod);
+    return bad;
+}
+/* }}} */
+
 WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
 {
     memset(f, 0, sizeof *f);
-    TableRow di, md;
+    TableRow di;
     if (row(fs, display_id, "CreatureDisplayInfo", (uint32_t)display_id, &di, why)) return why->code;
-    uint32_t model_id = dbc_u32(di.dbc, di.row, 2), scale_bits = dbc_u32(di.dbc, di.row, 5), extra = dbc_u32(di.dbc, di.row, 4);
+    uint32_t scale_bits = dbc_u32(di.dbc, di.row, 5), extra = dbc_u32(di.dbc, di.row, 4);
     float scale;
     memcpy(&scale, &scale_bits, 4);
     if (!(scale > 0.01f && scale < 100)) scale = 1;
@@ -463,6 +490,16 @@ WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
         const char *bake = dbc_text(x, e, 21);
         if (bake && bake[0]) snprintf(baked, sizeof baked, "Textures\\BakedNpcTextures\\%.200s", bake);
         int bad = from_character(f, fs, &look, baked[0] ? baked : NULL, why);
+        if (bad && fs->assets) {                         /* no character to be made (a test map with no install): the stand-in, said (1109 step 1l) */
+            WWhy none;
+            char name[64];
+            snprintf(name, sizeof name, "display %d (a stand-in)", display_id);
+            if (!figure_stand_in(fs, f, name, &none)) {
+                fprintf(stderr, "creatures: display %d, a character look: %s; the baseline set's stand-in figure stands in\n", display_id, why->text);
+                f->scale = scale;
+                return W_OK;
+            }
+        }
         if (!bad) {
             char model_name[64];
             snprintf(model_name, sizeof model_name, "%s", f->name);
@@ -472,68 +509,32 @@ WErr figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why)
         return bad;
     }
     f->scale = scale;
-    char skins[3][128];
-    for (int k = 0; k < 3; ++k) snprintf(skins[k], sizeof skins[k], "%s", dbc_text(di.dbc, di.row, 7 + (uint32_t)k));
-    if (row(fs, display_id, "CreatureModelData", model_id, &md, why)) return why->code;
-    char named[260], base[260];
-    snprintf(named, sizeof named, "%s", dbc_text(md.dbc, md.row, 3));
-    if (!named[0]) { w_fail(why, W_ERR_NOT_FOUND, "display %d names model %u, whose CreatureModelData row has no path", display_id, model_id); return why->code; }
-    snprintf(base, sizeof base, "%s", named);
-    char *dot = strrchr(base, '.');
-    if (dot) *dot = '\0';
-    char folder[260];
-    snprintf(folder, sizeof folder, "%s", base);
-    char *cut = strrchr(folder, '\\');
-    if (cut) cut[1] = '\0'; else folder[0] = '\0';
-    snprintf(f->name, sizeof f->name, "display %d (%.40s)", display_id, cut ? base + (cut - folder) + 1 : base);
-
-    /* a .mdx named as it is: a WC3 model a converted map brought (W02c
-     * names a map's own model so; the game's own rows say .mdx too, but
-     * the archives hold only the .m2). Asked for as named, with no
-     * placeholder: a WC3 model (MDLX) found goes to 061's reader; anything
-     * else, the game's .m2 beside the name, as before. */
-    size_t nlen = strlen(named);
-    if (nlen > 4 && !strcasecmp(named + nlen - 4, ".mdx")) {
-        AssetAnswer a;
-        WWhy inner;
-        if (asset_read(fs->assets, fs->chain, named, ASSET_MODEL, &a, &inner) == W_OK) {
-            int wc3 = a.len >= 4 && !memcmp(a.data, "MDLX", 4);
-            WErr bad = wc3 ? from_wc3(fs, f, a.data, a.len, scale, why) : W_OK;
-            asset_answer_free(&a);
-            if (wc3) return bad;
-        }
+    FigureModel fm;
+    if (figure_model_for_display(fs->assets, fs->chain, fs->tables, display_id, &fm, why)) return why->code;
+    const char *leaf = strrchr(fm.named, '\\') ? strrchr(fm.named, '\\') + 1 : fm.named;
+    snprintf(f->name, sizeof f->name, "display %d (%.40s)", display_id, leaf);
+    if (fm.kind == FIGURE_MODEL_WC3) {
+        WErr bad = from_wc3(fs, f, fm.model.data, fm.model.len, scale, why);
+        figure_model_free(&fm);
+        return bad;
     }
-    char path[300];
-    size_t mlen, slen;
-    const char *from;
-    snprintf(path, sizeof path, "%s.m2", base);
-    unsigned char *m2 = mpq_chain_read(fs->chain, path, &mlen, &from);
-    snprintf(path, sizeof path, "%s00.skin", base);
-    unsigned char *skin = mpq_chain_read(fs->chain, path, &slen, &from);
-    if (!m2 || !skin) { w_fail(why, W_ERR_NOT_FOUND, "%s: its %s is in none of the archives", f->name, !m2 ? ".m2" : "00.skin"); free(m2); free(skin); return why->code; }
-    M2Model mod;
-    WWhy inner;
-    int bad = m2_read(m2, mlen, skin, slen, &mod, &inner);
-    free(m2); free(skin);
-    if (bad) { w_fail(why, inner.code, "%s: %s", f->name, inner.text); return why->code; }
+    if (fm.kind == FIGURE_MODEL_STAND_IN) fprintf(stderr, "creatures: %s; the baseline set's stand-in figure stands in\n", fm.stood_in_for);
+    WErr bad = from_model(fs, f, &fm, why);
+    figure_model_free(&fm);
+    return bad;
+}
+/* }}} */
 
-    Texture2D pics[64] = { 0 };
-    for (uint32_t t = 0; t < mod.ntextures && t < 64; ++t) {
-        uint32_t kind = mod.textures[t].kind;
-        if (kind == 0 && mod.textures[t].file[0]) snprintf(path, sizeof path, "%s", mod.textures[t].file);
-        else if (kind >= 11 && kind <= 13 && skins[kind - 11][0]) snprintf(path, sizeof path, "%s%s.blp", folder, skins[kind - 11]);
-        else continue;                                     /* a slot this display doesn't fill */
-        if (load_picture(fs, path, &pics[t], &inner)) {
-            w_fail(why, inner.code, "%s: %s", f->name, inner.text);
-            m2_free(&mod);
-            return why->code;
-        }
-    }
-    uint8_t *shown = calloc(mod.npieces ? mod.npieces : 1, 1);
-    for (uint32_t i = 0; i < mod.npieces; ++i) shown[i] = mod.pieces[i].id < 100 || mod.pieces[i].id % 100 == 1;
-    bad = build(f, fs, &mod, shown, pics, base, why);
-    free(shown);
-    m2_free(&mod);
+/* {{{ figure_stand_in */
+WErr figure_stand_in(Figures *fs, Figure *f, const char *name, WWhy *why)
+{
+    memset(f, 0, sizeof *f);
+    f->scale = 1;
+    snprintf(f->name, sizeof f->name, "%.63s", name && name[0] ? name : "the stand-in figure");
+    FigureModel fm;
+    if (figure_model_stand_in(fs->assets, fs->chain, NULL, &fm, why)) return why->code;
+    WErr bad = from_model(fs, f, &fm, why);
+    figure_model_free(&fm);
     return bad;
 }
 /* }}} */

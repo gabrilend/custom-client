@@ -54,6 +54,7 @@
 
 #include "016-dbc.h"
 #include "015-mpq.h"
+#include "060-resolver.h"
 
 typedef struct {
     float sun[3], shade[3];
@@ -68,10 +69,16 @@ typedef struct {
 
 typedef struct {
     unsigned char *files[5];          /* the tables' bytes, kept while open */
+    AssetSource    from[5];           /* where each came from (060): Light, LightIntBand, LightFloatBand, LightParams, LightSkybox */
     Dbc light, ints, floats, params, skyboxes;
 } LightTables;
 
-WErr  light_open(LightTables *t, MpqChain *chain, WWhy *why);
+/* Reads the five light tables, each the first copy a place has (060's
+ * asset_read: through `assets` when a resolver is open, else `chain`; the
+ * baseline set's are empty, so with no install there is no light anywhere
+ * and light_at gives its plain grey day). W_ERR_NOT_FOUND naming one no
+ * place has; W_ERR_CORRUPT for tables narrower than 3.3.5a's. */
+WErr  light_open(LightTables *t, Resolver *assets, MpqChain *chain, WWhy *why);
 void light_close(LightTables *t);
 
 /* Which of a light's parameter sets is used (Light's fields 8 on). */

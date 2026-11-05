@@ -30,6 +30,13 @@
  *     that row's race, choices and clothes, wearing its baked skin sheet
  *     (173t);
  *   any model: pictures of kind 0 are named inside the model.
+ *
+ * Every file comes through the resolver when one is open (a test-map
+ * run: 060's places, the baseline set among them), else the archives
+ * (1109 step 1l; which model a display means is 088-figure-model.h's).
+ * A creature whose model no place has, or a humanoid that can't be made
+ * (no install), is the baseline set's stand-in figure when the set is
+ * there, said; else left out, as before.
  */
 #ifndef EG_FIGURE_H
 #define EG_FIGURE_H
@@ -97,6 +104,12 @@ typedef struct Figure {
 
 WErr  figure_from_character(Figures *fs, Figure *f, const CharacterLook *look, WWhy *why);
 WErr  figure_from_display(Figures *fs, Figure *f, int display_id, WWhy *why);
+/* The baseline set's stand-in figure (088, 085: a column a person's
+ * height, one still bone, Stand), named `name` in messages: the player's
+ * in a test map whose character can't be made (no install), and a
+ * creature's whose model no place has (figure_from_display uses it then,
+ * said). W_ERR_NOT_FOUND when no place has it (no resolver, or no set). */
+WErr  figure_stand_in(Figures *fs, Figure *f, const char *name, WWhy *why);
 
 /* An item's model (a helm, a shoulder, a weapon), its pictures named
  * inside it or the item's own picture (kind 2); hung on a character

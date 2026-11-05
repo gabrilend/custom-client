@@ -785,15 +785,84 @@ Not checked here: the water frames' names against a 3.3.5a client
 (recalled: decision 86), the set drawn in a window, and a run with no
 WoW install, which still stops at the start: the client's tables
 (`LiquidType`, `Light`, `Map` ...), her model and the creatures come
-from the archives (decision 88).
+from the archives (decision 88; since step 1l, it starts).
+
+**Step 1l is built** (2026-11-05, the same background work): a
+test-map run starts with no WoW install at all. Decisions 89 to 97.
+
+- **The start, out of the window (087):** what 043 did before its
+  window opens (the archives, the resolver, the tables, the map's row,
+  its heights, her start height and the steepest walkable slope) is
+  now `world_start_open`, so the test program runs it as 043 does. In
+  a test map, no archives in the client's folder is said ("no WoW
+  install: ...") and the start goes on with an empty chain, the map's
+  own folder and the baseline set answering; an ordinary run still
+  stops, naming the folder (decision 89). No server navigation tiles:
+  the server's rule, 60 degrees, as its tiles for Kalimdor hold it
+  (decision 92).
+- **The tables a start needs, from the set (085, 074, 026, 040):** the
+  set now holds `LiquidType` (one row, 1 "Water", its frames the set's
+  own run) and `Light`, `LightIntBand`, `LightFloatBand`,
+  `LightParams` and `LightSkybox`, each as wide as 3.3.5a's and empty
+  (decision 90). 026 reads its tables through the resolver (the first
+  copy whole: no light, so 043's plain grey day); 040 reads
+  `LiquidType` per row through 074, the map's own rows first; a set's
+  copy of another width than the first is left out, said, never a
+  refusal (decision 91). `Map`, `AreaTable`, `CreatureDisplayInfo`,
+  `CreatureModelData`, `Faction`, `FactionTemplate` and
+  `LoadingScreens` already come from the map's own folder.
+- **Her and the creatures (085, 088, 041, 043):** the set holds a
+  stand-in figure, `Baseline\StandInFigure.m2`, an eight-sided sand
+  column a person's height with a blue face looking the way a model
+  faces, one still bone and one animation, Stand (decision 93). 088
+  says which files a creature's display row means (the map's own WC3
+  model, the game's `.m2` and view, a character look, or the stand-in
+  where no place has the model, or only the set's skeleton-less post
+  does); 041 builds from it and reads every file (models, `.anim`
+  files, pictures, an item's model) through the resolver (decision 94).
+  Her character needs `CharStartOutfit`, `CharSections` and the game's
+  models, so in a test map with none the stand-in stands in her place,
+  said, and stands while she moves (Stand only).
+- **`scripts/run`:** a test map with no server map folder or no
+  `common.MPQ` is a note, not an error (decision 96).
+
+Checked (`tests/044-test-client.c`, "a test-map start with no install",
+after the baseline set, before the archives): the set's six tables'
+widths and `LiquidType`'s row; the figure read by 022 (41 points, 72
+indices, its picture), 1.8 yards high, its blue face along +x, its
+skeleton read by 023 with no `.anim` asked for and posed still by 030,
+its picture's colours; 074 per row (the map's row, then a row only the
+set has) and a set's copy of another width left out; a creature whose
+model only the set's post answers given the figure; an ordinary run
+with no install refused. With the converter's real tables and builds,
+and no install, no server files (`/nowhere`):
+
+- **War in the Plaguelands:** 087 opens map 900 on its folder from its
+  own `Map` row, its heights from its own ground files, the start at
+  -0.659 yards (map.lua -0.659), 60 degrees; the light tables empty;
+  `LiquidType` 1 and its 30 frames from the set; her character not
+  made (`CharStartOutfit`), the stand-in read in her place; its
+  `war3map.w3i` read, WC3's ground not found; the start tile's 17
+  pictures prepared, none the checker. It has no creatures.
+- **Master Crafters:** the same (start 4.167 yards, 10 pictures), and
+  its 316 creatures' 19 looks: 1 its own WC3 model, 18 the stand-in
+  figure, all readable.
+- With no set as well, the start opens on the map's own files and
+  stops at the light tables, named.
+
+No memory errors under the address and undefined-behaviour checkers;
+043 and the drawing parts compile under gcc and clang with warnings as
+errors. Not checked here: the window, so nothing drawn (the figure
+uploaded, the grey day, the ground), and a whole run under
+`scripts/run`; what still needs an install is decision 97.
 
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
 its replaceable pictures are left off); 034's prefetch and
-041's game models through the resolver (they read the archives alone);
-the baseline set's buildings, creatures, WC3 stock art and tables (the
-smallest set has none: decision 88), and the asset forge's real set;
+the baseline set's buildings, creatures' own looks, her character, WC3
+stock art and the rest of the client's tables (decisions 88, 97), and
+the asset forge's real set;
 a missing table row as a placeholder (106 wants one: still an error
 naming the table and row); logging in, and the `lost-connection` ending
 (Phase 5's 609).
@@ -952,6 +1021,10 @@ return {
    `assetBaseline`), 040's water through the resolver, 085 and
    `make-baseline` (086) making it from the converter's tables
    (decisions 81 to 88).
+1l. ~~A test-map run with no WoW install.~~ Done (2026-11-05): 087
+   the start out of the window, 085's tables and stand-in figure, 088
+   and 041 finding a creature's model through the resolver, 026 and 040
+   reading their tables through it (decisions 89 to 97).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1569,7 +1642,82 @@ return {
     install still stops at the start; buildings, WC3's stock pictures
     and models (named by a map's own WC3 models), sounds and the
     interface stay placeholders without an install. Each is the asset
-    forge's, or a later step's.
+    forge's, or a later step's. (Since step 1l the tables a start needs,
+    her and the creatures come from the map's folder and the set, and a
+    test map starts with no install: decisions 89 to 97.)
+
+## Decisions (2026-11-05, step 1l, answered here; the owner may overturn any)
+
+89. **A test map may start with no WoW install; an ordinary run may
+    not.** A test map's world is its own folder and the baseline set,
+    so an empty Data folder is said ("no WoW install: ...") and the
+    chain is left empty: every read from it is "not there", and each
+    part already goes on to the next place. A run on the game's own
+    maps has nothing else to draw, so it still stops, naming the
+    folder. With neither an install nor a set, the start is said
+    ("test map: no install and no baseline set") and stops at the
+    first table it needs (`Light.dbc`), named.
+90. **The set holds the tables a start needs, made by code.**
+    `LiquidType` with one row (1, "Water", type 0, its texture pattern
+    the set's own water run, so the converter's one liquid has its
+    frames), and the five light tables empty, as wide as 3.3.5a's
+    (recalled: 45, 15, 34, 34, 9 and 3 fields). Empty light tables mean
+    no zone light, so 043's plain grey day, which reads as "not the
+    game's" the way the post does; a made-up sky would claim a look
+    nobody chose. Written at `DBFilesClient\NAME.dbc` with entries of
+    kind `table`.
+91. **Tables per row, the set's last; a set's copy of another width
+    left out.** 040 reads `LiquidType` through 074, so a row the map
+    or a pack has wins and the set's row answers only ids no one else
+    has. The light tables are read whole as the first copy (026 scans
+    them, it doesn't ask by id). Since the widths are recalled, a set's
+    copy whose width differs from the first copy's is left out and said
+    on the terminal, rather than refusing the table as two other
+    copies of different widths still are: a wrong recollection costs
+    the set's rows, never the start.
+92. **No navigation tiles in a test map: 60 degrees.** The steepest
+    walkable slope comes from the map's own navigation tiles, then the
+    server's for the stock maps; a test map with neither takes the
+    server's rule, 60 degrees, as its tiles for Kalimdor hold it
+    (044 checks that number against them when they are there). The
+    server builds every map by one rule, so this is its number, not a
+    guess.
+93. **One stand-in figure for her and for a creature with no model.**
+    An eight-sided sand column, 0.3 yards in radius and 1.8 high, with
+    a blue band down the face that looks along +x (the way a model
+    faces, so which way it turns can be seen), one bone that never
+    moves and one animation, Stand, its moments in the `.m2` (no
+    `.anim` file). The box would stand for a model that failed; this
+    stands for one nobody has, at a person's size, so a creature still
+    stands where it should and can be clicked. Stand only: she slides
+    standing when she moves, said at the start as any missing
+    animation is.
+94. **041 reads every file through the resolver.** Its models, views,
+    `.anim` files, pictures and items, with `asset_read` (the first
+    place that has it, never a placeholder: a figure decides itself
+    what stands in). Which files a display row means is 088's, out of
+    the window and checked. A model only the set answers is the set's
+    skeleton-less post (decision 85), which a creature can't stand or
+    walk with, so the figure answers instead. A humanoid display (a
+    character look) that can't be built in a test map takes the figure
+    too.
+95. **The start factored out of the window (087).** So 044 can run
+    043's start path, the archives to the slope, against a real build
+    with no install, as the brief asked; 043 calls it and holds its
+    result. The window, her figure and everything drawn come after it
+    and stay unchecked here.
+96. **`scripts/run` in a test map: no server folder, no `common.MPQ`,
+    a note.** Both were errors before any run; a test map needs
+    neither, so each is said as a note and the client decides.
+97. **What still can't work without an install.** Her real character
+    (`CharStartOutfit`, `CharSections`, the race models and skins: the
+    figure stands in) and the bystanders (left out, each said); a
+    creature's own look when the map didn't bring it (the figure);
+    buildings (WMO), WC3's stock models, ground tilesets and cliffs
+    (the converter's pictures stay); sounds, the interface and the
+    skybox; zone light (the grey day). Each is the asset forge's set or
+    a player's install. The window itself, and anything drawn, isn't
+    checked here.
 
 ## Open questions
 
@@ -1746,7 +1894,10 @@ return {
   and 081. For step 1j: `src/084-map-fog.info.md` (the map's fog), with
   083, 026 and 059. For step 1k: `src/085-baseline-set.info.md` (the
   smallest set), `src/086-make-baseline.info.md` (its program),
-  `src/060-resolver.info.md`, 014 and 040.
+  `src/060-resolver.info.md`, 014 and 040. For step 1l:
+  `src/087-world-start.info.md` (the start out of the window),
+  `src/088-figure-model.info.md` (which files a figure is made from),
+  with 085, 041, 074, 026, 040 and 043.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

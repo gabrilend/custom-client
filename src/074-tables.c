@@ -11,6 +11,7 @@
 #include "013-errors.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -88,6 +89,19 @@ static WErr load(Tables *ts, Table *t, WWhy *why)
     for (int c = 0; c < t->ncopies; ++c) {
         snprintf(t->from[c], sizeof t->from[c], "%s", t->copy[c].from ? t->copy[c].from : "");
         WWhy inner;
+        /* the baseline set's copy, last, of another width than the first:
+         * left out, said (a fallback never stops what the places before it
+         * answer; 1109 step 1l) */
+        if (c && t->copy[c].source == ASSET_FROM_BASELINE && !dbc_open(&t->dbc[c], t->copy[c].data, t->copy[c].len, &inner)
+            && t->dbc[c].fields != t->dbc[0].fields) {
+            fprintf(stderr, "tables: %s from the baseline set (%s) has %u fields a row, and from %s (%s) %u: the set's rows are left out\n",
+                    path, t->from[c], t->dbc[c].fields, asset_source_name(t->copy[0].source), t->from[0], t->dbc[0].fields);
+            asset_answer_free(&t->copy[c]);
+            for (int k = c + 1; k < t->ncopies; ++k) t->copy[k - 1] = t->copy[k];
+            --t->ncopies;
+            --c;
+            continue;
+        }
         if (dbc_open(&t->dbc[c], t->copy[c].data, t->copy[c].len, &inner))
             return w_fail(why, inner.code, "%s from %s (%s): %s", path, asset_source_name(t->copy[c].source), t->from[c], inner.text);
         if (t->dbc[c].fields < 1)
