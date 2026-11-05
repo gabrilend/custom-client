@@ -7,6 +7,7 @@
  */
 #include "075-adt-heights.h"
 #include "013-errors.h"
+#include "098-wdt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,7 @@ struct AdtHeights {
     MpqChain *chain;
     char      dir[64];
     int       big_alpha;
+    uint8_t   tiles[4096];            /* 1: its WDT lists the tile (098; 1109 step 1s) */
     int       made;                   /* counted with atomic adds: either thread asks */
 };
 
@@ -61,14 +63,17 @@ WErr adt_heights_open(Resolver *assets, MpqChain *chain, const char *map_dir, Ad
     WErr rc = asset_read(assets, chain, path, ASSET_GROUND, &a, why);
     if (rc) return rc == W_ERR_NOT_FOUND ? w_fail(why, rc, "the map's %s is in none of the places asked, so it has no ground to stand on", path) : rc;
     WWhy inner;
-    int big = adt_wdt_big_alpha(a.data, a.len, &inner);
+    Wdt *w = malloc(sizeof *w);
+    rc = w ? wdt_read(a.data, a.len, w, &inner) : W_ERR_FULL;
     asset_answer_free(&a);
-    if (big < 0) return w_fail(why, inner.code, "%s: %s", path, inner.text);
+    if (rc) { free(w); return w ? w_fail(why, rc, "%s: %s", path, inner.text) : w_fail(why, rc, "no memory for %s", path); }
     AdtHeights *h = calloc(1, sizeof *h);
     h->assets = assets;
     h->chain = chain;
     snprintf(h->dir, sizeof h->dir, "%s", map_dir);
-    h->big_alpha = big;
+    h->big_alpha = wdt_big_alpha(w);
+    for (int k = 0; k < WDT_TILES; ++k) h->tiles[k] = (w->tile_flags[k] & WDT_MAIN_HAS_ADT) != 0;
+    free(w);
     *out = h;
     return W_OK;
 }
@@ -82,6 +87,7 @@ MapTile *adt_heights_tile(void *ctx, int map_id, int tx, int ty, WWhy *why)
     AdtHeights *h = ctx;
     (void)map_id;                                        /* the files go by the map's folder, not its number */
     if (tx < 0 || tx > 63 || ty < 0 || ty > 63) { w_fail(why, W_ERR_NOT_FOUND, "tile (%d, %d) is off the map's 64 x 64 grid", tx, ty); return NULL; }
+    if (!h->tiles[tx * 64 + ty]) { w_fail(why, W_ERR_NOT_FOUND, "the map's WDT lists no ground at tile (%d, %d) (open sea)", tx, ty); return NULL; }
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", h->dir, h->dir, ty, tx);   /* west-east number first */
     AssetAnswer a;

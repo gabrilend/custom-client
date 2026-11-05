@@ -44,16 +44,13 @@ nothing else that is shared.
 - `type GroundPrep`
   A tile made ready to send.
 - `WErr ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const char *map_name, MapWorld *world, double ox, double oy, WWhy *why);`
-  Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
-  with `why`.
+  Reads the map's WDT (098) for its blend-map form and its tile list,
+  and fills `p`. W_OK, or a code with `why` (no WDT in any place, or one
+  that isn't one: no MPHD or MAIN).
+- `int ground_place_has_tile(const GroundPlace *p, int tx, int ty);`
+  1 when the map's WDT lists tile (tx, ty) (it has a ground file), 0
+  otherwise or off the grid.
 - `WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void *ctx, const char *name), void *ctx, GroundPrep **out, WWhy *why);`
-  Prepares tile (tx, ty). `on_card`, when given, answers whether a
-  picture (by archive name) is already on the card (asked with `ctx`:
-  the ground it is asking about); those aren't
-  unpacked (sending finds them there, or unpacks them itself if they
-  have gone since). W_OK with `*out` (freed by ground_prep_free);
-  W_ERR_NOT_FOUND when the map has no ground file there (open sea: not a
-  failure, nothing to draw); another code, with `why`, for a fault.
 - `void ground_prep_free(GroundPrep *g, int keep_adt);`
   Frees a prepared tile. `keep_adt`: 1 when the ground file was taken
   by the caller (it then frees it with adt_free and free).

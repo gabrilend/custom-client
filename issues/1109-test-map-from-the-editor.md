@@ -1240,6 +1240,55 @@ Not checked: any width or unread column against a real 3.3.5a file
 CreatureDisplayInfoExtra row (raylib isn't here; 041 compiles under
 gcc and clang -Werror); the mask 0xFF01FE (the converter's, recalled).
 
+**Step 1s is built** (2026-11-05, the same background work): a map's
+tile list from its WDT, `src/098-wdt.c`, in the reader library.
+Decisions 140 to 144.
+
+- **The reader (098):** `wdt_read` takes a WDT file's bytes and gives
+  its version (MVER), flags (MPHD), each of the 64 x 64 tiles' flags
+  (MAIN) and how many have ground, and for a map that is one building
+  its name (MWMO) and placement (MODF, read as an ADT's building by
+  020's `adt_place_read`, now shared); `wdt_has_tile`,
+  `wdt_big_alpha`, `wdt_wmo_only` ask it. The struct holds no
+  pointers, so the editor's LuaJIT FFI can use it as it uses the ADT
+  reader (decision 140). What neither project writes or reads (MPHD's
+  0x1, MAIN's other bits, a building map's MWMO and MODF) is marked
+  unchecked in 098-wdt.h.
+- **The client asks the list, not every file:** the ground (033, so
+  the window's tiles and 034's reading ahead), the heights (075, so
+  the start and the mover's ground) and the run with no window (089)
+  take a tile the WDT doesn't list as open sea without asking for its
+  file; a tile it lists that no place has is open sea too, said
+  (decision 141). 043 says how many tiles the WDT lists, and names a
+  one-building map's building, not yet placed (decision 144).
+- **Agreement with the converter (decision 143):** world-edit-to-
+  execute's W02a writer, from its commit df86a1365 (draft PR #252;
+  exported into the scratch folder, ai-stuff left as it was), called
+  directly for three tiles that read differently turned round, its
+  bytes read by this `libwreaders.so` through LuaJIT's FFI and the
+  `wreaders.h` scripts/build writes: each tile listed where its file
+  <dir>_<tx>_<ty>.adt is read, none turned round. And five maps
+  converted by the same commit (War in the Plaguelands, Master
+  Crafters, DAoW-2.1, Conquest-v8-fix: 2 x 2 tiles each; DaoW (HvA)
+  7.5: 4 x 4 from 30_30): each WDT lists exactly the tiles whose ADT
+  files the build holds, 4096 of 4096 agreeing.
+
+Checked (`tests/044-test-client.c`): made WDTs (three tiles listed by
+tile x * 64 + tile y and not turned round; a one-building map's name,
+placement in world axes and furnishing set; refusals naming a missing
+MVER, a short MAIN, a block past the end, no MPHD, no MAIN, a short
+MODF); on each converter build, its WDT's version, flags and tiles
+against the files, the ground (033) and the heights (075) taking an
+unlisted tile as open sea before a file is asked for. With the
+original's archives (not here): Kalimdor's tile list with Astranaar's
+tile, and every map in Map.dbc read, its building maps naming a .wmo
+and its placement.
+
+Not checked: any real 3.3.5a WDT (no install here; the checks above
+run on the owner's machine); a one-building map's MWMO and MODF and
+MPHD's 0x1 (recalled, as in 303); the windowed run's tile count line
+(raylib isn't here; 043 compiles under gcc and clang -Werror).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1433,6 +1482,10 @@ return {
    width check and layout-filled placeholder rows, 026's width check,
    041 asking for placeholder rows, 085's widths from the layouts
    (decisions 134 to 139).
+1s. ~~A map's tile list from its WDT.~~ Done (2026-11-05): 098 in the
+   reader library, the ground (033, 034), heights (075) and the run with
+   no window (089) asking its list, checked against the converter's own
+   WDTs (decisions 140 to 144).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -2449,6 +2502,44 @@ return {
     "numbered" by it would mean nothing; asking for one is not found,
     said.
 
+## Decisions (2026-11-05, step 1s, answered here; the owner may overturn any)
+
+140. **The WDT reader is its own part of the reader library.** 098
+    takes the file's bytes, as 020's readers do (finding the file is
+    the caller's, through the resolver), and fills a struct with no
+    pointers, so the editor's LuaJIT FFI reads it as it reads ADTs:
+    nothing to free, about 17 KB. 020's `adt_wdt_big_alpha` stays (the
+    converter's tests call it); its callers in this client read the
+    WDT through 098 instead. 020's MODF entry reading is now its
+    `adt_place_read`, shared with 098.
+141. **The WDT's list is the map's tiles.** A tile it doesn't list is
+    open sea and no file is asked for (the ground, its reading ahead,
+    the heights, the run with no window). A tile it lists that no
+    place has is open sea too, said on the standard error (the
+    window) or the run's log (no window), not refused: a broken
+    conversion still starts, and says where. A file a WDT doesn't list
+    is not read, as the original client does (recalled).
+142. **A WDT with no MPHD or no MAIN is refused.** The ground and the
+    heights already stopped without MPHD; a WDT with no tile list is
+    not a 3.3.5a one either (the converter always writes it). A version
+    other than 18 is read as it is (kept in the struct; unchecked
+    against another build). The run with no window, which went on
+    without a WDT before, still does: it then asks for each tile's
+    file, as before (said when its WDT is there but can't be read).
+143. **MAIN's entry k is tile x * 64 + tile y.** As this client numbers
+    tiles everywhere (020's AdtWdl, 039, 043), with the file
+    <dir>_<tile y>_<tile x>.adt; world-edit-to-execute's W02a writes
+    entry ty * 64 + tx for its file <dir>_<tx>_<ty>.adt, the same
+    tile. Checked with its own writer on tiles that differ turned
+    round, and on five converted maps; the original's own files are
+    checked only where an install is (the test program's Kalimdor
+    check).
+144. **A one-building map is read, not placed.** Its building's name
+    and placement are in the struct and 043 names it; placing it (a
+    WMO as the whole map) waits for its own step, with 303. Such a map
+    is one whose MPHD has 0x1 or that names a building and lists no
+    tile (both unchecked: neither project has one).
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -2641,7 +2732,9 @@ return {
   `src/074-tables.info.md` (a search's rows, placeholder rows), 025,
   060, 088, 089 and 043. For step 1r: `src/097-table-layouts.info.md`
   (the tables' layouts), 074, 026, 041 and 085;
-  [106](./106-dbc-parser.md) (layouts).
+  [106](./106-dbc-parser.md) (layouts). For step 1s:
+  `src/098-wdt.info.md` (a map's tile list), 020, 033, 034, 075, 089
+  and 043; [303](./303-wdt-and-streaming.md) (the WDT parser).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch

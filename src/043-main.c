@@ -634,6 +634,9 @@ int main(int argc, char **argv)
     /* the ground, its files through the resolver in a test-map run (its folder first) */
     if (ground_place_init(&app->ground_place, &app->ws.chain, app->ws.assets, app->ws.map_name, &app->ws.world, app->ox, app->oy, &why))
         return start_failed(app, 1, "%s", why.text);
+    printf("ground: the map's WDT lists %d tile%s\n", app->ground_place.ntiles, app->ground_place.ntiles == 1 ? "" : "s");
+    if (app->ground_place.wmo[0])                    /* a dungeon: one building, no ground (098); placing it waits */
+        printf("ground: %s is one building, %s, and no ground; the building isn't placed yet\n", app->ws.map_name, app->ground_place.wmo);
     /* a test map's ground laid with WC3's own tilesets, when its own
      * ground and the tilesets' pictures are found (a player with WC3:
      * 078); otherwise said, and the converter's pictures stay */

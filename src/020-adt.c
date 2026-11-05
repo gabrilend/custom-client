@@ -23,6 +23,30 @@ static int is_tag(const unsigned char *s, size_t at, const char *tag)
 }
 /* }}} */
 
+/* {{{ adt_place_read */
+void adt_place_read(const unsigned char *e, int doodad, AdtPlace *p)
+{
+    memset(p, 0, sizeof *p);
+    p->name = (int)u32(e, 0);
+    p->uid  = u32(e, 4);
+    p->x = 17066.666f - f32(e, 16);
+    p->y = 17066.666f - f32(e, 8);
+    p->z = f32(e, 12);
+    for (int r = 0; r < 3; ++r) p->rot[r] = f32(e, 20 + r * 4);
+    p->scale = doodad ? (float)(e[32] | e[33] << 8) / 1024.0f : 1.0f;
+    p->doodad_set = doodad ? 0 : (int)(e[58] | e[59] << 8);
+    if (!doodad)
+        for (int a = 0; a < 2; ++a) {
+            /* placement (x, y, z) -> world (17066.67 - z, 17066.67 - x, y);
+             * the corners swap since the axes flip */
+            size_t c = 32 + (size_t)a * 12;
+            float wx = 17066.666f - f32(e, c + 8), wy = 17066.666f - f32(e, c), wz = f32(e, c + 4);
+            if (a == 0) { p->hi[0] = wx; p->hi[1] = wy; p->lo[2] = wz; }
+            else        { p->lo[0] = wx; p->lo[1] = wy; p->hi[2] = wz; }
+        }
+}
+/* }}} */
+
 /* {{{ adt_wdt_big_alpha */
 int adt_wdt_big_alpha(const unsigned char *s, size_t len, WWhy *why)
 {
@@ -252,27 +276,7 @@ WErr adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, W
             size_t each = is_d ? 36 : 64;
             int n = (int)(size / each);
             AdtPlace *list = calloc(n ? n : 1, sizeof *list);
-            for (int k = 0; k < n; ++k) {
-                size_t e = at + 8 + (size_t)k * each;
-                AdtPlace *p = &list[k];
-                p->name = (int)u32(s, e);
-                p->uid  = u32(s, e + 4);
-                p->x = 17066.666f - f32(s, e + 16);
-                p->y = 17066.666f - f32(s, e + 8);
-                p->z = f32(s, e + 12);
-                for (int r = 0; r < 3; ++r) p->rot[r] = f32(s, e + 20 + r * 4);
-                p->scale = is_d ? (float)(s[e + 32] | s[e + 33] << 8) / 1024.0f : 1.0f;
-                p->doodad_set = is_d ? 0 : (int)(s[e + 58] | s[e + 59] << 8);
-                if (!is_d)
-                    for (int a = 0; a < 2; ++a) {
-                        /* placement (x, y, z) -> world (17066.67 - z, 17066.67 - x, y);
-                         * the corners swap since the axes flip */
-                        size_t c = e + 32 + (size_t)a * 12;
-                        float wx = 17066.666f - f32(s, c + 8), wy = 17066.666f - f32(s, c), wz = f32(s, c + 4);
-                        if (a == 0) { p->hi[0] = wx; p->hi[1] = wy; p->lo[2] = wz; }
-                        else        { p->lo[0] = wx; p->lo[1] = wy; p->hi[2] = wz; }
-                    }
-            }
+            for (int k = 0; k < n; ++k) adt_place_read(s + at + 8 + (size_t)k * each, is_d, &list[k]);
             if (is_d) { out->doodads = list; out->ndoodads = n; } else { out->places = list; out->nplaces = n; }
         } else if (is_tag(s, at, "MCNK")) {
             if (nchunks == 256) { w_fail(why, W_ERR_CORRUPT, "more than 256 MCNK blocks"); adt_free(out); return why->code; }

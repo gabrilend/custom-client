@@ -45,15 +45,18 @@ WErr adt_heights_from_tile(const AdtTile *adt, int tx, int ty, MapTile **out, WW
  * (the handle: docs/001, "Handles"): its files World\Maps\<dir>\<dir>.wdt
  * and <dir>_<ty>_<tx>.adt (the west-east number first), read through
  * `assets` (asset_read: the resolver when given, else `chain` alone).
- * Opening reads the WDT for the blend maps' form, so a map with none
- * stops here: W_ERR_NOT_FOUND, naming it. Both must outlive it. */
+ * Opening reads the WDT (098) for the blend maps' form and the tile
+ * list, so a map with none stops here: W_ERR_NOT_FOUND, naming it (a WDT
+ * that isn't one: W_ERR_CORRUPT). Both must outlive it. */
 typedef struct AdtHeights AdtHeights;
 WErr adt_heights_open(Resolver *assets, MpqChain *chain, const char *map_dir, AdtHeights **out, WWhy *why);
 void adt_heights_free(AdtHeights *h);
 
 /* The source itself (a MapTileSource; `ctx` an AdtHeights): tile (tx, ty)
  * read and made, or NULL with W_ERR_NOT_FOUND where the map has no ground
- * file (open sea), another code for a file that can't be read. Safe from
+ * file (open sea: its WDT lists none there, and then no file is asked
+ * for; or no place has the one it lists), another code for a file that
+ * can't be read. Safe from
  * either thread. */
 MapTile *adt_heights_tile(void *ctx, int map_id, int tx, int ty, WWhy *why);
 

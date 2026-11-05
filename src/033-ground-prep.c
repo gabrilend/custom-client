@@ -8,6 +8,7 @@
 #include "033-ground-prep.h"
 #include "013-errors.h"
 #include "017-blp.h"
+#include "098-wdt.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -28,9 +29,21 @@ WErr ground_place_init(GroundPlace *p, MpqChain *chain, Resolver *assets, const 
     AssetAnswer wdt;
     WErr rc = asset_read(assets, chain, path, ASSET_GROUND, &wdt, why);
     if (rc) return rc == W_ERR_NOT_FOUND ? w_fail(why, rc, "%s is in none of the %s", path, assets ? "places asked (the test map's folder, overlays, the archives)" : "client's archives") : rc;
-    p->big_alpha = adt_wdt_big_alpha(wdt.data, wdt.len, why);
+    Wdt *w = malloc(sizeof *w);
+    WWhy inner;
+    rc = w ? wdt_read(wdt.data, wdt.len, w, &inner) : W_ERR_FULL;
     asset_answer_free(&wdt);
-    return p->big_alpha < 0 ? why->code : W_OK;
+    if (rc) { free(w); return w ? w_fail(why, rc, "%s: %s", path, inner.text) : w_fail(why, rc, "no memory for %s", path); }
+    p->big_alpha = wdt_big_alpha(w);
+    p->ntiles = w->ntiles;
+    for (int k = 0; k < WDT_TILES; ++k) p->tiles[k] = (w->tile_flags[k] & WDT_MAIN_HAS_ADT) != 0;
+    if (wdt_wmo_only(w)) snprintf(p->wmo, sizeof p->wmo, "%s", w->wmo);
+    free(w);
+    return W_OK;
+}
+int ground_place_has_tile(const GroundPlace *p, int tx, int ty)
+{
+    return p && tx >= 0 && tx <= 63 && ty >= 0 && ty <= 63 && p->tiles[tx * 64 + ty];
 }
 /* }}} */
 
@@ -146,11 +159,16 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
 {
     *out = NULL;
     if (tx < 0 || tx > 63 || ty < 0 || ty > 63) return w_fail(why, W_ERR_NOT_FOUND, "tile (%d, %d) is off the map's 64 x 64 grid", tx, ty);
+    if (!p->tiles[tx * 64 + ty]) return w_fail(why, W_ERR_NOT_FOUND, "the map's WDT lists no ground at tile (%d, %d) (open sea)", tx, ty);
     char path[200];
     snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", p->map_name, p->map_name, ty, tx);   /* west-east number first */
     AssetAnswer file;
     WErr rc = asset_read(p->assets, p->chain, path, ASSET_GROUND, &file, why);
-    if (rc == W_ERR_NOT_FOUND) return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the %s (open sea: no ground there)", path, p->assets ? "places asked" : "archives");
+    if (rc == W_ERR_NOT_FOUND) {
+        /* listed, but no place has it: open sea there, said (1109 step 1s) */
+        fprintf(stderr, "ground: the map's WDT lists tile (%d, %d), but %s is in none of the %s: no ground there\n", tx, ty, path, p->assets ? "places asked" : "archives");
+        return w_fail(why, W_ERR_NOT_FOUND, "%s is in none of the %s, though the map's WDT lists it (no ground there)", path, p->assets ? "places asked" : "archives");
+    }
     if (rc) return rc;
     unsigned char *s = file.data;
     size_t len = file.len;
