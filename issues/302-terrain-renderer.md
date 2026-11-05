@@ -59,11 +59,18 @@ pictures (W02b), so its ground draws as any ADT. Since 1109's step 1d
 run with a Warcraft III install (`assetWc3`), draws WC3's own tileset
 pictures on this mesh instead (`src/078-wc3-ground.c`, through 033):
 no new shader, each chunk's four layers and blend picture laid the way
-WC3 lays its cells (1109 decisions 32-41). Still to come: cliffs and
-blight (laid whole with their south-west tileset for now), the
-tilesets' variation pictures (one whole tile a tileset for now), and
-chunks with more than four tilesets (the rest folded): the last two
-are where a ground shader for WC3's own blend would earn its place.
+WC3 lays its cells (1109 decisions 32-41). Since 1109's step 1e
+(2026-11-05) its cliffs stand as WC3's own cliff models
+(`src/079-wc3-cliffs.c`, placed among the tile's doodads so 042 draws
+them, each cliff cell laid with its cliff tileset's ground: decisions
+42-50), seated whole on their cell rather than bent to the mesh point
+by point. Still to come: ramps (their cells show the converted slope),
+cliffs bent to the ground, blight (laid whole with its south-west
+tileset for now), the tilesets' variation pictures (one whole tile a
+tileset for now), and chunks with more than four tilesets (the rest
+folded): the last two are where a ground shader for WC3's own blend
+would earn its place, and the bending where a cliff shader reading the
+ground's heights would.
 
 ## Intended behavior
 

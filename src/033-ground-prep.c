@@ -191,7 +191,8 @@ WErr ground_prep_tile(const GroundPlace *p, int tx, int ty, int (*on_card)(void 
     unsigned char *wc3_rgb = NULL, painted[256] = { 0 };
     if (p->wc3) {
         wc3_rgb = malloc((size_t)1024 * 1024 * 3);
-        if (wc3_ground_paint_tile(p->wc3, g->adt, g->chunk_tex, wc3_rgb, painted, NULL, &inner)) {
+        if (wc3_ground_paint_tile(p->wc3, g->adt, g->chunk_tex, wc3_rgb, painted, NULL, &inner)
+            || wc3_ground_place_cliffs(p->wc3, g->adt, NULL, &inner)) {   /* its cliffs, drawn as its doodads (042) */
             w_fail(why, inner.code, "%s: %s", path, inner.text);
             free(wc3_rgb); ground_prep_free(g, 0);
             return why->code;

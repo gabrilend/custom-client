@@ -40,7 +40,7 @@
 typedef struct {
     MpqChain *chain;
     Resolver *assets;
-    const Wc3Ground *wc3;
+    const Wc3Ground *wc3;             /* also places its cliffs in each tile's doodads (078, 079) */
     char      map_name[64];
     int       big_alpha;              /* 1: the map's blend maps are the 8-bit form (020-adt.h) */
     MapWorld *world;

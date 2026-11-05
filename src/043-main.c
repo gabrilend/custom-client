@@ -681,6 +681,16 @@ int main(int argc, char **argv)
             for (int k = 0; k < n; ++k) real += wc3_ground_tileset(app->wc3_ground, k)->source != ASSET_FROM_PLACEHOLDER;
             app->ground_place.wc3 = app->wc3_ground;
             printf("test map: its ground painted with WC3's own tilesets (%d of %d pictures found, the checker for the rest)\n", real, n);
+            /* its cliffs, as WC3's own cliff models (079), drawn as doodads */
+            const Wc3Cliffs *cliffs = wc3_ground_cliffs(app->wc3_ground);
+            if (cliffs) {
+                Wc3CliffCounts cc;
+                wc3_cliffs_counts(cliffs, &cc);
+                printf("test map: %d cliffs stand as WC3's own cliff models (%d models, %d of them found, the box for the rest)", cc.placed, cc.models, cc.found);
+                if (cc.no_tileset) printf("; %d cliff cells name no cliff tileset and keep their ground", cc.no_tileset);
+                if (cc.ramps) printf("; %d cells on ramps have no model yet", cc.ramps);
+                printf("\n");
+            } else printf("test map: no TerrainArt\\CliffTypes.slk in any place, so its cliffs keep their ground (no cliff models)\n");
         } else if (w == W_ERR_NOT_FOUND) printf("test map: its ground keeps the converter's pictures: %s\n", why.text);
         else return start_failed(app, 1, "%s", why.text);
     }

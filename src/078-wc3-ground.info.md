@@ -36,15 +36,21 @@ for the variation pictures (one whole tile a tileset) and the
 subtiles' own colours (their alpha, the whole tile's colours). A cell
 whose tileset is past the chunk's four is folded: a dropped lowest
 lets the next kept one lie whole, a dropped higher one is left out. A
-cliff or blighted cell (063 leaves it bare for the renderer) is laid
-whole with its south-west point's tileset until cliffs and blight are
-drawn. A chunk with no cell inside the WC3 grid keeps the converter's
+cliff cell with a WC3 cliff model (079: when the player has
+TerrainArt\CliffTypes.slk) is laid whole with its cliff tileset's
+ground (its groundTile, added to the tilesets when the map's list
+lacks it), and its model is added to the tile's doodads
+(wc3_ground_place_cliffs); another bare cell (blighted, or a cliff
+with no cliff tileset or model: 063 leaves them bare for the
+renderer) is laid whole with its south-west point's tileset until
+blight is drawn. A chunk with no cell inside the WC3 grid keeps the converter's
 own pictures; a cell outside it in a chunk with some inside shows the
 chunk's layer 0.
 
 Where the files come from: war3map.w3e by its name at the converted
-build folder's root (the converter doesn't copy it there yet: until it
-does, a test copies it in), TerrainArt\Terrain.slk (077-slk.h: each
+build folder's root (world-edit-to-execute's convert copies it there
+since its draft PR #246; for older builds a test copies it in),
+TerrainArt\Terrain.slk (077-slk.h: each
 tileset's folder and file) and the tileset pictures through the
 resolver (060): the player's packs, the server's, overlays (the map's
 own imports), the player's Warcraft III archives, then the checker.
@@ -79,8 +85,13 @@ is safe on any thread (the reading-ahead thread paints tiles too).
   W_ERR_REFUSED for a scale not above 0.
 - `void wc3_ground_free(Wc3Ground *w);`
 - `int wc3_ground_tilesets(const Wc3Ground *w);`
+  The tilesets: first the map's ground list (the numbers its points
+  name), then any cliff tileset's ground the list lacks.
 - `const Wc3Tileset *wc3_ground_tileset(const Wc3Ground *w, int k);`
 - `const W3eGround *wc3_ground_w3e(const Wc3Ground *w);`
+- `const Wc3Cliffs *wc3_ground_cliffs(const Wc3Ground *w);`
+  The map's cliffs (079), or NULL when no place has TerrainArt\
+  CliffTypes.slk: then cliff cells are laid as blighted ones are.
 - `int wc3_ground_cell_at(const Wc3Ground *w, double x, double y, int *i, int *j, double *fx, double *fy);`
   The WC3 cell (i, j) holding world place (x, y), by the map's rule:
   1 when inside the grid (cells (width - 1) x (height - 1), rows from
@@ -101,3 +112,12 @@ is safe on any thread (the reading-ahead thread paints tiles too).
   `painted[k]` 1; other chunks are left as they were. Counts into
   `*counts` (may be NULL). W_OK; W_ERR_FULL when the tile's list would
   pass 256 pictures.
+- `WErr wc3_ground_place_cliffs(const Wc3Ground *w, AdtTile *adt, int *placed, WWhy *why);`
+  Adds the cliff models standing on tile `adt` (those whose cell's
+  centre is on it, so each is placed by one tile) to its doodads: each
+  model's name (079's wc3_cliffs_model) to its list once, each cliff a
+  placement with id WC3_CLIFF_UID plus its cell, at its origin by the
+  map's rule (z: scale times WC3's), turned as WC3 lays models (rot
+  0, 90, 0), size 1 (076 sizes a WC3 model by the map's rule). How many
+  into `*placed` (may be NULL). W_OK, nothing done with no cliffs;
+  W_ERR_FULL when memory runs out.

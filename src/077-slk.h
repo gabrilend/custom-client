@@ -49,6 +49,12 @@ void        slk_free(Slk *k);
  * no such row, column or cell. Valid while the handle lives. */
 const char *slk_value(const Slk *k, const char *id, const char *column);
 
+/* The same, with the column's name matched without regard to capitals
+ * ("cliffModelDir", "cliffmodeldir"): for sheets whose column names are
+ * known only as the published tools spell them (issue 1109's decision
+ * 44). Of several columns so named, the last wins. */
+const char *slk_value_any_case(const Slk *k, const char *id, const char *column);
+
 /* The rows named in column 1 (every one once, in the order first met),
  * and the k-th's name (NULL past the end). */
 int         slk_rows(const Slk *k);
