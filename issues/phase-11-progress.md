@@ -188,5 +188,19 @@ itself was not run (no raylib here), nor two separate processes;
 models' floors and walls are left out of the headless world. Decisions
 102 to 110 in 1109.
 
+2026-11-05: 1109's step 1o. The headless world has the placed models'
+floors and walls: a new window-free part (091) builds a model's and a
+building part's solid shape for the doodad drawer and the headless run
+alike, places a tile's doodads, buildings, furnishings and buildings'
+pools with no drawing, and holds the window's floor and wall rule, so
+both runs ask the mover's questions the same way. The receipt counts
+the models. Moves files may name their map, and two routes
+(`tests/092`, `tests/093`) take her from War in the Plaguelands' and
+Master Crafters' starts to their water (21 and 205 steps swimming) and
+off their ground's edge (61 steps with nothing under her), the same
+twice. With no install, both maps' models (WC3 models and stand-ins)
+have no solid shape, so the floors and walls are checked with a tile
+made in the test. Decisions 111 to 117 in 1109.
+
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

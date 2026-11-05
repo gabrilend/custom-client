@@ -967,9 +967,76 @@ test program runs the same `headless_run`), two separate processes
 compared (the test runs both in one), and a windowed run's moves (not
 repeatable: its steps follow the frame time; decision 108).
 
+**Step 1o is built** (2026-11-05, the same background work): the
+headless world has the placed models' floors and walls, and two routes
+reach water and the map's edge. Decisions 111 to 117 (111 closes
+decision 105's gap).
+
+- **The models' shapes with no window (091):** the shape of one model
+  (a game model's collision lists; none for a WC3 model, the box or the
+  baseline set's stand-ins) and of one building part (its triangles
+  marked solid) moved out of the doodad drawer (042) into
+  `src/091-model-solids.c`, which 042 now calls, so both runs build them
+  the same way. 091 also places every model and building a tile lists,
+  as 042 does (read once a name through 076; a placement on two tiles
+  placed once; furnishings of set 0 and the placement's set; buildings'
+  pools filed for swimming; the box sized to a building no place has;
+  a dropped tile's copies taken away and the other tiles' placed
+  again), into the mover's solids (028) and water (027), with no
+  drawing. 043's floor and wall rule moved there too
+  (`model_solids_ground`, `model_solids_wall`), her body's 0.4 by 2.3
+  yards into 087 (`WORLD_HER_RADIUS`, `WORLD_HER_HEIGHT`), so the
+  window and the headless run ask the same question (decision 112).
+- **The headless run (089):** each tile within one of her has its
+  models placed as its water is filed, from an origin at her start
+  (043's); the mover asks the map's ground and the models' floors, the
+  models' walls and the water. The receipt counts the models: models,
+  models_solid, models_wc3, buildings, model_stand_ins,
+  models_left_out, model_copies, solid_copies, solid_triangles,
+  building_pools, steps_on_models, steps_walled (decision 113).
+- **Moves name their map (089):** an optional `map` (the map's folder
+  name); a run on another map refuses them, its receipt saying `error`
+  (decision 114).
+- **Two routes (092, 093):** `tests/092-test-map-moves-plaguelands.lua`
+  and `tests/093-test-map-moves-master-crafters.lua`, each from its
+  map's start to its water, a swim and a dive, then off the edge of its
+  ground; found by a search in the mover's own steps (decision 115).
+
+Checked (`tests/044-test-client.c`, "the placed models' floors and
+walls, with no window", with fixtures made there): a game model's 12
+collision triangles, none for the box or a WC3 model; a building part's
+solid triangle, appended; the box's size for a building; a made tile
+(a platform, the box, a WC3 model, a hut furnished in sets 0 and 1, a
+building no place has) placed: 3 models, 2 buildings, 2 stood in, 7
+copies, 4 solid, 37 triangles; the floor on the platform (11.5) and on
+the hut's set-1 furnishing, none beside them; a wall at the platform's
+side, none short of it; a placement on two tiles placed once, kept when
+its first tile is dropped, gone with both. The moves' `map` read and two
+bad ones refused. With the real builds and no install:
+
+- **War in the Plaguelands:** the project's moves place 147 models
+  11034 times (118 WC3 models, 28 baseline stand-ins, 1 left out: its
+  `glow.mdx` is cut short), no solid shape among them, so the run is
+  as in step 1n (125.7 yards). Its route: 1215 steps, 409.0 yards, 21
+  swimming, 61 with no ground under her, ending at (542.04, -79.75,
+  -77.19); run twice, the same receipt.
+- **Master Crafters:** 11 models placed 2940 times, all the baseline
+  set's stand-ins, no solid shape. Its route: 2295 steps, 796.8 yards,
+  205 swimming, 61 with no ground, ending at (-541.67, -136.65,
+  -87.03); run twice, the same receipt.
+- Each map's run of the other's route is refused, naming the map, with
+  `error` in its receipt.
+
+Not checked: a real game model's or building's floor and wall in the
+headless run (with no install both builds' models have none: WC3
+models and stand-ins are walked through, decision 116; 044's made
+platform and hut check the path), 043 and 042 running with 091 (they
+compile under gcc and clang -Werror; raylib isn't here), and a
+building's pool reached by swimming (neither build places a building).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
-#7), with its particles (403) and solid shape, or team-coloured (404:
+#7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
 its replaceable pictures are left off); the baseline set's buildings, creatures' own looks, her character, WC3
 stock art and the rest of the client's tables (decisions 88, 97), and
 the asset forge's real set;
@@ -1141,6 +1208,10 @@ return {
 1n. ~~A headless test-map run.~~ Done (2026-11-05): `--headless MOVES`
    (067, 089), the project's moves (`tests/090-test-map-moves.lua`),
    the receipt's counts (068) (decisions 102 to 110).
+1o. ~~The placed models' floors and walls with no window, and routes to
+   water and the edge.~~ Done (2026-11-05): 091 (shared with 042 and
+   043), 089 placing them, `tests/092` and `093` (decisions 111 to
+   117).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1149,8 +1220,9 @@ return {
 5. Check: the same map test-played twice gives the same receipt counts
    for the same scripted input. The client's side is built (step 1n:
    a headless run twice on War in the Plaguelands and Master Crafters,
-   in the test program); the check through the editor's F5 waits on
-   step 2.
+   in the test program; step 1o: with the models' floors and walls,
+   and each map's route to its water and off its edge, twice); the
+   check through the editor's F5 waits on step 2.
 
 ## Acceptance
 
@@ -1902,7 +1974,7 @@ return {
     out: they are built from the models by the drawing parts (042), so
     a headless path can differ from a windowed one where she meets a
     model. It needs no window and keeps every count to the map's own
-    ground.
+    ground. (The gap is closed by decision 111, step 1o.)
 106. **Her figure and the creatures' looks as the window would find
     them.** Her character from 025 (window-free), else the baseline
     set's stand-in, its skeleton read for her animations, chosen each
@@ -1934,6 +2006,68 @@ return {
     and look (a night-elf woman, a hunter's outfit) move from 043 into
     087 (`WORLD_START_FACING`, `WORLD_START_SPEED`, `WORLD_HER_*`), so
     the headless run starts her as the window does.
+
+## Decisions (2026-11-05, step 1o, answered here; the owner may overturn any)
+
+111. **The headless world has the placed models' floors and walls
+    (closing decision 105's gap).** Each tile within one of her has its
+    doodads and buildings placed as the window's 042 places them, into
+    the mover's solids and water, from an origin at her start as 043's;
+    the mover asks the map's ground and the models' floors, their
+    walls, and the water, buildings' pools included. A headless path
+    now differs from a windowed one only where the window loads tiles
+    farther out (its view reach) or drops them, which the mover never
+    meets: it stands within one tile of her.
+112. **One part builds the shapes; the drawer keeps its own
+    bookkeeping.** The shape of a model and of a building part, the
+    box's size for a building, and the floor and wall rule live in 091
+    (window-free), and 042 and 043 call them, so the two runs can't
+    drift. The placing (once a name, once a placement, furnishings,
+    dropped tiles) is 091's own copy of 042's rather than 042 handing
+    its solids to 091: 042 reads each model once for its pieces too,
+    and handing 091 the same files would read every model twice in a
+    windowed run. The two copies are short and each is tested.
+113. **The receipt counts the models.** models, models_solid,
+    models_wc3, buildings, model_stand_ins, models_left_out,
+    model_copies, solid_copies, solid_triangles, building_pools,
+    steps_on_models and steps_walled, as named numbers (decision 107),
+    so a change in what a map places, or in how she meets it, shows in
+    step 5's comparison. A stand-in is the box or the baseline set's
+    stand-in for a game model (085).
+114. **Moves may name their map.** An optional `map`, the map's folder
+    name (no slashes); a run on another map refuses them with
+    W_ERR_REFUSED, the receipt saying `error`, since a route found on
+    one map is only a route there. Moves with no `map` (090) run on any
+    map. Format stays 1: the field is new and optional, and no other
+    reader of moves files exists yet.
+115. **Each test build has its own route, found in the mover's own
+    steps.** The routes (092 for War in the Plaguelands, 093 for Master
+    Crafters) were found by a search over turns of a twentieth of a
+    second and runs of two or three seconds, stepping the same mover
+    over the same ground, models and water as the headless run, from
+    each map's start to its water, then (after two seconds' swim and
+    two of diving) off its ground's edge, where she falls with nothing
+    under her for three seconds. They hold while the map's ground, its
+    water and the mover stay as they are; when one changes, the test
+    says so (no swimming, or no edge) and the route is found again.
+    The search is not in the project: a route is data, written once.
+    The test program runs a build's own route when its folder name is
+    one of the two, and says it skipped them otherwise.
+116. **WC3 models and stand-ins are walked through, as in the window.**
+    A WC3 model's own collision shapes (CLID: boxes, spheres) are its
+    selection shapes in WC3, not walls (WC3 paths units by its pathing
+    map), so they are not seated; the box and the baseline set's
+    stand-ins are signs of what is missing, not walls. With no WoW
+    install, both test builds therefore have no solid model, and their
+    routes' counts are the ground's and the water's; the models' floors
+    and walls are checked with a made tile (044).
+117. **The edge is where the map's ground ends.** `steps_no_ground`
+    counts steps with no ground under her (her ground below -10000);
+    off the edge she falls at the mover's own speed, with nothing to
+    stop her, until the moves end. The client doesn't hold her at a
+    map's edge: the server does (a player can't walk off a real map),
+    and a test-map run with no server is where a converter's gap would
+    show.
 
 ## Open questions
 
@@ -2117,7 +2251,10 @@ return {
   `src/025-character.info.md` and `src/034-prefetch.info.md`. For step
   1n: `src/089-headless-run.info.md` (the headless run and its moves),
   `src/068-goodbye.info.md` (the receipt's counts), 067, 087, and
-  `tests/090-test-map-moves.lua`.
+  `tests/090-test-map-moves.lua`. For step 1o:
+  `src/091-model-solids.info.md` (the models' floors and walls with no
+  window), 089, 042, 043, 087, and `tests/092-test-map-moves-plaguelands.lua`
+  and `tests/093-test-map-moves-master-crafters.lua`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

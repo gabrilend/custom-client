@@ -70,6 +70,7 @@
 #include "../src/087-world-start.h"
 #include "../src/088-figure-model.h"
 #include "../src/089-headless-run.h"
+#include "../src/091-model-solids.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -2435,6 +2436,209 @@ static void t_lay_pixels(const GroundPlace *gp, const AdtTile *adt, const Wc3Lay
     for (int t = 0; t < adt->ntextures; ++t) if (needed[t]) ground_prep_pixels(gp, adt->textures[t], &px[t], &why);
 }
 static void t_lay_pixels_free(GroundPixels *px) { for (int t = 0; t < 256; ++t) { free(px[t].rgba); free(px[t].smaller); } }
+
+/* {{{ the placed models' floors and walls with no window (091; issue 1109
+ * step 1o): a tile made here placing a model with a solid shape, the
+ * box, a WC3 model, a furnished building and a building no place has;
+ * shared placements, dropped tiles, the mover's floor and walls; folders
+ * made here, no game data */
+/* the box (060's placeholder) with a solid shape of its own: a platform
+ * 6 yards square and 1.5 high (its 8 corners, 060's 12 triangles), the
+ * collision lists M2 keeps at header 216 (m2_collision) */
+static unsigned char *t_solid_model(const AssetAnswer *box, size_t *len)
+{
+    static const int TRIS[36] = { 0,2,1, 1,2,3,  4,5,6, 5,7,6,  0,1,4, 1,5,4,  2,6,3, 3,6,7,  0,4,2, 2,4,6,  1,3,5, 3,7,5 };
+    size_t points = box->len, corners = points + 8 * 12;
+    *len = corners + 36 * 2;
+    unsigned char *s = calloc(1, *len);
+    memcpy(s, box->data, box->len);
+    for (int i = 0; i < 8; ++i) {
+        float p[3] = { (i & 1) ? 3.0f : -3.0f, (i & 2) ? 3.0f : -3.0f, (i & 4) ? 1.5f : 0.0f };
+        memcpy(s + points + (size_t)i * 12, p, 12);
+    }
+    for (int i = 0; i < 36; ++i) { s[corners + (size_t)i * 2] = (unsigned char)TRIS[i]; s[corners + (size_t)i * 2 + 1] = 0; }
+    uint32_t h[4] = { 36, (uint32_t)corners, 8, (uint32_t)points };
+    memcpy(s + 216, h, sizeof h);
+    return s;
+}
+/* t_made_wmo_root with furnishings: two platforms, the first in set 0
+ * (every placement's), the second in set 1 */
+static void t_made_wmo_furnished(Bytes *o)
+{
+    t_made_wmo_root(o);
+    size_t c = open_chunk(o, "NDOM"); putname(o, "World\\Made\\Platform.m2", 24); close_chunk(o, c);
+    c = open_chunk(o, "SDOM");
+    putname(o, "Set_$DefaultGlobal", 20); put32(o, 0); put32(o, 1); put32(o, 0);
+    putname(o, "Lamps", 20); put32(o, 1); put32(o, 1); put32(o, 0);
+    close_chunk(o, c);
+    c = open_chunk(o, "DDOM");
+    for (int i = 0; i < 2; ++i) {
+        put32(o, 0); putf(o, 10.0f * (i + 1)); putf(o, 0); putf(o, 0);
+        putf(o, 0); putf(o, 0); putf(o, 0); putf(o, 1); putf(o, 1); put32(o, 0);
+    }
+    close_chunk(o, c);
+}
+static void model_solids_tests(const char *dir)
+{
+    char root[400], folder[520], line[1000];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-model-solids", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the model solids' fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+    /* {{{ the fixtures */
+    Resolver *bare = NULL;
+    ResolverPlace none = { .distinctness = 0.5 };
+    char *quiet = NULL;
+    size_t quiet_len = 0;
+    none.log = open_memstream(&quiet, &quiet_len);
+    e = resolver_open(&none, &bare, &why);
+    AssetAnswer box, box_skin;
+    WErr e1 = e ? e : asset_stand_in(bare, "World\\Made\\Platform.m2", ASSET_MODEL, &box, &why);
+    WErr e2 = e ? e : asset_stand_in(bare, "World\\Made\\Platform00.skin", ASSET_MODEL, &box_skin, &why);
+    if (e || e1 || e2) { check(0, why.text); if (bare) resolver_free(bare); fclose(none.log); free(quiet); return; }
+    size_t solid_len;
+    unsigned char *solid = t_solid_model(&box, &solid_len);
+    static Bytes mdx, wmo_root, wmo_group;
+    made_mdx(&mdx);
+    t_made_wmo_furnished(&wmo_root);
+    t_made_wmo_group(&wmo_group);
+    snprintf(folder, sizeof folder, "%s/map-build", root);
+    t_write(folder, "World/Made/Platform.m2", solid, solid_len);
+    t_write(folder, "World/Made/Platform00.skin", box_skin.data, box_skin.len);
+    t_write(folder, "war3mapImported/Made.mdx", mdx.b, mdx.n);
+    t_write(folder, "World/Made/Hut.wmo", wmo_root.b, wmo_root.n);
+    t_write(folder, "World/Made/Hut_000.wmo", wmo_group.b, wmo_group.n);
+    ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+    snprintf(place.overlays[0], sizeof place.overlays[0], "%s", folder);
+    char *log = NULL;
+    size_t log_len = 0;
+    place.log = open_memstream(&log, &log_len);
+    Resolver *r = NULL;
+    e = resolver_open(&place, &r, &why);
+    check(!e, e ? why.text : "the resolver opens the made map's folder");
+    /* }}} */
+    if (!e) {
+        /* {{{ one model's and one part's shape */
+        PlacedModel pm;
+        float *tris = NULL;
+        int n = -1;
+        e = placed_model_read(r, NULL, "World\\Made\\Platform.m2", 0, &pm, &why);
+        if (!e) { e = model_solids_of_model(&pm, &tris, &n, &why); placed_model_free(&pm); }
+        float top = -1;
+        for (int i = 0; tris && i < n * 3; ++i) if (tris[i * 3 + 2] > top) top = tris[i * 3 + 2];
+        check(!e && n == 12 && top == 1.5f, e ? why.text : "a game model's solid shape: its collision lists' 12 triangles, 1.5 yards high");
+        free(tris); tris = NULL;
+        int nbox = -1, nwc3 = -1;
+        e = placed_model_read(r, NULL, "World\\Made\\Gone.m2", 0, &pm, &why);
+        if (!e) { e = model_solids_of_model(&pm, &tris, &nbox, &why); placed_model_free(&pm); free(tris); tris = NULL; }
+        WErr ew = placed_model_read(r, NULL, "war3mapImported\\Made.mdx", 0.5, &pm, &why);
+        if (!ew) { ew = model_solids_of_model(&pm, &tris, &nwc3, &why); placed_model_free(&pm); free(tris); tris = NULL; }
+        check(!e && !ew && nbox == 0 && nwc3 == 0, "the box standing in for a model no place has, and a WC3 model, have none: walked through, as in the window");
+        WmoGroup g;
+        n = 0;
+        e = placed_building_group(r, NULL, "World\\Made\\Hut.wmo", 0, &g, &why);
+        if (!e) {
+            e = model_solids_of_group(&g, &tris, &n, &why);
+            WErr e3 = model_solids_of_group(&g, &tris, &n, &why);   /* appended */
+            e = e ? e : e3;
+            wmo_free_group(&g);
+        }
+        check(!e && n == 2 && tris && tris[3] == 4 && tris[9 + 8] == 3, e ? why.text : "a building part's solid triangles (MOPY 0x20, not 0x04: solid), appended to what is there");
+        free(tris); tris = NULL;
+        AdtPlace sp = { .lo = { 0, 0, 0 }, .hi = { 10, 5, 20 }, .scale = 1 };
+        float sm[16];
+        adt_place_matrix(&sp, 0, 0, sm);
+        model_solids_stand_in_size(&sp, sm);
+        check(near(hypot(hypot(sm[0], sm[1]), sm[2]), 20, 1e-4) && near(hypot(hypot(sm[8], sm[9]), sm[10]), 5, 1e-4),
+              "the box standing in for a building: as wide as its widest side (20 yards) and as tall as its box (5)");
+        /* }}} */
+        /* {{{ a tile's placements */
+        AdtTile *t = calloc(2, sizeof *t);
+        static const char *const MODELS[] = { "World\\Made\\Platform.m2", "World\\Made\\Gone.m2", "war3mapImported\\Made.mdx" };
+        static const char *const BUILDINGS[] = { "World\\Made\\Hut.wmo", "World\\Made\\Nowhere.wmo" };
+        for (int k = 0; k < 2; ++k) {
+            t[k].models = calloc(3, sizeof *t[k].models);
+            for (int i = 0; i < 3; ++i) snprintf(t[k].models[i], sizeof t[k].models[i], "%s", MODELS[i]);
+            t[k].nmodels = 3;
+            t[k].buildings = calloc(2, sizeof *t[k].buildings);
+            for (int i = 0; i < 2; ++i) snprintf(t[k].buildings[i], sizeof t[k].buildings[i], "%s", BUILDINGS[i]);
+            t[k].nbuildings = 2;
+            t[k].doodads = calloc(3, sizeof *t[k].doodads);
+            t[k].places = calloc(2, sizeof *t[k].places);
+        }
+        /* tile A: the platform (uid 1), the box, the WC3 model; the hut
+         * with set 1 (uid 7), the building no place has (uid 8). Tile B:
+         * the platform again (uid 1, on both tiles) and a second (uid 9). */
+        t[0].doodads[0] = (AdtPlace){ .name = 0, .uid = 1, .x = 100, .y = 200, .z = 10, .scale = 1 };
+        t[0].doodads[1] = (AdtPlace){ .name = 1, .uid = 2, .x = 120, .y = 200, .z = 10, .scale = 1 };
+        t[0].doodads[2] = (AdtPlace){ .name = 2, .uid = 3, .x = 130, .y = 200, .z = 10, .scale = 1 };
+        t[0].ndoodads = 3;
+        t[0].places[0] = (AdtPlace){ .name = 0, .uid = 7, .x = 150, .y = 200, .z = 10, .scale = 1, .doodad_set = 1 };
+        t[0].places[1] = (AdtPlace){ .name = 1, .uid = 8, .x = 180, .y = 200, .z = 10, .scale = 1, .lo = { 0, 0, 0 }, .hi = { 8, 4, 8 } };
+        t[0].nplaces = 2;
+        t[1].doodads[0] = t[0].doodads[0];
+        t[1].doodads[1] = (AdtPlace){ .name = 0, .uid = 9, .x = 100, .y = 240, .z = 10, .scale = 1 };
+        t[1].ndoodads = 2;
+        CollideWorld *cw = collide_new(100, 200);
+        LiquidWorld *lw = liquid_new();
+        char *mlog = NULL;
+        size_t mlog_len = 0;
+        FILE *mf = open_memstream(&mlog, &mlog_len);
+        ModelSolids *ms = model_solids_new(r, NULL, 0.5, cw, lw, mf);
+        e = model_solids_add_tile(ms, &t[0], 31 * 64 + 31, 100, 200, &why);
+        ModelSolidsCounts c;
+        model_solids_counts(ms, &c);
+        snprintf(line, sizeof line, "a tile's models and buildings placed (091): %d models (%d solid, %d WC3), %d buildings, %d stood in, %d left out; %d copies, %d solid, %d triangles",
+                 c.models, c.models_solid, c.models_wc3, c.buildings, c.stand_ins, c.left_out, c.copies, c.solid_copies, c.triangles);
+        check(!e && c.models == 3 && c.models_solid == 1 && c.models_wc3 == 1 && c.buildings == 2 && c.stand_ins == 2 && c.left_out == 0
+              && c.copies == 7 && c.solid_copies == 4 && c.triangles == 12 + 1 + 2 * 12 && c.pools == 0, e ? why.text : line);
+        /* the mover's floor and walls */
+        float gx, gy;
+        float fz = model_solids_ground(NULL, cw, 101, 201, 20, &gx, &gy);
+        float fz3 = model_solids_ground(NULL, cw, 90, 200, 20, &gx, &gy);
+        float fz2 = -100000;
+        for (double a = 0; a < 6.3 && fz2 < 11; a += 0.05)   /* the hut's set-1 furnishing, 20 yards from its middle, turned with the hut: looked for round it */
+            fz2 = model_solids_ground(NULL, cw, 150 + 20 * cos(a), 200 + 20 * sin(a), 20, &gx, &gy);
+        snprintf(line, sizeof line, "the mover's floor (091, 043's rule): on the platform %.2f, on the hut's set-1 furnishing (a platform too) %.2f, beside them none (%.0f)", fz, fz2, fz3);
+        check(near(fz, 11.5, 1e-3) && near(fz2, 11.5, 1e-3) && fz3 < -10000, line);
+        float nx, ny;
+        int hit = model_solids_wall(cw, 95, 201, 99, 201, 10, 1.73f, &nx, &ny);
+        int miss = model_solids_wall(cw, 90, 201, 92, 201, 10, 1.73f, &nx, &ny);
+        check(hit && nx < -0.9f && !miss && !model_solids_wall(NULL, 95, 201, 99, 201, 10, 1.73f, &nx, &ny),
+              "the mover's walls: into the platform's side (1.5 yards: over her step) stops her, facing her; short of it, and with no solids, nothing");
+        /* the platform listed by both tiles: placed once, by the first */
+        e = model_solids_add_tile(ms, &t[1], 31 * 64 + 32, 100, 200, &why);
+        model_solids_counts(ms, &c);
+        int both = c.copies == 8 && c.triangles == 49;
+        model_solids_drop_tile(ms, 31 * 64 + 31);
+        model_solids_counts(ms, &c);
+        int kept = c.copies == 2 && c.triangles == 24 && near(model_solids_ground(NULL, cw, 101, 201, 20, &gx, &gy), 11.5, 1e-3);
+        model_solids_drop_tile(ms, 31 * 64 + 32);
+        model_solids_counts(ms, &c);
+        check(!e && both && kept && c.copies == 0 && c.triangles == 0 && c.models == 3,
+              "a placement on two tiles is placed once; dropping the tile that placed it lets the other place it again; dropping both leaves none (the models stay read)");
+        fclose(mf);
+        model_solids_free(ms);
+        free(mlog);
+        liquid_free(lw);
+        collide_free(cw);
+        for (int k = 0; k < 2; ++k) adt_free(&t[k]);
+        free(t);
+        /* }}} */
+        resolver_free(r);
+    }
+    fclose(place.log);
+    free(log);
+    free(solid);
+    asset_answer_free(&box);
+    asset_answer_free(&box_skin);
+    resolver_free(bare);
+    fclose(none.log);
+    free(quiet);
+    t_remove_tree(root);
+}
+/* }}} */
 
 static void wc3_place_tests(const char *dir, const char *build)
 {
@@ -4987,6 +5191,8 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             { "return { format = 1, speed = 2, moves = { { hold = \"\", seconds = 1 } } }", "speed" },
             { "return { format = 1, moves = { { hold = \"\", seconds = 3600 }, { hold = \"\", seconds = 1 } } }", "72000" },
             { "return { format = 1, moves = { { hold = \"jump\", seconds = 1, walking = 1 } } }", "walking" },
+            { "return { format = 1, map = \"World\\\\Maps\\\\Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
+            { "return { format = 1, map = 3, moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
         };
         int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
         for (int i = 0; i < nbad; ++i) {
@@ -4995,8 +5201,25 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             else printf("    (moves %d: %s)\n", i, e ? why.text : "taken");
             if (!e) headless_moves_free(hm);
         }
-        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false", refused, nbad);
+        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name", refused, nbad);
         check(refused == nbad, line);
+        const char *named = "return { format = 1, map = \"Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }";
+        e = headless_moves_parse(named, strlen(named), "made", &hm, &why);
+        check(!e && !strcmp(headless_moves_map(hm), "Kalimdor"), e ? why.text : "moves may name the map they are for (1109 step 1o); \"\" when they don't");
+        if (!e) headless_moves_free(hm);
+        /* the project's routes on two converted maps (1109 step 1o): each names its map */
+        static const struct { const char *file, *map; } ROUTES[] = {
+            { "092-test-map-moves-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a" },
+            { "093-test-map-moves-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest" },
+        };
+        for (int i = 0; i < 2; ++i) {
+            snprintf(moves_path + at, sizeof moves_path - at, "%s", ROUTES[i].file);
+            e = headless_moves_read(moves_path, &hm, &why);
+            snprintf(line, sizeof line, "the route tests/%s reads, for the map %s", ROUTES[i].file, ROUTES[i].map);
+            check(!e && !strcmp(headless_moves_map(hm), ROUTES[i].map) && headless_moves_steps(hm) > 480, e ? why.text : line);
+            if (!e) headless_moves_free(hm);
+        }
+        snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
         const char *tiny = "return { format = 1, moves = { { hold = \"\", seconds = 0.001 }, { hold = \"left right\", seconds = 0.08 } } }";
         e = headless_moves_parse(tiny, strlen(tiny), "made", &hm, &why);
         check(!e && headless_moves_steps(hm) == 3, e ? why.text : "a move shorter than a step still takes one; 0.08 seconds (1.6 steps) takes two");
@@ -5241,6 +5464,66 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         int same = ran == 2 && t_receipts_same(r1, r2, diff, sizeof diff);
         snprintf(line, sizeof line, "run twice (1109 step 5): the two receipts' counts are %s (all but started, ended and seconds)", diff);
         check(same && res[0].end_x == res[1].end_x && res[0].end_y == res[1].end_y && res[0].end_z == res[1].end_z && res[0].distance == res[1].distance, line);
+        snprintf(line, sizeof line, "the placed models in the headless world (091, 1109 step 1o): %d models and %d buildings read, %d placed copies (%d WC3 models and %d stand-ins walked through, %d left out), %d solid copies, %d solid triangles; %d steps on models' floors, %d against their walls",
+                 h->models, h->buildings, h->model_copies, h->models_wc3, h->model_stand_ins, h->models_left_out, h->solid_copies, h->solid_triangles, h->steps_on_models, h->steps_walled);
+        check(ran == 2 && h->models > 0 && h->model_copies >= h->models && h->solid_copies <= h->model_copies && (h->solid_triangles > 0) == (h->solid_copies > 0)
+              && res[1].model_copies == h->model_copies && res[1].solid_triangles == h->solid_triangles, line);
+        /* the build's own route (1109 step 1o): to its water and off its
+         * ground's edge, twice, the same receipt; the other map's route refused */
+        {
+            static const struct { const char *file, *map; } ROUTES[] = {
+                { "092-test-map-moves-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a" },
+                { "093-test-map-moves-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest" },
+            };
+            int mine = -1;
+            for (int i = 0; i < 2; ++i) if (!strcasecmp(m.directory, ROUTES[i].map)) mine = i;
+            if (mine < 0) printf("  (no route of the project's is for %s: the water and edge runs are skipped)\n", m.directory);
+            else {
+                char rr[2][700], route[600];
+                snprintf(route, sizeof route, "%.*s%s", (int)at, moves_path, ROUTES[mine].file);
+                HeadlessMoves *rm = NULL;
+                WErr re2 = headless_moves_read(route, &rm, &why);
+                HeadlessResult rres[2];
+                memset(rres, 0, sizeof rres);
+                int rran = 0;
+                for (int k = 0; !re2 && k < 2; ++k) {
+                    snprintf(rr[k], sizeof rr[k], "%s/headless-route-%d", root, k + 1);
+                    Goodbye *g = NULL;
+                    re2 = goodbye_begin(rr[k], build, &g, &why);
+                    HeadlessIn hin = { .start = in, .moves = rm, .world_dir = world };
+                    hin.start.log = lf;
+                    if (!re2) re2 = headless_run(&hin, g, &rres[k], &why);
+                    goodbye_free(g);
+                    rran += !re2;
+                }
+                headless_moves_free(rm);
+                const HeadlessResult *q = &rres[0];
+                snprintf(line, sizeof line, "its route (tests/%s): %d steps, %.1f yards to (%.2f, %.2f, %.2f), %d swimming, %d with no ground under her, %d in the air, lowest %.2f",
+                         ROUTES[mine].file, q->steps, q->distance, q->end_x, q->end_y, q->end_z, q->steps_swimming, q->steps_no_ground, q->steps_airborne, q->lowest_z);
+                check(rran == 2 && q->steps_swimming > 0 && q->steps_no_ground > 0 && q->end_z < q->start_z && q->model_copies == h->model_copies, re2 ? why.text : line);
+                int rsame = rran == 2 && t_receipts_same(rr[0], rr[1], diff, sizeof diff);
+                snprintf(line, sizeof line, "its route run twice: the two receipts' counts are %s", diff);
+                check(rsame && rres[0].end_x == rres[1].end_x && rres[0].end_z == rres[1].end_z && rres[0].steps_swimming == rres[1].steps_swimming, line);
+                /* the other map's route: refused, by map, in the receipt */
+                snprintf(route, sizeof route, "%.*s%s", (int)at, moves_path, ROUTES[1 - mine].file);
+                re2 = headless_moves_read(route, &rm, &why);
+                snprintf(rr[1], sizeof rr[1], "%s/headless-route-other", root);
+                Goodbye *g = NULL;
+                if (!re2) re2 = goodbye_begin(rr[1], build, &g, &why);
+                HeadlessIn hin = { .start = in, .moves = rm, .world_dir = world };
+                hin.start.log = lf;
+                WErr oe = re2 ? re2 : headless_run(&hin, g, NULL, &why);
+                goodbye_free(g);
+                headless_moves_free(rm);
+                LuaData *od = NULL;
+                WErr ore = oe == W_ERR_REFUSED ? lua_data_read(rr[1], 65536, &od, &why) : W_ERR_NOT_FOUND;
+                const LuaValue *ot = ore ? NULL : lua_data_top(od);
+                check(oe == W_ERR_REFUSED && !ore && !strcmp(lua_value_text(lua_value_field(ot, "reason")), "error")
+                      && strstr(lua_value_text(lua_value_field(ot, "why")), ROUTES[1 - mine].map) && !lua_value_field(ot, "steps"),
+                      "the other map's route: refused, naming the map it is for, the receipt saying error with no counts");
+                if (od) lua_data_free(od);
+            }
+        }
         /* and the comparison sees a difference: one move changed (a second
          * less of the first run) gives another receipt */
         {
@@ -5439,6 +5722,11 @@ int main(int argc, char **argv)
      * archive made here, no game data, so before the archives */
     printf("placed models and buildings, and the ground's pictures, through the resolver\n");
     placed_tests(dir);
+    /* }}} */
+
+    /* {{{ the placed models' floors and walls with no window (1109 step 1o) */
+    printf("the placed models' floors and walls, with no window\n");
+    model_solids_tests(dir);
     /* }}} */
 
     /* {{{ Warcraft III's own install as a place, and a converted map's

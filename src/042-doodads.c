@@ -21,6 +21,7 @@
 #include "021-wmo.h"
 #include "060-resolver.h"
 #include "076-placed-models.h"
+#include "091-model-solids.h"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -350,7 +351,7 @@ static void model_from(Doodads *dd, DoodadModel *md, const PlacedModel *pm)
     } else if (pm->m2_bytes) {
         fprintf(stderr, "doodads: %s's skeleton: %s; it stands still\n", name, why.text);
     }
-    if (pm->m2_bytes && m2_collision(pm->m2_bytes, pm->m2_len, &md->solid, &md->nsolid, &why))
+    if (model_solids_of_model(pm, &md->solid, &md->nsolid, &why))   /* its solid shape: 091, shared with the run with no window */
         fprintf(stderr, "doodads: %s's solid shape: %s; it is walked through\n", name, why.text);
     md->moving = moving;
     for (uint32_t i = 0; i < mod->nvertices; ++i) {
@@ -522,18 +523,9 @@ static int load_building(Doodads *dd, const char *name)
             float r = sqrtf(g.vertices[v].x * g.vertices[v].x + g.vertices[v].y * g.vertices[v].y + g.vertices[v].z * g.vertices[v].z);
             if (r > md->radius) md->radius = r;
         }
-        /* its solid triangles (173q), kept in the building's own space */
-        int nt = (int)(g.nindices / 3);
-        md->solid = realloc(md->solid, sizeof(float) * 9 * (size_t)(md->nsolid + nt + 1));
-        for (int t = 0; t < nt; ++t) {
-            if ((uint32_t)t >= g.nflags || !wmo_solid(g.tri_flags[t])) continue;
-            for (int c = 0; c < 3; ++c) {
-                WmoVertex v = g.vertices[g.indices[t * 3 + c]];
-                float *o = md->solid + (size_t)md->nsolid * 9 + c * 3;
-                o[0] = v.x; o[1] = v.y; o[2] = v.z;
-            }
-            ++md->nsolid;
-        }
+        /* its solid triangles (173q), kept in the building's own space
+         * (091, shared with the run with no window) */
+        if (model_solids_of_group(&g, &md->solid, &md->nsolid, &why)) fprintf(stderr, "buildings: %s: %s; its solid shape is left out\n", path, why.text);
         md->pieces = realloc(md->pieces, sizeof *md->pieces * (md->npieces + g.nbatches + 1));
         for (int k = 0; k < g.nbatches; ++k) {
             WmoBatch bt = g.batches[k];
@@ -694,10 +686,8 @@ WErr doodads_add_tile(Doodads *dd, const AdtTile *t, int tile, double ox, double
         int bi = load_building(dd, t->buildings[p->name]);
         if (dd->buildings[bi].stand_in) {
             /* the box stood in: as wide and as tall as the building's box
-             * (MODF's extents, in the placement's axes: 0 and 2 across, 1 up),
-             * a yard at least, so its place shows */
-            float across = fmaxf(fmaxf(p->hi[0] - p->lo[0], p->hi[2] - p->lo[2]), 1.0f), up = fmaxf(p->hi[1] - p->lo[1], 1.0f);
-            for (int k = 0; k < 3; ++k) { m[k] *= across; m[4 + k] *= across; m[8 + k] *= up; }
+             * (MODF's extents), a yard at least, so its place shows (091) */
+            model_solids_stand_in_size(p, m);
         }
         r->p[r->n++] = (Placement){ p->uid, 1, bi, p->doodad_set, { m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15] } };
     }
