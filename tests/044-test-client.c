@@ -57,6 +57,7 @@
 #include "../src/077-slk.h"
 #include "../src/078-wc3-ground.h"
 #include "../src/079-wc3-cliffs.h"
+#include "../src/080-ground-shader.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -2245,14 +2246,19 @@ static unsigned char *t_blp2(int w, int h, const unsigned char *rgba, size_t *le
     }
     return s;
 }
-/* a tileset picture as WC3 lays them out, in one colour: 4 x 4 subtiles of
- * 64 (8 x 4 when extended, the right half whole variations), subtile s's
- * alpha full on exactly the quarters of its corner bits (south-east 1,
- * south-west 2, north-east 4, north-west 8; north at the top) */
-static const unsigned char T_COLOURS[16][3] = {
-    { 200, 40, 40 }, { 40, 200, 40 }, { 40, 40, 200 }, { 200, 200, 40 }, { 40, 200, 200 }, { 200, 40, 200 }, { 120, 120, 120 }, { 250, 150, 50 },
-    { 50, 150, 250 }, { 150, 250, 50 }, { 90, 30, 160 }, { 160, 90, 30 }, { 30, 160, 90 }, { 230, 230, 230 }, { 20, 20, 20 }, { 100, 180, 140 },
-};
+/* a made tileset's colour for subtile s (0 to 31) of tileset k (0 to
+ * 31): each pair its own */
+static void t_colour(int k, int s, unsigned char out[3])
+{
+    out[0] = (unsigned char)(20 + 7 * k);
+    out[1] = (unsigned char)(4 + 8 * s);
+    out[2] = (unsigned char)(230 - 5 * k);
+}
+/* a tileset picture as WC3 lays them out: 4 x 4 subtiles of 64 (8 x 4
+ * when extended, the right half whole variations), each its own colour
+ * (t_colour), subtile s's alpha full on exactly the quarters of its
+ * corner bits (south-east 1, south-west 2, north-east 4, north-west 8;
+ * north at the top) */
 static unsigned char *t_tileset(int k, int extended, size_t *len)
 {
     int w = extended ? 512 : 256, h = 256;
@@ -2260,8 +2266,8 @@ static unsigned char *t_tileset(int k, int extended, size_t *len)
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) {
             unsigned char *p = rgba + ((size_t)y * w + x) * 4;
-            memcpy(p, T_COLOURS[k % 16], 3);
-            int s = (y / 64) * 4 + (x / 64), sx = x % 64, sy = y % 64;
+            int s = (y / 64) * 4 + (x % 256) / 64, sx = x % 64, sy = y % 64;
+            t_colour(k, x >= 256 ? 16 + s : s, p);
             int bit = sy < 32 ? (sx < 32 ? 8 : 4) : (sx < 32 ? 2 : 1);
             p[3] = (x >= 256 || (s & bit)) ? 255 : 0;
         }
@@ -2269,24 +2275,6 @@ static unsigned char *t_tileset(int k, int extended, size_t *len)
     free(rgba);
     return b;
 }
-/* the chunk's colour at blend point (px, py), as 038's shader mixes it:
- * layer 0, then layers 1 to 3 over it by the point's strengths */
-static void t_mix(const unsigned char *const cols[4], const unsigned char *rgb, unsigned char out[3])
-{
-    double c[3];
-    for (int d = 0; d < 3; ++d) c[d] = cols[0][d];
-    for (int l = 1; l < 4; ++l) for (int d = 0; d < 3; ++d) c[d] += (cols[l][d] - c[d]) * (rgb[l - 1] / 255.0);
-    for (int d = 0; d < 3; ++d) out[d] = (unsigned char)(c[d] + 0.5);
-}
-/* Compares a painted tile with WC3's own laying: in each painted chunk,
- * each blend point's mixed colour against the colour of the tile point
- * at its cell's corner nearest it (with these pictures, WC3's layering
- * gives each quarter of a cell its corner's tileset), or the cell's
- * south-west point's for a bare cell. Counts points that match, in all
- * and in chunks of four tilesets or fewer. `cols` is each tileset's
- * colour; `tex_set` gives each of the tile's pictures its tileset, -1
- * for the ground file's own. */
-typedef struct { long points, same, exact_points, exact_same; int chunks, hit_twice; double worst_centre; } TPaintCheck;
 /* the tileset a cliff cell with a model is laid with (its cliff
  * tileset's ground, found by its id), or -1: no cliffs, no cliff, or no ground */
 static int t_cliff_set(const Wc3Ground *w, int i, int j)
@@ -2298,59 +2286,143 @@ static int t_cliff_set(const Wc3Ground *w, int i, int j)
     for (int k = 0; ground[0] && k < wc3_ground_tilesets(w); ++k) if (!strcmp(wc3_ground_tileset(w, k)->id, ground)) return k;
     return -1;
 }
-static void t_paint_check(const Wc3Ground *w, const W3ePrep *prep, const AdtTile *adt, int chunk_tex[256][4], const unsigned char *blend, int stride,
-                          const unsigned char painted[256], const int *tex_set, unsigned char *hit, TPaintCheck *pc)
+/* WC3's own laying of cell (i, j), worked out here from its points:
+ * its tilesets lowest first and the piece (0 to 31) each is laid with:
+ * the lowest its south-west point's variation's (063's w3e_variation),
+ * each higher one its corners' bits (south-east 1, south-west 2,
+ * north-east 4, north-west 8). A cliff cell with a model: its cliff's
+ * ground alone; a blighted cell (the blight named): the blight on its
+ * blighted corners; another bare cell: its south-west point's tileset
+ * alone. How many. */
+static int t_wc3_cell(const Wc3Ground *w, const W3ePrep *prep, int i, int j, int t[4], int piece[4])
+{
+    const W3eGround *g = wc3_ground_w3e(w);
+    int kind = prep->cell_kind[(size_t)j * (g->width - 1) + i], blight = wc3_ground_blight(w);
+    const W3ePoint *sw = w3e_point(g, i, j);
+    int corner[4] = { -1, -1, -1, -1 }, n = 0;            /* south-west, south-east, north-west, north-east */
+    static const int BIT[4] = { 2, 1, 8, 4 };
+    int cs = t_cliff_set(w, i, j);
+    if (cs >= 0) { t[0] = cs; n = 1; }
+    else if (kind == W3E_CELL_TEXTURED || (kind == W3E_CELL_BLIGHT && blight >= 0)) {
+        for (int q = 0; q < 4; ++q) {
+            const W3ePoint *p = w3e_point(g, i + (q & 1), j + (q >> 1));
+            corner[q] = p->is_blight && blight >= 0 ? blight : p->ground_texture;
+        }
+        for (int q = 0; q < 4; ++q) {
+            int seen = 0;
+            for (int k = 0; k < n; ++k) seen |= t[k] == corner[q];
+            if (!seen) t[n++] = corner[q];
+        }
+        for (int a = 1; a < n; ++a) for (int b = a; b > 0 && t[b - 1] > t[b]; --b) { int x = t[b]; t[b] = t[b - 1]; t[b - 1] = x; }
+    } else { t[0] = sw->ground_texture; n = 1; }
+    for (int k = 0; k < n; ++k) {
+        piece[k] = 0;
+        if (!k) piece[k] = w3e_variation(wc3_ground_tileset(w, t[0])->extended, sw->texture_details);
+        else for (int q = 0; q < 4; ++q) if (corner[q] == t[k]) piece[k] |= BIT[q];
+    }
+    return n;
+}
+/* Compares a laid tile (078's pieces, the pictures they name as 033
+ * unpacks them) with WC3's own laying, chunk by painted chunk: each
+ * cell's pieces against t_wc3_cell's, and each blend point's colour, as
+ * 080's shader works it out from the cells (a subtile's texel a half
+ * texel in from its edges at most, the lowest whole and each higher one
+ * over it by its alpha), against WC3's: with these pictures, WC3's
+ * layering gives each quarter of a cell its corner's tileset's piece
+ * (the lowest's variation, a higher one's corner piece). Counts all, and
+ * apart those in chunks laying more than four tilesets. `px` holds each
+ * of the tile's pictures unpacked. */
+typedef struct { long points, same, many_points, many_same, cells, cells_same, varied, right; int chunks, many_chunks, hit_twice; double worst_centre; } TLayCheck;
+static void t_lay_check(const Wc3Ground *w, const W3ePrep *prep, const AdtTile *adt, const Wc3Lay *lay, const unsigned char painted[256],
+                        const GroundPixels *px, unsigned char *hit, TLayCheck *lc)
 {
     const W3eGround *g = wc3_ground_w3e(w);
     const float step = ADT_CHUNK_SIZE / 8;
+    /* each of the tile's pictures: its tileset, and 0 or 16 (an extended one's right half) */
+    int pic_set[256], pic_off[256];
+    for (int t = 0; t < adt->ntextures; ++t) {
+        pic_set[t] = -1; pic_off[t] = 0;
+        for (int k = 0; k < wc3_ground_tilesets(w); ++k) {
+            const Wc3Tileset *ts = wc3_ground_tileset(w, k);
+            if (!strcmp(adt->textures[t], ts->layer)) pic_set[t] = k;
+            else if (ts->layer_right[0] && !strcmp(adt->textures[t], ts->layer_right)) { pic_set[t] = k; pic_off[t] = 16; }
+        }
+    }
     for (int k = 0; k < 256; ++k) {
         if (!painted[k]) continue;
-        ++pc->chunks;
+        ++lc->chunks;
         const AdtChunk *c = &adt->chunks[k];
         int crow = k / 16, ccol = k % 16;
-        const unsigned char *cols[4];
-        for (int l = 0; l < 4; ++l) { int t = tex_set[chunk_tex[k][l]]; cols[l] = T_COLOURS[(t < 0 ? 15 : t) % 16]; }
-        int ci[8][8], cj[8][8], used[32] = { 0 }, nused = 0;
+        int ci[8][8], cj[8][8], wt[8][8][4], wp[8][8][4], wn[8][8], used[32] = { 0 }, nused = 0;
         for (int r = 0; r < 8; ++r)
             for (int cc = 0; cc < 8; ++cc) {
                 double fx, fy;
-                ci[r][cc] = -1;
+                wn[r][cc] = 0;
                 if (!wc3_ground_cell_at(w, c->x - (r + 0.5) * step, c->y - (cc + 0.5) * step, &ci[r][cc], &cj[r][cc], &fx, &fy)) { ci[r][cc] = -1; continue; }
                 double off = fabs(fx - 0.5) > fabs(fy - 0.5) ? fabs(fx - 0.5) : fabs(fy - 0.5);
-                if (off > pc->worst_centre) pc->worst_centre = off;
+                if (off > lc->worst_centre) lc->worst_centre = off;
                 size_t at = (size_t)cj[r][cc] * (g->width - 1) + ci[r][cc];
-                if (hit) { if (hit[at]) ++pc->hit_twice; hit[at] = 1; }
-                int cs = t_cliff_set(w, ci[r][cc], cj[r][cc]);
-                if (cs >= 0) { if (!used[cs]) { used[cs] = 1; ++nused; } continue; }
-                for (int q = 0; q < 4; ++q) {
-                    const W3ePoint *pt = w3e_point(g, ci[r][cc] + (q & 1), cj[r][cc] + (q >> 1));
-                    int t = pt->is_blight && wc3_ground_blight(w) >= 0 ? wc3_ground_blight(w) : pt->ground_texture;
-                    if (t < 32 && !used[t]) { used[t] = 1; ++nused; }
-                }
+                if (hit) { if (hit[at]) ++lc->hit_twice; hit[at] = 1; }
+                wn[r][cc] = t_wc3_cell(w, prep, ci[r][cc], cj[r][cc], wt[r][cc], wp[r][cc]);
+                for (int q = 0; q < wn[r][cc]; ++q) if (wt[r][cc][q] < 32 && !used[wt[r][cc][q]]) { used[wt[r][cc][q]] = 1; ++nused; }
+                /* the cell's pieces as laid, against WC3's */
+                const Wc3Lay *e = &lay[(size_t)(crow * 8 + r) * WC3_TILE_CELLS + (size_t)(ccol * 8 + cc)];
+                int same = 1, q = 0;
+                for (; q < 4 && e->sub[q] != WC3_PIECE_NONE; ++q)
+                    same &= q < wn[r][cc] && pic_set[e->pic[q]] == wt[r][cc][q] && pic_off[e->pic[q]] + e->sub[q] == wp[r][cc][q];
+                same &= q == wn[r][cc];
+                ++lc->cells; lc->cells_same += same;
+                lc->varied += wn[r][cc] && wp[r][cc][0] != 15;     /* its lowest not subtile 15 */
+                lc->right += wn[r][cc] && wp[r][cc][0] >= 16;      /* one of an extended picture's whole variations */
             }
+        int many = nused > 4;
+        lc->many_chunks += many;
         for (int py = 0; py < 64; ++py)
-            for (int px = 0; px < 64; ++px) {
-                double rf = py * 8.0 / 63.0, cf = px * 8.0 / 63.0;
+            for (int pxl = 0; pxl < 64; ++pxl) {
+                double rf = py * 8.0 / 63.0, cf = pxl * 8.0 / 63.0;
                 int r = rf >= 8 ? 7 : (int)rf, cc = cf >= 8 ? 7 : (int)cf;
-                if (ci[r][cc] < 0) continue;
-                int i = ci[r][cc], j = cj[r][cc];
-                int bare = prep->cell_kind[(size_t)j * (g->width - 1) + i] != W3E_CELL_TEXTURED;
-                int east = cf - cc >= 0.5, north = rf - r < 0.5;
-                int cs = t_cliff_set(w, i, j);
-                const W3ePoint *qp = w3e_point(g, i + east, j + north);
-                int blighted = wc3_ground_blight(w) >= 0 && prep->cell_kind[(size_t)j * (g->width - 1) + i] == W3E_CELL_BLIGHT;
-                int t = cs >= 0 ? cs
-                      : blighted ? (qp->is_blight ? wc3_ground_blight(w) : qp->ground_texture)   /* the blight a tileset on its corners */
-                      : bare ? w3e_point(g, i, j)->ground_texture : qp->ground_texture;
-                unsigned char got[3];
-                const unsigned char *b = blend + ((size_t)(crow * 64 + py) * 1024 + (size_t)(ccol * 64 + px)) * stride;
-                t_mix(cols, b, got);
-                int same = abs(got[0] - T_COLOURS[t % 16][0]) <= 1 && abs(got[1] - T_COLOURS[t % 16][1]) <= 1 && abs(got[2] - T_COLOURS[t % 16][2]) <= 1;
-                ++pc->points; pc->same += same;
-                if (nused <= 4) { ++pc->exact_points; pc->exact_same += same; }
+                if (ci[r][cc] < 0 || !wn[r][cc]) continue;
+                double f[2] = { cf - cc, rf - r };
+                /* the shader's colour */
+                const Wc3Lay *e = &lay[(size_t)(crow * 8 + r) * WC3_TILE_CELLS + (size_t)(ccol * 8 + cc)];
+                double got[3] = { 0, 0, 0 };
+                for (int q = 0; q < 4 && e->sub[q] != WC3_PIECE_NONE; ++q) {
+                    const GroundPixels *pp = &px[e->pic[q]];
+                    int side = pp->width, sub = side / 4;
+                    double gx = f[0] < 1.0 / 128 ? 1.0 / 128 : f[0] > 127.0 / 128 ? 127.0 / 128 : f[0];
+                    double gy = f[1] < 1.0 / 128 ? 1.0 / 128 : f[1] > 127.0 / 128 ? 127.0 / 128 : f[1];
+                    int X = (e->sub[q] % 4) * sub + (int)(gx * sub), Y = (e->sub[q] / 4) * sub + (int)(gy * sub);
+                    const unsigned char *s = pp->rgba + ((size_t)Y * side + X) * 4;
+                    double a = q ? s[3] / 255.0 : 1;
+                    for (int d = 0; d < 3; ++d) got[d] += (s[d] - got[d]) * a;
+                }
+                /* WC3's: the nearest corner's tileset's piece */
+                int east = f[0] >= 0.5, north = f[1] < 0.5;
+                int t = wt[r][cc][0], pc = wp[r][cc][0];
+                if (wn[r][cc] > 1) {
+                    const W3ePoint *qp = w3e_point(g, ci[r][cc] + east, cj[r][cc] + north);
+                    int corner = qp->is_blight && wc3_ground_blight(w) >= 0 ? wc3_ground_blight(w) : qp->ground_texture;
+                    for (int q = 0; q < wn[r][cc]; ++q) if (wt[r][cc][q] == corner) { t = corner; pc = wp[r][cc][q]; }
+                }
+                unsigned char want[3];
+                t_colour(t, pc, want);
+                int same = fabs(got[0] - want[0]) <= 1 && fabs(got[1] - want[1]) <= 1 && fabs(got[2] - want[2]) <= 1;
+                ++lc->points; lc->same += same;
+                if (many) { ++lc->many_points; lc->many_same += same; }
             }
     }
 }
+/* each of a laid tile's pictures unpacked as 033 does (into px[256]) */
+static void t_lay_pixels(const GroundPlace *gp, const AdtTile *adt, const Wc3Lay *lay, GroundPixels *px)
+{
+    WWhy why;
+    memset(px, 0, sizeof *px * 256);
+    unsigned char needed[256] = { 0 };
+    for (size_t c = 0; c < (size_t)WC3_TILE_CELLS * WC3_TILE_CELLS; ++c)
+        for (int q = 0; q < 4 && lay[c].sub[q] != WC3_PIECE_NONE; ++q) needed[lay[c].pic[q]] = 1;
+    for (int t = 0; t < adt->ntextures; ++t) if (needed[t]) ground_prep_pixels(gp, adt->textures[t], &px[t], &why);
+}
+static void t_lay_pixels_free(GroundPixels *px) { for (int t = 0; t < 256; ++t) { free(px[t].rgba); free(px[t].smaller); } }
 
 static void wc3_place_tests(const char *dir, const char *build)
 {
@@ -2547,15 +2619,22 @@ static void wc3_place_tests(const char *dir, const char *build)
         if (!e) {
             const Wc3Tileset *t1 = wc3_ground_tileset(w, 1), *t5 = wc3_ground_tileset(w, 5);
             check(!strcmp(t1->id, "Agrs") && !strcmp(t1->path, "TerrainArt\\Made\\Agrs_pic.blp") && t1->source == ASSET_FROM_BLIZZARD && t1->extended
-                  && !wc3_ground_tileset(w, 0)->extended && t1->width == 512 && !strcmp(t1->layer, "TerrainArt\\Made\\Agrs_pic.blp" WC3_LAYER_MARK),
-                  "each tileset: its id, its picture's path from the sheet, from the install, extended when twice as wide");
+                  && !wc3_ground_tileset(w, 0)->extended && t1->width == 512 && !strcmp(t1->layer, "TerrainArt\\Made\\Agrs_pic.blp" WC3_LAYER_MARK)
+                  && !strcmp(t1->layer_right, "TerrainArt\\Made\\Agrs_pic.blp" WC3_RIGHT_MARK WC3_LAYER_MARK) && !wc3_ground_tileset(w, 0)->layer_right[0],
+                  "each tileset: its id, its picture's path from the sheet, from the install, extended when twice as wide (a layer for each half)");
             check(!strcmp(t5->id, "Zzzz") && !t5->path[0] && t5->source == ASSET_FROM_PLACEHOLDER, "a tileset the sheet has no row for: the checker");
             check(!wc3_ground_cliffs(w), "an install with no CliffTypes.slk: no cliffs, their cells laid as before");
             unsigned char *px = NULL;
             int side = 0;
+            unsigned char want0[3], want16[3], want31[3];
+            t_colour(1, 0, want0); t_colour(1, 16, want16); t_colour(1, 31, want31);
             e = wc3_ground_layer(w, t1->layer, &px, &side, &why);
-            check(!e && side == 64 && px[0] == T_COLOURS[1][0] && px[1] == T_COLOURS[1][1] && px[3] == 255 && px[(64 * 64 - 1) * 4 + 3] == 255,
-                  "a layer's picture: its tileset's whole tile (subtile 15), 64 x 64, opaque");
+            check(!e && side == 256 && !memcmp(px, want0, 3) && px[3] == 0 && px[(256 * 256 - 1) * 4 + 3] == 255,
+                  "a layer's picture: its tileset's picture's left square, 4 x 4 subtiles of 64, alpha and all (subtile 0 clear, 15 whole)");
+            free(px);
+            e = wc3_ground_layer(w, t1->layer_right, &px, &side, &why);
+            check(!e && side == 256 && !memcmp(px, want16, 3) && !memcmp(px + (256 * 256 - 1) * 4, want31, 3) && px[3] == 255,
+                  "an extended picture's right half: its 16 whole variations, a layer of its own");
             free(px);
             check(wc3_ground_layer(w, "Textures\\Other.blp|wc3", &px, &side, &why) == W_ERR_NOT_FOUND, "a layer no tileset has: not found");
             int i, j;
@@ -2576,45 +2655,72 @@ static void wc3_place_tests(const char *dir, const char *build)
                 adt->chunks[k].y = (float)(Y0 - (k % 16) * 8 * step);
                 for (int l = 0; l < 4; ++l) tex[k][l] = l % 2;
             }
-            unsigned char *rgb = calloc((size_t)1024 * 1024, 3), painted[256];
+            Wc3Lay *lay = malloc(sizeof *lay * WC3_TILE_CELLS * WC3_TILE_CELLS);
+            unsigned char painted[256];
             Wc3Paint pc = { 0 };
-            e = wc3_ground_paint_tile(w, adt, tex, rgb, painted, &pc, &why);
-            int others = 0;
+            e = wc3_ground_lay_tile(w, adt, lay, tex, painted, &pc, &why);
+            int others = 0, unlaid = 0;
             for (int k = 2; k < 256; ++k) others += painted[k] || tex[k][0] != 0 || tex[k][1] != 1;
-            snprintf(line, sizeof line, "the two chunks on the WC3 grid painted (%d cells, %d bare, %d folded), the other 254 left with the ground file's pictures", pc.cells, pc.bare, pc.folded);
-            check(!e && painted[0] && painted[1] && !others && pc.painted == 2 && pc.cells == 128 && pc.outside == 0 && pc.bare == 8 && pc.folded > 0, e ? why.text : line);
-            int tex_set[256];
-            for (int t = 0; t < 256; ++t) tex_set[t] = -1;
-            for (int t = 2; t < adt->ntextures; ++t)
-                for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(adt->textures[t], wc3_ground_tileset(w, k)->layer)) tex_set[t] = k;
-            int chunk0_lowest = tex_set[tex[0][0]] < tex_set[tex[0][1]] && tex_set[tex[0][1]] < tex_set[tex[0][2]] && tex_set[tex[0][2]] < tex_set[tex[0][3]];
-            int kept[6] = { 0 }, nkept = 0, once = 1;
-            for (int k = 0; k < 2; ++k) for (int l = 0; l < 4; ++l) { int ts = tex_set[tex[k][l]]; if (ts >= 0 && !kept[ts]) { kept[ts] = 1; ++nkept; } }
-            for (int t = 2; t < adt->ntextures; ++t) for (int u = t + 1; u < adt->ntextures; ++u) once &= strcmp(adt->textures[t], adt->textures[u]) != 0;
-            check(adt->ntextures == 2 + nkept && nkept >= 4 && once && chunk0_lowest && tex_set[tex[0][0]] == 0,
-                  "the tile's list gains a layer for each tileset its chunks keep, once each; a chunk's four drawn lowest tileset first");
+            for (int r = 0; r < WC3_TILE_CELLS; ++r)
+                for (int c = 0; c < WC3_TILE_CELLS; ++c) unlaid += (r < 8 && c < 16) != (lay[r * WC3_TILE_CELLS + c].sub[0] != WC3_PIECE_NONE);
+            snprintf(line, sizeof line, "the two chunks on the WC3 grid laid (%d cells, %d bare, %d with another variation; one chunk lays %d tilesets), the other 254 left with the ground file's pictures, their cells with no piece",
+                     pc.cells, pc.bare, pc.varied, pc.most);
+            check(!e && painted[0] && painted[1] && !others && !unlaid && pc.painted == 2 && pc.cells == 128 && pc.outside == 0 && pc.bare == 8 && pc.most == 5 && pc.varied > 64, e ? why.text : line);
+            int once = 1, named = 1;
+            for (int t = 2; t < adt->ntextures; ++t) {
+                int found = 0;
+                for (int k = 0; k < wc3_ground_tilesets(w); ++k) found |= !strcmp(adt->textures[t], wc3_ground_tileset(w, k)->layer) || !strcmp(adt->textures[t], wc3_ground_tileset(w, k)->layer_right);
+                named &= found;
+                for (int u = t + 1; u < adt->ntextures; ++u) once &= strcmp(adt->textures[t], adt->textures[u]) != 0;
+            }
+            check(adt->ntextures > 2 + 4 && once && named && tex[0][0] == tex[0][3] && tex[0][0] >= 2,
+                  "the tile's list gains a layer for each tileset picture (or half) its cells lay, once each; a chunk's own four its most used tileset's");
             /* 063's preparation, for which cells are bare */
             uint8_t ext[6] = { 0, 1, 0, 0, 0, 0 };
             W3eGround *g2 = NULL;
             W3ePrep *prep = NULL;
             if (!w3e_read(o.b, o.n, &g2, &why)) w3e_prep(g2, ext, 6, &prep, &why);
-            TPaintCheck chk = { 0 };
-            if (prep) t_paint_check(w, prep, adt, tex, rgb, 3, painted, tex_set, NULL, &chk);
-            snprintf(line, sizeof line, "chunk 0 (four tilesets) as WC3 lays it: each quarter of each cell its corner's tileset, a bare cell its south-west one's (%ld of %ld points)",
-                     chk.exact_same, chk.exact_points);
-            check(prep && chk.exact_points == 4096 && chk.exact_same == chk.exact_points, line);
-            snprintf(line, sizeof line, "chunk 1 (five tilesets) folded to four: %ld of its %ld points as WC3 lays them", chk.same - chk.exact_same, chk.points - chk.exact_points);
-            check(chk.points == 8192 && chk.same - chk.exact_same > (chk.points - chk.exact_points) / 2 && chk.same < chk.points, line);
+            GroundPlace lp = { .assets = r, .wc3 = w };
+            GroundPixels *lpx = malloc(sizeof *lpx * 256);
+            t_lay_pixels(&lp, adt, lay, lpx);
+            TLayCheck chk = { 0 };
+            if (prep) t_lay_check(w, prep, adt, lay, painted, lpx, NULL, &chk);
+            snprintf(line, sizeof line, "both chunks as WC3 lays them, cell by cell: %ld of %ld cells' pieces, %ld of %ld points (each quarter of a cell its corner's tileset's piece, the lowest's its variation's; a bare cell its south-west one's)",
+                     chk.cells_same, chk.cells, chk.same, chk.points);
+            check(prep && chk.cells == 128 && chk.cells_same == 128 && chk.points == 8192 && chk.same == 8192, line);
+            snprintf(line, sizeof line, "chunk 1, laying five tilesets, as WC3 lays it too (%ld of %ld points; four were the most before)", chk.many_same, chk.many_points);
+            check(chk.many_chunks == 1 && chk.many_points == 4096 && chk.many_same == 4096, line);
+            t_lay_pixels_free(lpx); free(lpx);
+            /* the cells as the card takes them (033), each piece's picture by its layer there */
+            GroundPrep *fake = calloc(1, sizeof *fake);
+            fake->wc3_lay = lay;
+            int layer_of[256];
+            for (int t = 0; t < 256; ++t) layer_of[t] = 255 - t;
+            unsigned char *texels = malloc((size_t)2 * WC3_TILE_CELLS * WC3_TILE_CELLS * 4);
+            ground_prep_cell_texels(fake, layer_of, texels);
+            int packed = 1;
+            for (int r = 0; r < WC3_TILE_CELLS; ++r)
+                for (int c = 0; c < WC3_TILE_CELLS; ++c)
+                    for (int q = 0; q < 4; ++q) {
+                        const Wc3Lay *e2 = &lay[r * WC3_TILE_CELLS + c];
+                        const unsigned char *tx = texels + ((size_t)r * 256 + (size_t)c * 2) * 4;
+                        packed &= tx[4 + q] == e2->sub[q] && tx[q] == (e2->sub[q] == WC3_PIECE_NONE ? 0 : layer_of[e2->pic[q]]);
+                    }
+            check(packed, "the cells packed for the card: a cell's row its row, texel 2c its pieces' layers there, 2c + 1 their subtiles (255 none)");
+            check(strstr(GROUND_FS, "uniform sampler2D cells") && strstr(GROUND_FS, "uniform int has_cells") && strstr(GROUND_FS, "texelFetch(cells, ivec2(at.x * 2, at.y)")
+                  && strstr(GROUND_FS, "texelFetch(cells, ivec2(at.x * 2 + 1, at.y)") && strstr(GROUND_VS, "flat out vec4 lay"),
+                  "080's shader reads the cells as they are packed: texel 2c the layers, 2c + 1 the subtiles, by the uniforms 038 sets");
+            free(texels); free(fake);
+            free(lay);
             w3e_prep_free(prep); w3e_free(g2);
-            /* through the ground's preparation (033): a WC3 layer's name is its whole tile */
+            /* through the ground's preparation (033): a WC3 layer's name is its square of subtiles */
             GroundPlace gp = { .assets = r, .wc3 = w };
             GroundPixels gpx = { 0 };
-            e = ground_prep_pixels(&gp, t1->layer, &gpx, &why);
-            check(!e && gpx.width == 64 && gpx.height == 64 && gpx.smaller && gpx.rgba[2] == T_COLOURS[1][2], e ? why.text : "033 gives a WC3 layer's name its whole tile, with its smaller copies");
+            e = ground_prep_pixels(&gp, t1->layer_right, &gpx, &why);
+            check(!e && gpx.width == 256 && gpx.height == 256 && gpx.smaller && gpx.rgba[2] == want16[2], e ? why.text : "033 gives a WC3 layer's name its square of subtiles, with its smaller copies");
             free(gpx.rgba); free(gpx.smaller);
             gp.wc3 = NULL;
             check(ground_prep_pixels(&gp, t1->layer, &gpx, &why) == W_ERR_NOT_FOUND, "a WC3 layer with no WC3 ground: not found");
-            free(rgb);
             adt_free(adt); free(adt);
             wc3_ground_free(w);
         }
@@ -2725,8 +2831,8 @@ static void wc3_place_tests(const char *dir, const char *build)
             for (int k = 0; k < 16; ++k) ext[k] = k < wc3_ground_tilesets(w) && wc3_ground_tileset(w, k)->extended;
             W3ePrep *prep = NULL;
             w3e_prep(wg, ext, wc3_ground_tilesets(w), &prep, &why);
-            TPaintCheck chk = { 0 };
-            int tiles = 0, own = 0, layers = 0, whole = 0;
+            TLayCheck chk = { 0 };
+            int tiles = 0, own = 0, layers = 0, squares = 0, packed = 1, found_cell = 1;
             for (int a1 = 0; !e && a1 < 64; ++a1)
                 for (int b1x = 0; !e && b1x < 64; ++b1x) {
                     snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, a1, b1x);
@@ -2736,18 +2842,39 @@ static void wc3_place_tests(const char *dir, const char *build)
                     e = ground_prep_tile(&gp, b1x, a1, NULL, NULL, &gpr, &why);
                     if (e) break;
                     ++tiles;
-                    unsigned char painted[256];
-                    int tex_set[256];
-                    for (int t = 0; t < 256; ++t) tex_set[t] = -1;
-                    for (int t = 0; t < gpr->adt->ntextures; ++t)
-                        for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(gpr->adt->textures[t], wc3_ground_tileset(w, k)->layer)) tex_set[t] = k;
+                    unsigned char painted[256] = { 0 };
                     for (int k = 0; k < 256; ++k) {
-                        painted[k] = tex_set[gpr->chunk_tex[k][0]] >= 0;
+                        painted[k] = gpr->wc3_lay && gpr->wc3_lay[(size_t)(k / 16 * 8) * WC3_TILE_CELLS + (size_t)(k % 16 * 8)].sub[0] != WC3_PIECE_NONE;
                         own += !painted[k];
                     }
                     for (int t = 0; t < gpr->adt->ntextures; ++t)
-                        if (gpr->needed[t] && tex_set[t] >= 0) { ++layers; whole += gpr->pixels[t].width == 64 && gpr->pixels[t].rgba[3] == 255; }
-                    t_paint_check(w, prep, gpr->adt, gpr->chunk_tex, gpr->blend, 4, painted, tex_set, hit, &chk);
+                        if (gpr->needed[t] && strstr(gpr->adt->textures[t], WC3_LAYER_MARK)) { ++layers; squares += gpr->pixels[t].width == 256 && gpr->pixels[t].height == 256; }
+                    if (gpr->wc3_lay) {
+                        t_lay_check(w, prep, gpr->adt, gpr->wc3_lay, painted, gpr->pixels, hit, &chk);
+                        /* packed for the card as laid; and each cell's centre point, by the shader's own reckoning
+                         * from 033's texture places (its chunk from uv2, the cell in it from uv), finds its own */
+                        int layer_of[256];
+                        for (int t = 0; t < 256; ++t) layer_of[t] = t;
+                        unsigned char *texels = malloc((size_t)2 * WC3_TILE_CELLS * WC3_TILE_CELLS * 4);
+                        ground_prep_cell_texels(gpr, layer_of, texels);
+                        for (size_t c = 0; c < (size_t)WC3_TILE_CELLS * WC3_TILE_CELLS; ++c)
+                            for (int q = 0; q < 4; ++q)
+                                packed &= texels[c * 8 + 4 + q] == gpr->wc3_lay[c].sub[q] && (gpr->wc3_lay[c].sub[q] == WC3_PIECE_NONE || texels[c * 8 + q] == gpr->wc3_lay[c].pic[q]);
+                        free(texels);
+                        for (int qn = 0; qn < 4; ++qn) {
+                            const GroundQuarter *gq = &gpr->quarter[qn];
+                            for (int qk = 0; qk < 64; ++qk)
+                                for (int i = 0; i < 145; ++i) {
+                                    if (i % 17 < 9) continue;           /* the cells' centres */
+                                    int crow = (qn / 2) * 8 + qk / 8, ccol = (qn % 2) * 8 + qk % 8;
+                                    const float *u = gq->texcoords + (qk * 145 + i) * 2, *u2 = gq->texcoords2 + (qk * 145 + i) * 2;
+                                    int cx = (int)floorf(u[0]), cy = (int)floorf(u[1]);
+                                    cx = cx < 0 ? 0 : cx > 7 ? 7 : cx; cy = cy < 0 ? 0 : cy > 7 ? 7 : cy;
+                                    int ax = (int)floorf(u2[0] * 16) * 8 + cx, ay = (int)floorf(u2[1] * 16) * 8 + cy;
+                                    found_cell &= ay == crow * 8 + i / 17 && ax == ccol * 8 + (i % 17 - 9);
+                                }
+                        }
+                    }
                     ground_prep_free(gpr, 0);
                 }
             long cells = 0;
@@ -2757,13 +2884,17 @@ static void wc3_place_tests(const char *dir, const char *build)
             snprintf(line, sizeof line, "every WC3 cell (%ld of %d x %d) lies in exactly one cell of the ground's chunks, its centre on WC3's (%d twice; the farthest %.4f of a cell off)",
                      cells, wg->width - 1, wg->height - 1, chk.hit_twice, chk.worst_centre);
             check(cells == (long)(wg->width - 1) * (wg->height - 1) && chk.hit_twice == 0 && chk.worst_centre < 0.01, line);
-            snprintf(line, sizeof line, "in chunks of four tilesets or fewer, every blend point as WC3 lays it (%ld of %ld)", chk.exact_same, chk.exact_points);
-            check(chk.exact_points > 0 && chk.exact_same == chk.exact_points, line);
-            snprintf(line, sizeof line, "over all its chunks %ld of %ld blend points (%.1f%%) as WC3 lays them; the rest in chunks of more than four tilesets, folded",
+            snprintf(line, sizeof line, "every cell laid as WC3 lays it, each its own variation (%ld of %ld cells' pieces; %ld laid with a piece other than subtile 15, %ld of them an extended picture's variation)",
+                     chk.cells_same, chk.cells, chk.varied, chk.right);
+            check(chk.cells > 0 && chk.cells_same == chk.cells, line);
+            snprintf(line, sizeof line, "over all its chunks %ld of %ld blend points (%.1f%%) as WC3 lays them, as the shader reads the cells",
                      chk.same, chk.points, chk.points ? 100.0 * chk.same / chk.points : 0.0);
-            check(chk.points > 0 && chk.same * 10 > chk.points * 8, line);
-            snprintf(line, sizeof line, "each WC3 layer a tile needs unpacked as its tileset's whole tile, 64 x 64 (%d of %d)", whole, layers);
-            check(layers > 0 && whole == layers, line);
+            check(chk.points > 0 && chk.same == chk.points, line);
+            snprintf(line, sizeof line, "in its %d chunks laying more than four tilesets too: %ld of %ld blend points", chk.many_chunks, chk.many_same, chk.many_points);
+            check(chk.many_same == chk.many_points, line);
+            check(packed && found_cell, "its cells packed for the card as laid, and each cell's centre point finds its own cell by the shader's reckoning from 033's texture places");
+            snprintf(line, sizeof line, "each WC3 layer a tile needs unpacked as its square of subtiles, 256 x 256 (%d of %d)", squares, layers);
+            check(layers > 0 && squares == layers, line);
             free(hit);
             w3e_prep_free(prep);
             maps_world_free(mw); free(mw);
@@ -2969,24 +3100,28 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             adt->ntextures = 1;
             int tex[256][4] = { { 0 } };
             for (int k = 0; k < 256; ++k) { adt->chunks[k].x = (float)(X0 - (k / 16) * 8 * step); adt->chunks[k].y = (float)(Y0 - (k % 16) * 8 * step); }
-            unsigned char *rgb = calloc((size_t)1024 * 1024, 3), painted[256];
+            Wc3Lay *lay = malloc(sizeof *lay * WC3_TILE_CELLS * WC3_TILE_CELLS);
+            unsigned char painted[256];
             Wc3Paint pc = { 0 };
-            e = wc3_ground_paint_tile(w, adt, tex, rgb, painted, &pc, &why);
-            int tex_set[256];
-            for (int t = 0; t < 256; ++t) tex_set[t] = -1;
-            for (int t = 1; t < adt->ntextures; ++t)
-                for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(adt->textures[t], wc3_ground_tileset(w, k)->layer)) tex_set[t] = k;
+            e = wc3_ground_lay_tile(w, adt, lay, tex, painted, &pc, &why);
             uint8_t ext[2] = { 0 };
             W3ePrep *prep = NULL;
             if (g) w3e_prep(g, ext, 2, &prep, &why);
-            TPaintCheck chk = { 0 };
-            if (prep && !e) t_paint_check(w, prep, adt, tex, rgb, 3, painted, tex_set, NULL, &chk);
-            snprintf(line, sizeof line, "the chunk laid as WC3 lays it: its %d cliff cells with a model on their cliff's ground, its ramps' on their own, its %d blighted cells with the blight on their blighted corners (%ld of %ld points)",
-                     pc.cliff_ground, pc.blight, chk.exact_same, chk.exact_points);
-            check(!e && painted[0] && pc.cliff_ground > 0 && pc.cliff_ground < cc.placed && pc.blight == 4 && chk.exact_points == 4096 && chk.exact_same == 4096, line);
-            int blight_shown = 0;
-            for (int px = 0; px < 8; ++px) blight_shown += rgb[(size_t)(63 - px) * 1024 * 3 + (size_t)px * 3 + 2] == 255;   /* layer 3 (the blight) at the south-west corner */
-            check(blight_shown == 8, "the blight's layer full at a blighted corner");
+            GroundPlace lp = { .assets = r, .wc3 = w };
+            GroundPixels *lpx = malloc(sizeof *lpx * 256);
+            t_lay_pixels(&lp, adt, lay, lpx);
+            TLayCheck chk = { 0 };
+            if (prep && !e) t_lay_check(w, prep, adt, lay, painted, lpx, NULL, &chk);
+            snprintf(line, sizeof line, "the chunk laid as WC3 lays it: its %d cliff cells with a model on their cliff's ground, its ramps' on their own, its %d blighted cells with the blight on their blighted corners (%ld of %ld cells, %ld of %ld points)",
+                     pc.cliff_ground, pc.blight, chk.cells_same, chk.cells, chk.same, chk.points);
+            check(!e && painted[0] && pc.cliff_ground > 0 && pc.cliff_ground < cc.placed && pc.blight == 4 && chk.cells == 64 && chk.cells_same == 64 && chk.points == 4096 && chk.same == 4096, line);
+            /* the south-west corner cell (WC3's (0, 0); points (0, 0) and (1, 1) blighted): the blight its highest piece, on those two corners */
+            const Wc3Lay *sw = &lay[7 * WC3_TILE_CELLS];
+            int bq = -1;
+            for (int q = 0; q < 4 && sw->sub[q] != WC3_PIECE_NONE; ++q) if (!strcmp(adt->textures[sw->pic[q]], wc3_ground_tileset(w, wc3_ground_blight(w))->layer)) bq = q;
+            check(bq > 0 && (bq == 3 || sw->sub[bq + 1] == WC3_PIECE_NONE) && sw->sub[bq] == 6, "the blight the highest piece of a blighted cell, on its blighted corners (south-west and north-east: subtile 6)");
+            t_lay_pixels_free(lpx); free(lpx);
+            free(lay);
             /* the cliffs into the tile's doodads */
             int placed = 0;
             e = wc3_ground_place_cliffs(w, adt, &placed, &why);
@@ -3023,7 +3158,6 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                   && placed_model_read(r, NULL, "Doodads\\X.mdx" PLACED_REPLACE_MARK "x=Y.blp", s, &pm, &why) == W_ERR_REFUSED, "a mark with no number and file after it: refused");
             w3e_prep_free(prep);
             w3e_free(g);
-            free(rgb);
             adt_free(adt); free(adt);
         }
         wc3_ground_free(w);
@@ -3092,7 +3226,7 @@ static void wc3_cliff_tests(const char *dir, const char *build)
         snprintf(edit, sizeof edit, "[TileSets]\r\n%c=WESTRING_MADE,TerrainArt\\Blight\\Made_Blight,Made\r\n", g->tileset_code);
         n1[c1] = "UI\\WorldEditData.txt"; b1[c1] = edit; l1[c1] = strlen(edit); ++c1;
         size_t blen;
-        unsigned char *bpic = t_tileset(nset % 16, 0, &blen);
+        unsigned char *bpic = t_tileset(nset, 0, &blen);   /* its colours the blight's own: it is the last tileset */
         n1[c1] = "TerrainArt\\Blight\\Made_Blight.blp"; b1[c1] = (const char *)bpic; l1[c1] = blen; ++c1;
         snprintf(folder, sizeof folder, "%s/install-real", root);
         t_mkdirs(folder);
@@ -3168,7 +3302,7 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             uint8_t ext[16] = { 0 };
             W3ePrep *prep = NULL;
             w3e_prep(g, ext, nset, &prep, &why);
-            TPaintCheck chk = { 0 };
+            TLayCheck chk = { 0 };
             int tiles = 0, placed = 0, n_ramps = 0, twice = 0, wrong_name = 0, wrong_cell = 0, own_kept = 1;
             double below = 0, above = 0;
             char sample[260] = "";
@@ -3227,13 +3361,9 @@ static void wc3_cliff_tests(const char *dir, const char *build)
                     }
                     placed += n_cliffs;
                     if (own_n >= 0 && t->ndoodads - n_cliffs != own_n) own_kept = 0;
-                    unsigned char painted[256];
-                    int tex_set[256];
-                    for (int x = 0; x < 256; ++x) tex_set[x] = -1;
-                    for (int x = 0; x < t->ntextures; ++x)
-                        for (int k = 0; k < wc3_ground_tilesets(w); ++k) if (!strcmp(t->textures[x], wc3_ground_tileset(w, k)->layer)) tex_set[x] = k;
-                    for (int k = 0; k < 256; ++k) painted[k] = tex_set[gpr->chunk_tex[k][0]] >= 0;
-                    t_paint_check(w, prep, gpr->adt, gpr->chunk_tex, gpr->blend, 4, painted, tex_set, NULL, &chk);
+                    unsigned char painted[256] = { 0 };
+                    for (int k = 0; gpr->wc3_lay && k < 256; ++k) painted[k] = gpr->wc3_lay[(size_t)(k / 16 * 8) * WC3_TILE_CELLS + (size_t)(k % 16 * 8)].sub[0] != WC3_PIECE_NONE;
+                    if (gpr->wc3_lay) t_lay_check(w, prep, gpr->adt, gpr->wc3_lay, painted, gpr->pixels, NULL, &chk);
                     ground_prep_free(gpr, 0);
                 }
             snprintf(line, sizeof line, "over its %d tiles every cliff and ramp placed once (%d of %d, %d of them ramps; %d twice), on the tile its cell is on, its origin one cell east of its cell's south-west corner (%d off)",
@@ -3244,9 +3374,9 @@ static void wc3_cliff_tests(const char *dir, const char *build)
             snprintf(line, sizeof line, "each cliff's foot on its own level: less than a level (%.2f yards) below its cell's lowest converted corner (at most %.2f: unbent, at its corners' mean height), never above its highest (%.2f)",
                      128 * m.wc3_scale, below, above);
             check(below < 128 * m.wc3_scale && above < 0.01, line);
-            snprintf(line, sizeof line, "the ground with its cliff cells on their cliffs' ground, its ramps on their own and its blight on its blighted corners: %ld of %ld points as laid in chunks of four tilesets or fewer, %.1f%% of all",
-                     chk.exact_same, chk.exact_points, chk.points ? 100.0 * chk.same / chk.points : 0.0);
-            check(chk.exact_points > 0 && chk.exact_same == chk.exact_points, line);
+            snprintf(line, sizeof line, "the ground with its cliff cells on their cliffs' ground, its ramps on their own and its blight on its blighted corners, as WC3 lays it: %ld of %ld cells, %ld of %ld blend points (%.1f%%; %ld of %ld in its %d chunks laying more than four tilesets)",
+                     chk.cells_same, chk.cells, chk.same, chk.points, chk.points ? 100.0 * chk.same / chk.points : 0.0, chk.many_same, chk.many_points, chk.many_chunks);
+            check(chk.points > 0 && chk.cells_same == chk.cells && chk.same == chk.points, line);
             /* one placed name through the drawer's reader: the loose model, its cliff picture */
             if (sample[0]) {
                 PlacedModel pm;

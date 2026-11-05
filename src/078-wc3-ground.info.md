@@ -19,37 +19,32 @@ The map's own ground (war3map.w3e, read and prepared by 063-w3e.h) is
 a grid of tile points 128 WC3 units apart; the converter makes one WC3
 cell one cell of a chunk (4.17 yards, 8 to a chunk side), by the rule
 in map.lua (073-converted-map.h). Each WC3 cell lays up to four
-tilesets, lowest first: the lowest whole, each higher one as the piece
-of its picture ("subtile") whose alpha covers just the corners it is
-on. Here, for each chunk:
-  - each of its 64 cells is found in the WC3 grid by its centre;
-  - the chunk's four tilesets are the four its cells use most (ties:
-    the lower number first), drawn lowest number first;
-  - layer 0 is the lowest; each higher layer's strength in a cell is
-    full where it is the cell's lowest kept tileset, its subtile's
-    alpha where it is a higher one, and nothing where the cell lacks
-    it, at the blend picture's 8 points a cell side;
-  - each layer's picture is its tileset's whole tile (subtile 15),
-    repeated once a cell as the ground's pictures always are.
-So a chunk using four tilesets or fewer comes out as WC3 lays it, but
-for the variation pictures (one whole tile a tileset) and the
-subtiles' own colours (their alpha, the whole tile's colours). A cell
-whose tileset is past the chunk's four is folded: a dropped lowest
-lets the next kept one lie whole, a dropped higher one is left out. A
-cliff cell with a WC3 cliff model (079: when the player has
-TerrainArt\CliffTypes.slk) is laid whole with its cliff tileset's
-ground (its groundTile, added to the tilesets when the map's list
-lacks it), and its model is added to the tile's doodads
-(wc3_ground_place_cliffs); a ramp's cell (079: a model too) keeps its
-own ground. A blighted cell, when the editor's data
+tilesets, lowest first: the lowest whole, as the piece ("subtile") of
+its picture its south-west point's variation picks (a plain picture's
+two whole pieces, or one of an extended picture's 16 whole variations:
+063's w3e_variation), each higher one as the piece whose alpha covers
+just the corners it is on. WC3 lays them cell by cell, so this does
+too (wc3_ground_lay_tile): for each cell of a tile, its pieces, each a
+picture (one of the tile's pictures: a tileset's picture, or each half
+of an extended one, a square of 4 x 4 subtiles) and the subtile in it.
+The ground drawer's shader (038, 080) reads them per cell, so a chunk
+shows every tileset its cells lay, however many, with each cell's own
+variation and each piece's own colours. A cliff cell with a WC3 cliff
+model (079: when the player has TerrainArt\CliffTypes.slk) is laid
+whole with its cliff tileset's ground (its groundTile, added to the
+tilesets when the map's list lacks it), and its model is added to the
+tile's doodads (wc3_ground_place_cliffs); a ramp's cell (079: a model
+too) keeps its own ground. A blighted cell, when the editor's data
 (UI\WorldEditData.txt's [TileSets], second field) names the main
 tileset's blight picture, is laid as WC3 lays tilesets with the
 blight a tileset of its own, highest, on each blighted corner; with
 none named, and for a cliff with no cliff tileset or model (063 leaves
 them bare for the renderer), a bare cell is laid whole with its
-south-west point's tileset. A chunk with no cell inside the WC3 grid
-keeps the converter's own pictures; a cell outside it in a chunk with some inside shows the
-chunk's layer 0.
+south-west point's tileset. The whole piece of each of these comes
+from the cell's south-west point's variation too. A chunk with no cell
+inside the WC3 grid keeps the converter's own pictures; a cell outside
+it in a chunk with some inside is laid whole (subtile 15) with the
+tileset the chunk's cells use most.
 
 Where the files come from: war3map.w3e by its name at the converted
 build folder's root (world-edit-to-execute's convert copies it there
@@ -72,7 +67,11 @@ is safe on any thread (the reading-ahead thread paints tiles too).
     id        its four letters ("Ldrt"), ended by a zero
     path      its picture (Terrain.slk's dir\file.blp), "" when the
               sheet has no row for it (the checker stands in)
-    layer     its layer's name (path, or TerrainArt\<id>.blp, and the mark)
+    layer     its picture's layer's name (path, or TerrainArt\<id>.blp,
+              and the mark): the whole picture, or an extended one's
+              left half (subtiles 0 to 15)
+    layer_right   an extended picture's right half (subtiles 16 to 31:
+              the whole variations), "" for a plain one
     source    where its picture came from (ASSET_FROM_PLACEHOLDER: the checker)
     width, height   its picture's; extended when twice as wide as high
     extended  1: 8 x 4 subtiles (the right half 16 whole variations)
@@ -106,20 +105,29 @@ is safe on any thread (the reading-ahead thread paints tiles too).
   the south), with where in it (fx from its west side, fy from its
   south, 0 to 1) when asked; 0 outside.
 - `WErr wc3_ground_layer(const Wc3Ground *w, const char *name, unsigned char **rgba, int *side, WWhy *why);`
-  A layer's picture by its name (a Wc3Tileset's `layer`): its tileset's
-  whole tile (subtile 15), opaque, side x side RGBA in a new buffer the
-  caller frees. W_OK; W_ERR_NOT_FOUND for a name no tileset has.
+  A layer's picture by its name (a Wc3Tileset's `layer` or
+  `layer_right`): that square of its tileset's picture (the picture's
+  height a side: 4 x 4 subtiles), alpha and all, side x side RGBA in a
+  new buffer the caller frees. W_OK; W_ERR_NOT_FOUND for a name no
+  tileset has.
+- `type Wc3Lay`
+  One cell's laying: up to four pieces, lowest first, each a picture
+  (`pic`: into the tile's picture list, a tileset's layer) and the
+  subtile of it (`sub`: 0 to 15, row sub / 4 from the top, column
+  sub % 4, each a quarter of the square's side), WC3_PIECE_NONE in `sub`
+  after the last. The lowest is drawn whole, each higher one over it by
+  its own alpha.
 - `type Wc3Paint`
-  What painting a tile did.
-- `WErr wc3_ground_paint_tile(const Wc3Ground *w, AdtTile *adt, int chunk_tex[256][4], unsigned char *rgb, unsigned char painted[256], Wc3Paint *counts, WWhy *why);`
-  Paints tile `adt`'s chunks: for each chunk with a cell inside the WC3
-  grid, its four picture numbers into `chunk_tex[k]` (into the tile's
-  list, to which the WC3 layers' names are added once each), its three
-  strengths into `rgb` (1024 x 1024 x 3, chunk k at row k / 16, column
-  k % 16 of 64 x 64, as the tile's blend picture is laid out: 033), and
-  `painted[k]` 1; other chunks are left as they were. Counts into
-  `*counts` (may be NULL). W_OK; W_ERR_FULL when the tile's list would
-  pass 256 pictures.
+  What laying a tile did.
+- `WErr wc3_ground_lay_tile(const Wc3Ground *w, AdtTile *adt, Wc3Lay *lay, int chunk_tex[256][4], unsigned char painted[256], Wc3Paint *counts, WWhy *why);`
+  Lays tile `adt`'s cells: for each chunk with a cell inside the WC3
+  grid, each of its 64 cells' pieces into `lay` (WC3_TILE_CELLS a side:
+  the tile's 16384 cells), the pictures named added to the tile's list
+  once each, its four picture numbers in `chunk_tex[k]` all the chunk's
+  most used tileset's (for a drawer without the cells), and `painted[k]`
+  1; another chunk's cells get no piece (WC3_PIECE_NONE first) and its
+  `chunk_tex[k]` is left as it was. Counts into `*counts` (may be NULL).
+  W_OK; W_ERR_FULL when the tile's list would pass 256 pictures.
 - `WErr wc3_ground_place_cliffs(const Wc3Ground *w, AdtTile *adt, int *placed, WWhy *why);`
   Adds the cliff and ramp models standing on tile `adt` (those whose cell's
   centre is on it, so each is placed by one tile) to its doodads: each

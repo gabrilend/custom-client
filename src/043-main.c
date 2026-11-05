@@ -671,7 +671,7 @@ int main(int argc, char **argv)
     /* the ground, its files through the resolver in a test-map run (its folder first) */
     if (ground_place_init(&app->ground_place, &app->chain, app->assets, app->map_name, &app->world, app->ox, app->oy, &why))
         return start_failed(app, 1, "%s", why.text);
-    /* a test map's ground painted with WC3's own tilesets, when its own
+    /* a test map's ground laid with WC3's own tilesets, when its own
      * ground and the tilesets' pictures are found (a player with WC3:
      * 078); otherwise said, and the converter's pictures stay */
     if (app->test_map) {
@@ -680,7 +680,7 @@ int main(int argc, char **argv)
             int real = 0, n = wc3_ground_tilesets(app->wc3_ground);
             for (int k = 0; k < n; ++k) real += wc3_ground_tileset(app->wc3_ground, k)->source != ASSET_FROM_PLACEHOLDER;
             app->ground_place.wc3 = app->wc3_ground;
-            printf("test map: its ground painted with WC3's own tilesets (%d of %d pictures found, the checker for the rest)\n", real, n);
+            printf("test map: its ground laid cell by cell with WC3's own tilesets and variations (%d of %d pictures found, the checker for the rest)\n", real, n);
             /* its cliffs, as WC3's own cliff models (079), drawn as doodads */
             const Wc3Cliffs *cliffs = wc3_ground_cliffs(app->wc3_ground);
             if (cliffs) {

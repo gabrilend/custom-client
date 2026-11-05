@@ -34,9 +34,10 @@
  * pictures are read through the resolver (pictures since 1109's step 1c:
  * a picture no place has stands in as the magenta checker, said); with
  * no resolver, the archives alone. `wc3`, when set (a converted map
- * whose own WC3 ground and tileset pictures were found: 078), paints
- * each chunk on the WC3 grid with WC3's tilesets instead of the ground
- * file's pictures; NULL (every other run) leaves the ground file's. */
+ * whose own WC3 ground and tileset pictures were found: 078), lays
+ * each chunk on the WC3 grid cell by cell with WC3's tilesets instead
+ * of the ground file's pictures; NULL (every other run) leaves the
+ * ground file's. */
 typedef struct {
     MpqChain *chain;
     Resolver *assets;
@@ -81,6 +82,8 @@ typedef struct {
     unsigned char needed[256];        /* 1: the tile's picture k is drawn by some chunk */
     GroundPixels  pixels[256];        /* by the tile's picture number */
     int           chunk_tex[256][4];  /* each chunk's four pictures, by the tile's picture number */
+    Wc3Lay       *wc3_lay;            /* WC3_TILE_CELLS x WC3_TILE_CELLS: each cell's WC3 pieces (078), drawn in place of
+                                       * its chunk's four pictures where it has one; NULL: no chunk on the WC3 grid */
 } GroundPrep;
 
 /* Reads the map's WDT for its blend-map form and fills `p`. W_OK, or a code
@@ -103,10 +106,19 @@ void ground_prep_free(GroundPrep *g, int keep_adt);
 /* Unpacks one ground picture by archive name into `px`, with its smaller
  * copies, from the place's resolver (asset_get: the checker for one no
  * place has) or, with none, its archives; a WC3 layer's name (ending in
- * WC3_LAYER_MARK) is its tileset's whole tile, from the place's `wc3`.
+ * WC3_LAYER_MARK) is its square of its tileset's picture, from the
+ * place's `wc3`.
  * W_OK, or a code with `why` (W_ERR_NOT_FOUND: the archives lack it,
  * strict mode refused the checker, or a WC3 layer with no `wc3`). */
 WErr  ground_prep_pixels(const GroundPlace *p, const char *name, GroundPixels *px, WWhy *why);
+
+/* The tile's WC3 cells as the card takes them (038's shader, 080):
+ * 2 * WC3_TILE_CELLS x WC3_TILE_CELLS RGBA (256 x 128, 4 bytes a texel),
+ * cell (r, c) at row r: texel 2c its four pieces' layers on the card
+ * (`layer_of`: the tile's picture number to its layer), texel 2c + 1
+ * their subtiles (WC3_PIECE_NONE: none; a cell with none first is drawn
+ * from its chunk's four pictures). `out` holds 131072 bytes. */
+void  ground_prep_cell_texels(const GroundPrep *g, const int layer_of[256], unsigned char *out);
 
 /* Makes a square picture's smaller copies (into px->smaller): each pixel
  * the average of the four beneath it, as the card itself would make them.

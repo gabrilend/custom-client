@@ -463,10 +463,62 @@ Not checked here: real ramp models (their names, that one reaches over
 the ramp's flat half), a real `WorldEditData.txt` (that the blight is
 its second field), and a window (open question 10).
 
+**Step 1g is built** (2026-11-05, the same background work): a
+converted map's WC3 ground is laid cell by cell, as WC3 lays it, by the
+ground's shader. Decisions 57 to 63.
+
+- **The cells (078, 033):** `wc3_ground_lay_tile` gives each of a
+  tile's 16384 cells its pieces, lowest first: each a picture of the
+  tile (a tileset's picture as a square of 4 x 4 subtiles, or each half
+  of an extended one) and the subtile in it, the lowest its south-west
+  point's variation's (decision 60). 033 keeps them with the prepared
+  tile and packs them for the card (`ground_prep_cell_texels`: 256 x
+  128, each cell's layers and subtiles), and 038 sends them as a small
+  picture a tile, beside its blend picture.
+- **The shader (080, 038):** moved out of 038 into its own window-free
+  file (decision 58). A tile with cells reads, at each point, its cell
+  (its chunk from the blend square it is in, the cell from the repeat),
+  draws the cell's lowest piece whole and each higher one over it by its
+  own alpha; any other tile, and a chunk off the WC3 grid, as before. So
+  a chunk shows every tileset its cells lay, however many, and each
+  cell its own variation and the pieces' own colours (decisions 57, 59).
+
+Checked (`tests/044-test-client.c`, in the WC3 ground and cliff
+sections, before the archives): the made pictures now colour each
+subtile its own (decision 62); each tileset's layers (an extended
+one's two halves); the made map's two chunks (one laying five
+tilesets) cell for cell and point for point as WC3 lays them, 121 of
+128 cells with another variation; the cells packed for the card; the
+shader's text reading them as packed. With the real conversions and
+the made installs:
+
+- **War in the Plaguelands**: every one of its 49152 cells' pieces as
+  WC3's rule gives them (42050 laid with a variation other than subtile
+  15, 7873 of them an extended picture's), and 3145728 of 3145728 blend
+  points as WC3 lays them as the shader reads the cells (before: 90.4%,
+  folded to four tilesets a chunk; 531 of its chunks lay more than
+  four); with cliffs, ramps and blight, 3145728 of 3145728 (89.5%
+  before). Each cell's centre point finds its own cell by the shader's
+  reckoning from 033's texture places.
+- **Master Crafters**: all 65536 cells, all 4194304 points (99.8%
+  before; 99.7% with cliffs and blight), 36 chunks laying more than
+  four.
+
+The shader itself, outside the tests (decision 63): compiled and linked
+on Mesa's software renderer (llvmpipe, GL 4.5 core) under a virtual X
+display, and one made chunk drawn through it 512 x 512 (three made
+tileset pictures in the array, a made cell table packed by 033, 033's
+point layout): every pixel of its 63 WC3 cells as the rule lays them,
+read nearest and smoothed with smaller copies, and its one cell with
+no piece as its chunk's own layer. No memory errors under the address
+and undefined-behaviour checkers; every drawing part, 043 and 058
+compile with `-Werror` under gcc and clang against stand-in headers.
+Not checked here: real WC3 tileset pictures (that subtiles 0 and 15
+are whole tiles, open question 11), Raylib binding the cells as the
+material's second map, and a window.
+
 Not built yet: cliffs and ramps bent to the ground under each point
-(decision 46); a tileset's variations (one whole tile each); more than four
-tilesets in a chunk (folded: a shader taking a chunk's own tileset
-list, or a fifth layer, would lift it: decision 37); WC3's water; a WC3
+(decision 46); WC3's water; a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
 its replaceable pictures are left off); 034's prefetch, 040's water and
@@ -611,8 +663,11 @@ return {
    replaceable-picture mark (decisions 42 to 50).
 1f. ~~Ramps as WC3's own ramp models, and blight.~~ Done (2026-11-05):
    079's ramps, 078's blight from the editor's data (decisions 51 to
-   56). Cliffs bent to the ground, variations and more than four
-   tilesets a chunk are next (302).
+   56).
+1g. ~~The ground laid cell by cell: every tileset in a chunk, each
+   cell's variation.~~ Done (2026-11-05): the ground's shader (080)
+   reading each cell's pieces from 078 through 033 and 038 (decisions
+   57 to 63). Cliffs bent to the ground are next (302).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -823,16 +878,20 @@ return {
 36. **No ground shader.** One WC3 cell is one cell of a chunk and the
     ground's pictures already repeat once a cell, so WC3's laying fits
     038's four layers and blend picture: 033 hands it different picture
-    names and strengths, and 038 is unchanged.
+    names and strengths, and 038 is unchanged. (Lifted in step 1g: the
+    ground's shader lays WC3 cells one by one, decision 57.)
 37. **Four tilesets a chunk, the four used most.** 038 draws four layers
     a chunk; where a chunk's cells use more (common in War in the
     Plaguelands: 90.4% of its points are as WC3 lays them), a cell's
     dropped lowest lets its next kept tileset lie whole and a dropped
-    higher one is left out. Lifting it is a shader's job (302).
+    higher one is left out. Lifting it is a shader's job (302). (Lifted
+    in step 1g: every tileset a chunk's cells lay shows, decision 57.)
 38. **One picture a tileset: its whole tile**, with the subtiles' alpha
     for the blends. WC3's 16 variations and its subtiles' own colours
     wait for that shader. Masks are read at the blend picture's 8
-    points a cell side.
+    points a cell side. (Lifted in step 1g: a picture's own subtiles,
+    alpha and colours, read per point, and each cell's variation:
+    decisions 59 and 60.)
 39. **Cliffs and blight are laid whole** with the cell's south-west
     point's tileset (063 leaves them bare for the renderer) until
     cliff models are seated (302) and blight is drawn. (Since step 1e,
@@ -946,7 +1005,55 @@ return {
 56. **The tests' colours repeat past 16 tilesets**: War in the
     Plaguelands' blight is its 17th tileset and shares the first's
     colour in the made pictures, so its blight's laying is checked
-    less sharply than Master Crafters' (its 11th).
+    less sharply than Master Crafters' (its 11th). (Gone in step 1g:
+    decision 62.)
+
+## Decisions (2026-11-05, step 1g, answered here; the owner may overturn any)
+
+57. **A ground shader that lays WC3 cells one by one** (lifts
+    decisions 36 to 38). Chosen over splitting a chunk into draws of
+    four tilesets each (more draw orders, and a cell's blend split
+    across them) and over more layers in 033 (more blend pictures a
+    tile and still a cap, and each variation would be a layer of its
+    own). Each cell's pieces ride in one small picture a tile (256 x
+    128, 128 KB), read texel by texel; the tileset pictures sit in the
+    ground's picture array as any ground picture does. WC3 chunks use
+    the blend picture's shadow only; the four-layer blend stays for
+    every other chunk.
+58. **The shader in its own window-free file (080), as C text**, not a
+    `.glsl` file read at run time: the client is one executable with no
+    files beside it but its data, and the tests and a checking tool
+    read the same text the card gets. One shader for both kinds of
+    tile: a tile with cells (a uniform) branches per point.
+59. **A tileset picture as one layer, or two when extended** (its two
+    halves, each 4 x 4 subtiles), named by its path and the mark, with
+    `|right` for the right half; the array's 256 x 256 (a WC3 tileset
+    picture is 256 high). A piece is read a half texel in from its
+    subtile's edges, with the slopes of the cell's own place, so the
+    card picks the same smaller copy on both sides of a cell's edge.
+    The smaller copies still mix a subtile's edge with its neighbours'
+    from far off.
+60. **Each cell's variation from its south-west point**, through 063's
+    `w3e_variation`, for every kind of cell (textured, a cliff's
+    ground, blighted, bare). 063's rule for a plain picture (variation
+    0: subtile 15; otherwise subtile 0) is its Lua twin's; the published
+    viewers may read it the other way round. Both are whole tiles (open
+    question 11).
+61. **A cell off the WC3 grid in a laid chunk** takes the tileset the
+    chunk's cells use most, whole (subtile 15), and the chunk's own four
+    pictures name it too, for a drawer without the cells. (Before, it
+    showed the chunk's layer 0.)
+62. **The tests' made pictures colour each subtile its own** (up to 32
+    tilesets of 32 subtiles each), so a wrong variation or piece shows,
+    and the blight's colours are its own (decision 56 gone). The tests
+    check each cell's pieces against WC3's rule worked out from the
+    points, and every blend point's colour as the shader works it out
+    (its sums done in C, on the pictures as 033 unpacks them).
+63. **The GLSL checked outside the tests**, on Mesa's software
+    renderer under a virtual X display (both already on this machine;
+    nothing installed): the test program has no window and links no
+    OpenGL, so the drawing check stays a tool run by hand, its result
+    recorded here.
 
 ## Open questions
 
@@ -1039,6 +1146,12 @@ return {
     the blight is `WorldEditData.txt`'s second field are the viewers'
     reading from memory. On the owner's machine: Master Crafters' ramps
     as boxes, or doubled, or its blight the checker, says which.
+11. **WC3's tileset pictures, unseen here.** That subtiles 0 and 15 of a
+    plain picture are both whole tiles, which of them variation 0 picks
+    (decision 60), and that an extended picture's right half is 16
+    whole variations are the viewers' reading; checked only against
+    pictures made in the test. On the owner's machine with WC3: a Test
+    Map run showing see-through cells, or every cell alike, says which.
 
 ## Related
 
@@ -1057,7 +1170,9 @@ return {
   `src/078-wc3-ground.info.md` (the ground in WC3's tilesets),
   `src/063-w3e.info.md` ([302a](./302a-wc3-ground-read-and-prepared.md)).
   For step 1e: `src/079-wc3-cliffs.info.md` (the cliffs), with 078,
-  076 and 077. For step 1f: 079 (ramps) and 078 (blight).
+  076 and 077. For step 1f: 079 (ramps) and 078 (blight). For step 1g:
+  `src/080-ground-shader.info.md` (the ground's shader), with 078
+  (each cell's pieces), 033 (packed for the card) and 038.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103
