@@ -264,3 +264,16 @@ int light_at_weather(const LightTables *t, int map, float x, float y, float z, f
     return used;
 }
 /* }}} */
+
+/* {{{ light_indoor_fog */
+void light_indoor_fog(LightNow *l, const WmoFog *f, float depth, int under)
+{
+    if (!f || depth <= 0) return;
+    float w = depth >= LIGHT_INDOOR_FOG_YARDS ? 1 : depth / LIGHT_INDOOR_FOG_YARDS;
+    float end = under ? f->under_end : f->end, share = under ? f->under_start_share : f->start_share;
+    const float *c = under ? f->under_colour : f->colour;
+    for (int k = 0; k < 3; ++k) l->fog[k] += (c[k] - l->fog[k]) * w;
+    l->fog_start += (end * share - l->fog_start) * w;
+    l->fog_end += (end - l->fog_end) * w;
+}
+/* }}} */

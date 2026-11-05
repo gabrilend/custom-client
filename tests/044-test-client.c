@@ -277,6 +277,7 @@ static size_t open_chunk(Bytes *o, const char *t) { puttag(o, t); put32(o, 0); r
 static void close_chunk(Bytes *o, size_t body) { patch32(o, body - 4, (uint32_t)(o->n - body)); }
 static size_t open_record(Bytes *o) { put32(o, 0); return o->n - 4; }
 static void close_record(Bytes *o, size_t at) { patch32(o, at, (uint32_t)(o->n - at)); }
+static void wmo_fog_tests(void);   /* a building's fogs (1109 step 1v), with the made buildings below */
 static unsigned char *find_tag(Bytes *o, const char *t) { for (size_t i = 0; i + 4 <= o->n; ++i) if (!memcmp(o->b + i, t, 4)) return o->b + i; return NULL; }
 /* a geoset: points (x y z, three a point), normals (as many as given),
  * triangles, its material; one matrix group, all points in it */
@@ -2107,6 +2108,10 @@ static void converted_tests(const char *dir, const char *build)
     }
     /* }}} */
 
+    /* {{{ a building's fogs and the indoor blend (021, 026; 1109 step 1v) */
+    wmo_fog_tests();
+    /* }}} */
+
     /* {{{ heights from a map's own ground files (075) */
     {
         AdtTile *adt = calloc(1, sizeof *adt);
@@ -2531,6 +2536,71 @@ static void t_made_wmo_group(Bytes *o)
     c = open_chunk(o, "VTOM"); for (int i = 0; i < 6; ++i) putf(o, 0); close_chunk(o, c);
     c = open_chunk(o, "ABOM"); for (int i = 0; i < 3; ++i) put32(o, 0); put32(o, 0); put16(o, 3); put16(o, 0); put16(o, 0); o->b[o->n++] = 0; o->b[o->n++] = 0; close_chunk(o, c);
     close_chunk(o, g);
+}
+/* a building's fogs and a group naming them (021, 026; 1109 step 1v):
+ * made here, the layout as 021-wmo.h recalls it */
+static void wmo_fog_tests(void)
+{
+    char line[600];
+    WWhy why;
+    static Bytes o;
+    t_made_wmo_root(&o);
+    size_t c = open_chunk(&o, "GOFM");
+    /* fog 0: centre (1, 2, 3), radii 5 and 20, ends at 100 yards, starts
+     * at a quarter, orange (blue 0, green 128, red 255); under water ends
+     * at 30, starts at a tenth, blue. Fog 1: grey, 50 yards. */
+    static const unsigned char ORANGE[4] = { 0, 128, 255, 255 }, BLUE[4] = { 255, 0, 0, 255 }, GREY[4] = { 128, 128, 128, 255 };
+    put32(&o, 0); putf(&o, 1); putf(&o, 2); putf(&o, 3); putf(&o, 5); putf(&o, 20);
+    putf(&o, 100); putf(&o, 0.25f); memcpy(o.b + o.n, ORANGE, 4); o.n += 4;
+    putf(&o, 30); putf(&o, 0.1f); memcpy(o.b + o.n, BLUE, 4); o.n += 4;
+    put32(&o, 1); for (int i = 0; i < 5; ++i) putf(&o, 0);
+    putf(&o, 50); putf(&o, 0.5f); memcpy(o.b + o.n, GREY, 4); o.n += 4;
+    putf(&o, 50); putf(&o, 0.5f); memcpy(o.b + o.n, GREY, 4); o.n += 4;
+    close_chunk(&o, c);
+    WmoRoot r;
+    WErr e = wmo_read_root(o.b, o.n, &r, &why);
+    const WmoFog *f = e || r.nfogs < 1 ? NULL : &r.fogs[0];
+    snprintf(line, sizeof line, "a building's fogs (MFOG, its layout recalled): %d, the first centred (%.0f, %.0f, %.0f), radii %.0f and %.0f, ending at %.0f yards from %.2f of it, (%.3f, %.3f, %.3f); under water %.0f from %.2f, (%.0f, %.0f, %.0f)",
+             e ? 0 : r.nfogs, f ? f->pos[0] : 0, f ? f->pos[1] : 0, f ? f->pos[2] : 0, f ? f->inner : 0, f ? f->outer : 0, f ? f->end : 0, f ? f->start_share : 0,
+             f ? f->colour[0] : 0, f ? f->colour[1] : 0, f ? f->colour[2] : 0, f ? f->under_end : 0, f ? f->under_start_share : 0,
+             f ? f->under_colour[0] : 0, f ? f->under_colour[1] : 0, f ? f->under_colour[2] : 0);
+    check(!e && r.nfogs == 2 && f && f->pos[2] == 3 && f->inner == 5 && f->outer == 20 && f->end == 100 && f->start_share == 0.25f && f->colour[0] == 1
+          && f->colour[1] == 128.0f / 255 && f->colour[2] == 0 && f->under_end == 30 && f->under_colour[2] == 1 && f->under_colour[0] == 0
+          && r.fogs[1].flags == 1 && r.fogs[1].end == 50 && r.materials && r.nmaterials == 1, e ? why.text : line);
+    /* a group naming fog 1 then 0, its box from (0, 0, 0) to (40, 40, 10) */
+    static Bytes gb;
+    t_made_wmo_group(&gb);
+    unsigned char *mogp = find_tag(&gb, "PGOM");
+    static const float BOX[6] = { 0, 0, 0, 40, 40, 10 };
+    for (int k = 0; k < 6; ++k) memcpy(mogp + 8 + 12 + k * 4, &BOX[k], 4);
+    mogp[8 + 48] = 1; mogp[8 + 49] = 0;
+    WmoGroup g;
+    WErr ge = wmo_read_group(gb.b, gb.n, &g, &why);
+    float mid[3] = { 20, 20, 5 }, near_wall[3] = { 2, 20, 5 }, out1[3] = { -3, 20, 5 }, out2[3] = { -3, -4, 5 };
+    float dm = ge ? 0 : wmo_group_depth(&g, mid), dw = ge ? 0 : wmo_group_depth(&g, near_wall), d1 = ge ? 0 : wmo_group_depth(&g, out1), d2 = ge ? 0 : wmo_group_depth(&g, out2);
+    snprintf(line, sizeof line, "a group's fogs by number (%d, %d) and its box; how far in: the middle %.1f yards (its floor and roof 5 off), by a wall %.1f, outside %.1f and %.1f (past a corner)",
+             ge ? -1 : g.fog[0], ge ? -1 : g.fog[1], dm, dw, d1, d2);
+    check(!ge && g.fog[0] == 1 && g.fog[1] == 0 && g.box[3] == 40 && dm == 5 && dw == 2 && d1 == -3 && d2 == -5, ge ? why.text : line);
+    /* the blend into fog 0 over the first 25 yards in */
+    LightNow out, l0, half, whole, under;
+    memset(&out, 0, sizeof out);
+    for (int k = 0; k < 3; ++k) out.fog[k] = LIGHT_GREY_FOG;
+    out.fog_start = 125; out.fog_end = 500;
+    l0 = half = whole = under = out;
+    if (f) {
+        light_indoor_fog(&l0, f, d1, 0);
+        light_indoor_fog(&half, f, 12.5f, 0);
+        light_indoor_fog(&whole, f, 30, 0);
+        light_indoor_fog(&under, f, 25, 1);
+    }
+    snprintf(line, sizeof line, "indoors, the outdoor fog (grey, 125 to 500) into the group's (orange, 25 to 100): outside %s; 12.5 yards in (%.3f, %.3f, %.3f) from %.1f to %.1f; 30 in, all the group's (%.3f, %.3f, %.3f) from %.1f to %.1f; under water 25 in, its underwater fog (%.0f, %.0f, %.0f) from %.1f to %.1f",
+             memcmp(&l0, &out, sizeof out) ? "changed" : "as it was", half.fog[0], half.fog[1], half.fog[2], half.fog_start, half.fog_end,
+             whole.fog[0], whole.fog[1], whole.fog[2], whole.fog_start, whole.fog_end, under.fog[0], under.fog[1], under.fog[2], under.fog_start, under.fog_end);
+    check(f && !memcmp(&l0, &out, sizeof out) && fabsf(half.fog[0] - 0.8f) < 1e-5f && fabsf(half.fog[1] - (0.6f + 128.0f / 255) / 2) < 1e-5f && fabsf(half.fog[2] - 0.3f) < 1e-5f
+          && fabsf(half.fog_start - 75) < 1e-3f && fabsf(half.fog_end - 300) < 1e-3f && whole.fog[0] == 1 && whole.fog[2] == 0 && whole.fog_start == 25 && whole.fog_end == 100
+          && under.fog[2] == 1 && under.fog[0] == 0 && fabsf(under.fog_start - 3) < 1e-5f && under.fog_end == 30, line);
+    if (!ge) wmo_free_group(&g);
+    if (!e) wmo_free_root(&r);
 }
 static void placed_tests(const char *dir)
 {
