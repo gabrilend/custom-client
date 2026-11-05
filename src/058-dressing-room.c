@@ -103,7 +103,7 @@ typedef struct {
 static WErr save_icon(Room *room, const char *name, int look, WWhy *why)
 {
     char icon[300], path[1200];
-    if (character_item_icon(&room->chain, look, icon, sizeof icon, why)) return why->code;
+    if (character_item_icon(NULL, &room->chain, look, icon, sizeof icon, why)) return why->code;
     size_t len;
     unsigned char *b = mpq_chain_read(&room->chain, icon, &len, NULL);
     if (!b) return w_fail(why, W_ERR_NOT_FOUND, "the icon %s is not in the client's archives", icon);
@@ -154,7 +154,7 @@ static WErr save_view(Room *room, const Figure *fig, const char *name, const cha
 static WErr save_worn(Room *room, const char *name, const int items[SLOT_COUNT], WWhy *why)
 {
     CharacterLook look = { room->race, room->sex, 0, 0, room->hair_style, room->hair_color, { 0 }, 0, 0 };
-    if (character_start_outfit(&room->chain, room->race, room->class_id, room->sex, look.items, why)) return why->code;
+    if (character_start_outfit(NULL, &room->chain, room->race, room->class_id, room->sex, look.items, why)) return why->code;
     for (int k = 0; k < SLOT_COUNT; ++k) if (items[k]) look.items[k] = items[k];
     Figure fig;
     if (figure_from_character(room->figures, &fig, &look, why)) return why->code;

@@ -582,7 +582,7 @@ int main(int argc, char **argv)
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
     app->figures = figures_new(&app->ws.chain, app->ws.assets, app->ws.tables, &app->textures);   /* makes her, the bystanders and the creatures (041-figure.h) */
     if (app->test_map) figures_wc3_scale(app->figures, app->conv.wc3_scale);       /* a map's own WC3 models, in yards by its rule */
-    WErr her_bad = character_start_outfit(&app->ws.chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why);
+    WErr her_bad = character_start_outfit(app->ws.assets, &app->ws.chain, app->LOOK.race, HER_CLASS, app->LOOK.sex, app->LOOK.items, &why);
     if (!her_bad) {
         for (int k = 0; k < SLOT_COUNT; ++k) if (app->WEAR_OVER[k]) app->LOOK.items[k] = app->WEAR_OVER[k];
         her_bad = figure_from_character(app->figures, &app->her, &app->LOOK, &why);
@@ -604,7 +604,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < NBYSTANDERS; ++i) {
         Figure *f = &app->others[app->nothers];
         CharacterLook look = { BYSTANDERS[i].race, BYSTANDERS[i].sex, 0, 0, 0, 0, { 0 }, BYSTANDERS[i].facial_hair, 0 };
-        if (BYSTANDERS[i].race && character_start_outfit(&app->ws.chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, &why)) {
+        if (BYSTANDERS[i].race && character_start_outfit(app->ws.assets, &app->ws.chain, look.race, BYSTANDERS[i].class_id, look.sex, look.items, &why)) {
             fprintf(stderr, "bystander %d left out: %s\n", i, why.text);
             continue;
         }

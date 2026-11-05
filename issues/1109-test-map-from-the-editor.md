@@ -856,11 +856,54 @@ errors. Not checked here: the window, so nothing drawn (the figure
 uploaded, the grey day, the ground), and a whole run under
 `scripts/run`; what still needs an install is decision 97.
 
+**Step 1m is built** (2026-11-05, the same background work): nothing in
+a test-map run reads the archives past the resolver. Decisions 98 to
+101.
+
+- **Her character through the resolver (025):** her tables
+  (`CharStartOutfit`, `ItemDisplayInfo`, `CharHairGeosets`,
+  `CharacterFacialHairStyles`, `CharSections`, `HelmetGeosetVisData`),
+  her race's model and view, and every picture on her (skin, face,
+  hair, fur, underwear, the items' region pictures, the cloak) are
+  asked of the resolver when one is open, else of the archives alone,
+  as before. Each table is read whole, the first place's copy (they
+  are scanned by race, sex and choice, not asked by number; decision
+  98). A pack or the map's folder can now hold a character; with no
+  install and no such place she is still the stand-in figure (step
+  1l). A build that fails part way lets go of what it made (decision
+  100).
+- **The read-ahead through the resolver (034):** each tile's pictures,
+  doodads (a converted map's own WC3 model as named, MDLX inside, with
+  its pictures; else the `.m2`, its view and pictures) and buildings
+  (root, parts, pictures) are asked as the tile's load asks them,
+  never as a placeholder (decision 99).
+- **What still reads outside it, and why (decision 101):** 015 is the
+  archive reader itself; 060 reads the chain as the Blizzard place;
+  087 opens the chain (empty with no install); 058, the dressing room,
+  is its own program with no resolver and needs an install (its item
+  icons). The server's map files and navigation tiles (018, 019), the
+  creature list (035) and the settings file (014) are read from their
+  own folders: they are not the game's archives.
+
+Checked (`tests/044-test-client.c`, in "a test-map start with no
+install"): a character made from one overlay folder with no archives
+(its tables written here, the stand-in figure as a night-elf woman's
+model, its skin picture): a starting outfit, an item's icon, the
+character built with its worn chest, one whose model no place has
+refused with nothing left to free, an outfit the table hasn't refused
+as from the archives, and with neither resolver nor archives not
+found, naming the table; and with the real builds and no install, the
+read-ahead on her start tile reading every file through the resolver:
+War in the Plaguelands' 224 (its ground file, 17 pictures, 93 doodads
+and theirs), Master Crafters' 29 (10 pictures, 6 doodads), none from an
+archive (before this step, its ground file alone). An ordinary run's
+reads are as before (no resolver: the archives alone); its checks
+against the archives were not run here (no client).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
-its replaceable pictures are left off); 034's prefetch and
-the baseline set's buildings, creatures' own looks, her character, WC3
+its replaceable pictures are left off); the baseline set's buildings, creatures' own looks, her character, WC3
 stock art and the rest of the client's tables (decisions 88, 97), and
 the asset forge's real set;
 a missing table row as a placeholder (106 wants one: still an error
@@ -1025,6 +1068,9 @@ return {
    the start out of the window, 085's tables and stand-in figure, 088
    and 041 finding a creature's model through the resolver, 026 and 040
    reading their tables through it (decisions 89 to 97).
+1m. ~~Nothing in a test-map run past the resolver.~~ Done (2026-11-05):
+   025's character and 034's read-ahead through it (decisions 98 to
+   101).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1194,7 +1240,8 @@ return {
     and 041's game models still read them: none of them stands in a
     placeholder, and a converted map's water and creatures still draw.
     Moving them is the next slice of 105a. (040's water moved in step
-    1k, decision 86, never as a placeholder.)
+    1k, decision 86, never as a placeholder; 041's models in step 1l,
+    decision 94; 034's prefetch in step 1m, decision 99.)
 30. **A model 061 refuses is left out, said**, as any unreadable file
     is; 061 isn't changed here (open item below).
 31. **The tests read the converter's real output when given it**, as
@@ -1719,6 +1766,40 @@ return {
     a player's install. The window itself, and anything drawn, isn't
     checked here.
 
+## Decisions (2026-11-05, step 1m, answered here; the owner may overturn any)
+
+98. **025 reads through the resolver; a table whole, the first place's
+    copy.** Her tables are scanned (by race, sex and choice, or the
+    whole of `ItemDisplayInfo` for a look), not asked by number, and
+    074 merges by number, so each is read whole from the first place
+    that has it, as 026 reads the light tables. A converted map that
+    brought part of one of them would hide the archives' rows; none
+    does today, and a merged scan is 074's to add when one does. Never
+    a placeholder: a missing table or model is said by name, a missing
+    layer picture left unpainted, as before. Errors now say "no place
+    has" with a resolver and "the client's archives hold no" without.
+99. **034 reads ahead through the resolver, as the load reads.** The
+    same names and kinds the tile's load asks (pictures as pictures,
+    models and buildings as models), so a file read ahead is the file
+    the load gets; never a placeholder, so no warning and no box for
+    a file read ahead. A name ending `.mdx` is read as named first (a
+    converted map's own WC3 model, with its pictures); otherwise the
+    `.m2` beside it, as 076 does. Files read ahead count in the
+    resolver's counts as the load's would (once per asset). In an
+    ordinary run (no resolver) it reads the archives as before; a game
+    `.mdx` name costs one more lookup that finds nothing.
+100. **A character that fails part way lets go of what it made.**
+    `character_build` frees its model, pieces and pictures on any
+    failure and leaves `out` empty, so a caller has nothing to free
+    (before, a failure after the model was read kept it).
+101. **What still reads outside the resolver stays, each for a
+    reason.** The archive reader (015), the resolver's Blizzard place
+    (060), the start opening the chain (087), the dressing room (058:
+    its own program, no resolver, an install required), and the
+    server's own files (018 heights, 019 navigation tiles), the
+    creature list (035) and the settings (014), which are not the
+    game's archives.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -1897,7 +1978,8 @@ return {
   `src/060-resolver.info.md`, 014 and 040. For step 1l:
   `src/087-world-start.info.md` (the start out of the window),
   `src/088-figure-model.info.md` (which files a figure is made from),
-  with 085, 041, 074, 026, 040 and 043.
+  with 085, 041, 074, 026, 040 and 043. For step 1m:
+  `src/025-character.info.md` and `src/034-prefetch.info.md`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

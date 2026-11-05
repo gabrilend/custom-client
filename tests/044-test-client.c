@@ -4862,6 +4862,76 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     }
     /* }}} */
 
+    /* {{{ a character (025) from a resolver's place with no archives
+     * (1109 step 1m): its tables, model, view and skin picture all in one
+     * overlay folder (the figure standing for a night-elf woman's model) */
+    {
+        char over[520];
+        snprintf(over, sizeof over, "%s/character", root);
+        unsigned char dbc[20 + 80 * 4 + 200];
+        /* CharStartOutfit (74 fields): night elf (4), hunter (3), woman (1): a chest (kind 5) of look 12345 */
+        uint32_t outfit[74] = { 1, 4u | 3u << 8 | 1u << 16 };
+        outfit[26] = 12345; outfit[50] = 5;
+        t_write(over, "DBFilesClient/CharStartOutfit.dbc", dbc, t_dbc(dbc, 1, 74, outfit, "", 1));
+        /* ItemDisplayInfo (25 fields): look 12345, its icon (field 6), no models, pieces or region pictures */
+        uint32_t item[25] = { 12345 };
+        item[5] = 1;
+        const char item_text[] = "\0INV_Chest_Made";
+        t_write(over, "DBFilesClient/ItemDisplayInfo.dbc", dbc, t_dbc(dbc, 1, 25, item, item_text, sizeof item_text));
+        uint32_t hair[6] = { 1, 4, 1, 0, 0, 0 };                    /* CharHairGeosets: style 0, piece 0 */
+        t_write(over, "DBFilesClient/CharHairGeosets.dbc", dbc, t_dbc(dbc, 1, 6, hair, "", 1));
+        uint32_t facial[8] = { 4, 1, 0 };                           /* CharacterFacialHairStyles: choice 0, every variant 0 */
+        t_write(over, "DBFilesClient/CharacterFacialHairStyles.dbc", dbc, t_dbc(dbc, 1, 8, facial, "", 1));
+        uint32_t sections[10] = { 1, 4, 1, 0, 1 };                  /* CharSections: skin 0, its picture */
+        const char sect_text[] = "\0Character\\NightElf\\Female\\MadeSkin.blp";
+        t_write(over, "DBFilesClient/CharSections.dbc", dbc, t_dbc(dbc, 1, 10, sections, sect_text, sizeof sect_text));
+        size_t len;
+        unsigned char *b = baseline_figure_model(&len);
+        t_write(over, "Character/NightElf/Female/NightElfFemale.m2", b, len);
+        free(b);
+        b = baseline_figure_skin(&len);
+        t_write(over, "Character/NightElf/Female/NightElfFemale00.skin", b, len);
+        free(b);
+        b = baseline_figure_picture(&len);
+        t_write(over, "Character/NightElf/Female/MadeSkin.blp", b, len);
+        free(b);
+        ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", over);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            int items[SLOT_COUNT] = { 0 };
+            WErr oe = character_start_outfit(r, NULL, 4, 3, 1, items, &why);
+            check(!oe && items[SLOT_CHEST] == 12345, oe ? why.text : "a starting outfit from the place's CharStartOutfit, with no archives (025 through the resolver)");
+            char icon[300];
+            WErr ie = character_item_icon(r, NULL, 12345, icon, sizeof icon, &why);
+            check(!ie && !strcmp(icon, "Interface\\Icons\\INV_Chest_Made.blp"), ie ? why.text : "its item's icon from the place's ItemDisplayInfo");
+            CharacterLook look = { .race = 4, .sex = 1 };
+            look.items[SLOT_CHEST] = 12345;
+            Character ch;
+            WErr be = character_build(r, NULL, &look, &ch, &why);
+            check(!be && ch.model.nvertices == 41 && ch.skin.width == 64 && ch.items_unpainted == 0 && ch.shown && ch.shown[0] == 1,
+                  be ? why.text : "a character built from the place alone: its model and view, its hair, face and skin tables, its skin picture, its worn chest");
+            if (!be) character_free(&ch);
+            look.race = 1;                                          /* a human: the place has no such model */
+            be = character_build(r, NULL, &look, &ch, &why);
+            check(be && strstr(why.text, "no place") && strstr(why.text, "HumanFemale") && !ch.shown,
+                  "one whose model no place has: refused, naming it and saying no place has it, nothing left to free");
+            look.race = 4;
+            be = character_start_outfit(r, NULL, 4, 1, 1, items, &why);
+            check(be == W_ERR_CORRUPT && strstr(why.text, "class 1"), "an outfit the place's table hasn't: refused, as from the archives");
+            resolver_free(r);
+        } else check(0, why.text);
+        fclose(place.log); free(log);
+        int none[SLOT_COUNT] = { 0 };
+        check(character_start_outfit(NULL, NULL, 4, 3, 1, none, &why) == W_ERR_NOT_FOUND && strstr(why.text, "CharStartOutfit"),
+              "with neither a resolver nor archives: not found, naming the table");
+    }
+    /* }}} */
+
     /* {{{ an ordinary run with no archives still stops, named */
     {
         Settings *st = settings_new();
@@ -4935,7 +5005,7 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         check(!e && lr.source == ASSET_FROM_BASELINE && frames == BASELINE_WATER_FRAMES, e ? why.text : line);
         /* her: no character can be made (CharStartOutfit is the game's), so the stand-in */
         int outfit[SLOT_COUNT] = { 0 };
-        e = character_start_outfit(&ws.chain, 4, 3, 1, outfit, &why);
+        e = character_start_outfit(ws.assets, &ws.chain, 4, 3, 1, outfit, &why);
         check(e == W_ERR_NOT_FOUND && strstr(why.text, "CharStartOutfit"), "her character can't be made with no install (025 needs CharStartOutfit and the game's models)");
         FigureModel her;
         e = figure_model_stand_in(ws.assets, &ws.chain, "her", &her, &why);
@@ -5007,6 +5077,21 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         }
         snprintf(line, sizeof line, "the ground under her (tile %d, %d) prepared (033): %d pictures, %d of them the checker", tx, ty, need, checkers);
         check(!e && need > 0 && checkers == 0, e ? why.text : line);
+        /* the read-ahead (034) on that tile, through the resolver: its
+         * ground file, every picture and doodad it names, from the map's
+         * folder and the set, with no archives to read */
+        if (!e && gpr) {
+            int npics = gpr->adt->ntextures, nmodels = gpr->adt->nmodels;
+            Prefetch *reader = prefetch_start(&ws.chain, ws.assets, ws.map_name, 1);
+            prefetch_tile(reader, tx, ty);
+            prefetch_wait(reader);
+            int pt, pf, gm, gt;
+            prefetch_counts(reader, &pt, &pf, &gm, &gt);
+            prefetch_free(reader);
+            snprintf(line, sizeof line, "read ahead with no install (034, 1109 step 1m): tile %d, %d's %d files (its ground file, %d pictures, %d doodads' models and theirs), none from an archive",
+                     tx, ty, pf, npics, nmodels);
+            check(pt == 1 && pf >= 1 + npics + (nmodels ? 1 : 0) && ws.chain.count == 0, line);
+        }
         if (gpr) ground_prep_free(gpr, 0);
         world_start_close(&ws);
     }
@@ -5383,24 +5468,24 @@ int main(int argc, char **argv)
     {
         char icon[300] = "";
         BlpImage ic = { 0 };
-        int named = character_item_icon(&chain, 59981, icon, sizeof icon, &why) == W_OK;
+        int named = character_item_icon(NULL, &chain, 59981, icon, sizeof icon, &why) == W_OK;
         unsigned char *ib = named ? mpq_chain_read(&chain, icon, &len, NULL) : NULL;
         int decoded = ib && blp_decode(ib, len, &ic, &why) == 0;
         snprintf(line, sizeof line, "the Stormwind tabard's icon (%s) is in the archives and is 64 x 64 (%d x %d)", icon, ic.width, ic.height);
         check(decoded && ic.width == 64 && ic.height == 64, line);
         free(ib);
         if (decoded) blp_free(&ic);
-        check(character_item_icon(&chain, 999999999, icon, sizeof icon, &why) == W_ERR_NOT_FOUND, "an item look not in the table has no icon, and says so");
+        check(character_item_icon(NULL, &chain, 999999999, icon, sizeof icon, &why) == W_ERR_NOT_FOUND, "an item look not in the table has no icon, and says so");
         /* a worn item whose pictures the archives lack is counted, so the
          * dressing room can refuse it: look 3864 (the "Unused Tabard of
          * Chow") names two torso pictures no archive holds */
         CharacterLook lk = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
         Character worn;
         lk.items[SLOT_TABARD] = 59981;
-        int whole = character_build(&chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+        int whole = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
         if (whole >= 0) character_free(&worn);
         lk.items[SLOT_TABARD] = 3864;
-        int lacking = character_build(&chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
+        int lacking = character_build(NULL, &chain, &lk, &worn, &why) == W_OK ? worn.items_unpainted : -1;
         if (lacking >= 0) character_free(&worn);
         snprintf(line, sizeof line, "the Stormwind tabard is worn whole (%d missing); the Tabard of Chow lacks its 2 pictures (%d)", whole, lacking);
         check(whole == 0 && lacking == 2, line);
@@ -5479,7 +5564,7 @@ int main(int argc, char **argv)
     printf("putting her together\n");
     Character ch;
     CharacterLook look = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
-    int built = character_build(&chain, &look, &ch, &why) == 0;
+    int built = character_build(NULL, &chain, &look, &ch, &why) == 0;
     check(built, built ? "she is put together" : why.text);
     if (built) {
         int body = 0, hair2 = 0, others = 0, clothes = 0, bare = 0;
@@ -5546,7 +5631,7 @@ int main(int argc, char **argv)
         CharacterLook dressed = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 }, bare = { 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
         dressed.items[SLOT_CHEST] = 41143; dressed.items[SLOT_FEET] = 41480; dressed.items[SLOT_HANDS] = 41138;
         Character dc, bc;
-        if (character_build(&chain, &dressed, &dc, &why) || character_build(&chain, &bare, &bc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &dressed, &dc, &why) || character_build(NULL, &chain, &bare, &bc, &why)) check(0, why.text);
         else {
             int changed = 0, boots = 0, bare_feet = 0;
             int k = dc.skin.width / 256;
@@ -5565,7 +5650,7 @@ int main(int argc, char **argv)
         }
         /* hung items: the rogue's hood hides her hair; shoulders and a sword */
         dressed.items[SLOT_HEAD] = 41139; dressed.items[SLOT_SHOULDERS] = 41142; dressed.items[SLOT_MAIN_HAND] = 40857;
-        if (character_build(&chain, &dressed, &dc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &dressed, &dc, &why)) check(0, why.text);
         else {
             int points = 0, hair = 0;
             for (int i = 0; i < dc.nattached; ++i) points |= 1 << dc.attached[i].point;
@@ -5585,7 +5670,7 @@ int main(int argc, char **argv)
          * the skin row's second; without it the tail was skipped (173d) */
         CharacterLook tauren = { 6, 0, 0, 0, 0, 0, { 0 }, 0, 0 };
         Character tc;
-        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             int tail = 0, tail_fur = 0;
             for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.model.pieces[i].id == 1501 && tc.shown[i]) tail = 1;
@@ -5602,7 +5687,7 @@ int main(int argc, char **argv)
          * order groups 1, 3, 2; choice 0 is clean-shaven (no 1xx-3xx), choice
          * 1 shows 102, 302 and 202; his race has no eye glow */
         int shaven_any = 1, beard = 0, glow = 0;
-        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             shaven_any = 0;
             for (uint32_t i = 0; i < tc.model.npieces; ++i) {
@@ -5613,7 +5698,7 @@ int main(int argc, char **argv)
             character_free(&tc);
         }
         tauren.facial_hair = 1;
-        if (character_build(&chain, &tauren, &tc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &tauren, &tc, &why)) check(0, why.text);
         else {
             for (uint32_t i = 0; i < tc.model.npieces; ++i) {
                 uint32_t id = tc.model.pieces[i].id;
@@ -5626,7 +5711,7 @@ int main(int argc, char **argv)
                  shaven_any ? "some" : "none", beard, glow ? "one" : "none");
         check(!shaven_any && beard == 3 && !glow, line);
         tauren.facial_hair = 99;
-        int refused = character_build(&chain, &tauren, &tc, &why) != 0;
+        int refused = character_build(NULL, &chain, &tauren, &tc, &why) != 0;
         snprintf(line, sizeof line, "a facial-hair choice the table lacks is refused, naming it (%.80s)", refused ? why.text : "built");
         check(refused && strstr(why.text, "facial-hair choice 99"), line);
         if (!refused) character_free(&tc);
@@ -5635,15 +5720,15 @@ int main(int argc, char **argv)
          * have no slot here; a tauren warrior man his shirt, trousers, axe */
         {
             int hunter[SLOT_COUNT] = { 0 }, warrior[SLOT_COUNT] = { 0 };
-            int ok1 = !character_start_outfit(&chain, 4, 3, 1, hunter, &why);
-            int ok2 = !character_start_outfit(&chain, 6, 1, 0, warrior, &why);
+            int ok1 = !character_start_outfit(NULL, &chain, 4, 3, 1, hunter, &why);
+            int ok2 = !character_start_outfit(NULL, &chain, 6, 1, 0, warrior, &why);
             int filled = 0;
             for (int k = 0; k < SLOT_COUNT; ++k) filled += hunter[k] != 0;
             snprintf(line, sizeof line, "a fresh night-elf hunter wears shirt %d, trousers %d, boots %d, axe %d and nothing else (%d slots)",
                      hunter[SLOT_SHIRT], hunter[SLOT_LEGS], hunter[SLOT_FEET], hunter[SLOT_MAIN_HAND], filled);
             check(ok1 && hunter[SLOT_SHIRT] == 9976 && hunter[SLOT_LEGS] == 9975 && hunter[SLOT_FEET] == 9977 && hunter[SLOT_MAIN_HAND] == 22291 && filled == 4, line);
             check(ok2 && warrior[SLOT_SHIRT] == 9995 && warrior[SLOT_LEGS] == 9988 && warrior[SLOT_MAIN_HAND] == 8690, "a fresh tauren warrior wears his shirt, trousers and axe");
-            check(character_start_outfit(&chain, 4, 2, 1, hunter, &why) != 0 && strstr(why.text, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
+            check(character_start_outfit(NULL, &chain, 4, 2, 1, hunter, &why) != 0 && strstr(why.text, "class 2"), "a race and class with no outfit (a night-elf paladin) is refused, named");
         }
         /* a creature's look (173t) may use a choice players can't: an
          * Astranaar sentinel's facial-hair 10 (a night-elf woman's rows stop
@@ -5651,13 +5736,13 @@ int main(int argc, char **argv)
          * a player's look with it is refused */
         CharacterLook sentinel = { 4, 1, 0, 0, 0, 0, { 0 }, 10, 1 };
         int glow10 = 0;
-        if (character_build(&chain, &sentinel, &tc, &why)) check(0, why.text);
+        if (character_build(NULL, &chain, &sentinel, &tc, &why)) check(0, why.text);
         else {
             for (uint32_t i = 0; i < tc.model.npieces; ++i) if (tc.shown[i] && tc.model.pieces[i].id == 1702) glow10 = 1;
             character_free(&tc);
         }
         sentinel.npc = 0;
-        int player_refused = character_build(&chain, &sentinel, &tc, &why) != 0;
+        int player_refused = character_build(NULL, &chain, &sentinel, &tc, &why) != 0;
         if (!player_refused) character_free(&tc);
         check(glow10 && player_refused, "a creature's facial-hair choice beyond the table builds with the race's plain pieces (her eye glow kept); a player's is refused");
         /* the sentinel's look: display 4841 names a CreatureDisplayInfoExtra
