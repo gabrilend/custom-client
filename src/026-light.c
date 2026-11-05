@@ -96,9 +96,13 @@ static void band_at(const Dbc *d, uint32_t row, uint32_t t, int is_colour, float
     float f = span ? (float)into / (float)span : 0;
     uint32_t va = dbc_u32(d, row, 19 + a), vb = dbc_u32(d, row, 19 + b);
     if (is_colour) {
+        /* each channel cut down to a whole 255th after the blend between
+         * the two moments, as the original stores it (306's notes; 1109
+         * decision 151): the small margin keeps a blend that lands on a
+         * whole step, give or take a float's rounding, on it */
         for (int c = 0; c < 3; ++c) {
-            float ca = (float)((va >> (16 - 8 * c)) & 0xff) / 255.0f, cb = (float)((vb >> (16 - 8 * c)) & 0xff) / 255.0f;
-            out[c] = ca + (cb - ca) * f;
+            float ca = (float)((va >> (16 - 8 * c)) & 0xff), cb = (float)((vb >> (16 - 8 * c)) & 0xff);
+            out[c] = floorf(ca + (cb - ca) * f + 1e-3f) / 255.0f;
         }
     } else {
         out[0] = as_float(va) + (as_float(vb) - as_float(va)) * f;
@@ -136,9 +140,8 @@ static void params_at(const LightTables *t, uint32_t set, uint32_t when, LightNo
     else o->fog_end = LIGHT_GREY_FOG_END;
     if (band_row(t, "LightFloatBand", set * 6 - 4, &r)) { band_at(r.dbc, r.row, when, 0, v); o->fog_start = o->fog_end * v[0]; }
     else o->fog_start = o->fog_end * LIGHT_GREY_FOG_SHARE;
-    /* some sets give a negative share (Northrend light 1386: -0.1 at
-     * night); fog doesn't start behind the camera, so it starts at 0 */
-    if (o->fog_start < 0) o->fog_start = 0;
+    /* a negative share (Northrend light 1386: -0.1 at night) is kept
+     * here: whether it counts as 0 is the fog mode's (fog_rules) */
     /* the water's opacity (173r); a set with no parameter row keeps the
      * 0.75 this client drew all water with before it read them (a
      * placeholder row's own: 097's layout gives 0.75 there too) */
@@ -154,16 +157,51 @@ static void mix_into(LightNow *a, const LightNow *b, float w)
     size_t n = offsetof(LightNow, sun_dir) / sizeof(float);   /* every colour and the fog distances */
     for (size_t i = 0; i < n; ++i) pa[i] += (pb[i] - pa[i]) * w;
 }
+/* one light's set at a time, with its storm set (Light's field 10, or
+ * 11 under water) laid over it by the storm's strength, 0-1, when it
+ * names one (306's notes; 1109 decision 154) */
+static void light_params(const LightTables *t, const LightSphere *l, int kind, float storm, uint32_t when, LightNow *o)
+{
+    params_at(t, l->set[kind], when, o);
+    uint32_t ss = l->set[kind + 2];
+    if (storm > 0 && ss) {
+        LightNow st;
+        memset(&st, 0, sizeof st);
+        params_at(t, ss, when, &st);
+        mix_into(o, &st, storm > 1 ? 1 : storm);
+    }
+}
+/* the original's fog rules, on the blended light (306's notes; 1109
+ * decisions 152, 153): the start's share of the end held to -1 to 1, the
+ * end no nearer than LIGHT_FOG_END_LEAST; on a map numbered
+ * LIGHT_FOG_MODE2_MAP and up (the second fog mode: this client always
+ * draws with shaders) a negative share counts as 0, on the others it is
+ * kept, so the fog starts behind the eye */
+static void fog_rules(int map, LightNow *o)
+{
+    float share = o->fog_end > 0 ? o->fog_start / o->fog_end : 0;
+    if (share < -1) share = -1;
+    if (share > 1) share = 1;
+    o->fog_mode = map >= LIGHT_FOG_MODE2_MAP ? 2 : 1;
+    if (o->fog_mode == 2 && share < 0) share = 0;
+    if (o->fog_end < LIGHT_FOG_END_LEAST) o->fog_end = LIGHT_FOG_END_LEAST;
+    o->fog_start = o->fog_end * share;
+}
 /* }}} */
 
-/* {{{ light_at */
+/* {{{ light_at, light_at_weather */
 int light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out)
 {
+    return light_at_weather(t, map, x, y, z, hours, kind, 0, out);
+}
+int light_at_weather(const LightTables *t, int map, float x, float y, float z, float hours, int kind, float storm, LightNow *out)
+{
     memset(out, 0, sizeof *out);
+    if (kind != LIGHT_UNDERWATER) kind = LIGHT_CLEAR;
     uint32_t when = (uint32_t)(fmodf(fmodf(hours, 24.0f) + 24.0f, 24.0f) * 120.0f) % 2880;
-    /* the default first, then every sphere reaching here, the larger
-     * (outer) first so smaller, nearer lights are laid over them; with no
-     * default, the grey day under them */
+    /* the default first, then every sphere reaching here, farthest first
+     * so nearer lights are laid over them; with no default, Light's row 1
+     * under them, and with no row 1 either, the grey day */
     int def = -1;
     typedef struct { int k; float w, d, inner; } Reach;
     Reach reach[32];
@@ -190,13 +228,13 @@ int light_at(const LightTables *t, int map, float x, float y, float z, float hou
     if (def < 0 && !t->none) def = t->record1;           /* no default of its own: Light's row 1 (decision 147) */
     int used = -1, used_k = -1;
     float most = 0;
-    if (def >= 0) { params_at(t, t->lights[def].set[kind], when, out); used = t->lights[def].id; used_k = def; most = 0.0001f; }
+    if (def >= 0) { light_params(t, &t->lights[def], kind, storm, when, out); used = t->lights[def].id; used_k = def; most = 0.0001f; }
     else grey_day(out);
     for (int i = 0; i < nreach; ++i) {
         LightNow l;
         memset(&l, 0, sizeof l);
         const LightSphere *s = &t->lights[reach[i].k];
-        params_at(t, s->set[kind], when, &l);
+        light_params(t, s, kind, storm, when, &l);
         mix_into(out, &l, reach[i].w);
         if (reach[i].w >= most) { most = reach[i].w; used = s->id; used_k = reach[i].k; }
     }
@@ -212,7 +250,8 @@ int light_at(const LightTables *t, int map, float x, float y, float z, float hou
                 snprintf(out->skybox, sizeof out->skybox, "%s", dbc_text(sr.dbc, sr.row, 2));
         }
     }
-    if (used < 0) grey_day(out);
+    if (used < 0) grey_day(out);                     /* fog_mode 0: this client's own fixed fog */
+    else fog_rules(map, out);
 
     /* the sun: rises in the east at 6, overhead-south at noon, sets in the
      * west at 18 (world x north, y west); below the horizon at night, when

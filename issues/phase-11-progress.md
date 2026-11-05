@@ -263,3 +263,14 @@ as the original's notes say (not run against it). With the tables in no
 place the fixed grey sky and fog stand, said in one line. The run with
 no window takes the light where she ends at noon and counts its fog and
 sky in the receipt. Decisions 145 to 150 in 1109.
+
+2026-11-05: 1109's step 1u, the original's light rules from issue 306's
+notes. Each colour from the light tables is cut down to a whole 255th
+after the blend through the day; the fog never ends nearer than 10
+yards and its start's share is held to -1 to 1; from map 530 on (the
+second fog mode) a negative start counts as 0, while below it the fog
+starts behind the eye. Storm sets can be laid over by a storm's
+strength, though nothing reads the weather yet. The second fog mode's
+curve, zone and override lights and the indoor fog blend are left,
+with reasons. The test program's output is line buffered, so a warning
+no longer lands inside a check's line. Decisions 151 to 156 in 1109.

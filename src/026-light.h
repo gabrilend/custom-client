@@ -45,7 +45,7 @@
  * any of the four tables in no place, the plain grey day everywhere,
  * said once.
  *
- * A LightNow, field by field (colours are red, green, blue, 0 to 1):
+ * A LightNow, field by field (colours are red, green, blue, 0 to 1; a light's own in whole 255ths before lights are blended):
  *   sun[3], shade[3]     the sun's light and the light in shadow
  *   sky[5][3]            the sky's colours, overhead first, horizon last
  *   fog[3]               the fog's colour
@@ -55,6 +55,9 @@
  *                        ocean shallow, ocean deep, river shallow, river
  *                        deep (LightParams 8, 9, 6, 7; 173r)
  *   sun_dir[3]           a unit vector toward the sun (world axes)
+ *   fog_mode             the original's fog mode the light's fog follows:
+ *                        1 below map LIGHT_FOG_MODE2_MAP, 2 from it on,
+ *                        0 for the grey day (this client's own fog)
  *   skybox[128]          the skybox model the strongest light names
  *                        (LightParams 3 -> LightSkybox 2), "" for none
  */
@@ -77,7 +80,8 @@ typedef struct {
     float water[4][3];
     float fog_start, fog_end;
     float water_alpha[4];             /* opacity: ocean shallow, ocean deep, river shallow, river deep (LightParams 8, 9, 6, 7) */
-    float sun_dir[3];
+    float sun_dir[3];                 /* from here on, not blended between lights (mix_into stops here) */
+    int   fog_mode;
     char  skybox[128];
 } LightNow;
 
@@ -129,8 +133,18 @@ void light_close(LightTables *t);
 #define LIGHT_GREY_FOG_END   500.0f   /* yards */
 #define LIGHT_GREY_FOG_SHARE 0.25f    /* where it starts, as a share of its end */
 
-/* Which of a light's parameter sets is used (Light's fields 8 on). */
+/* Which of a light's parameter sets is used (Light's fields 8 on; a
+ * storm's are the two after, 10 and 11, laid over by light_at_weather). */
 enum { LIGHT_CLEAR = 0, LIGHT_UNDERWATER = 1 };
+
+/* The original's fog rules (306's notes, 1109 step 1u): the end never
+ * nearer than this many yards; the second fog mode from this map number
+ * on (Outland, Northrend and later), where a negative start counts as 0
+ * (on lower maps it is kept: the fog starts behind the eye). The second
+ * mode's curve, its rate and its end pushed to the far clip are not done
+ * (decision 153). */
+#define LIGHT_FOG_END_LEAST 10.0f
+#define LIGHT_FOG_MODE2_MAP 530
 
 /* The light at world (x, y, z) on map `map` at `hours` since midnight
  * (0-24), of kind `kind` (LIGHT_CLEAR, or LIGHT_UNDERWATER while the
@@ -138,5 +152,12 @@ enum { LIGHT_CLEAR = 0, LIGHT_UNDERWATER = 1 };
  * reports), or -1 when the map has no lights at all (then `out` holds a
  * plain grey day, and the caller is told). */
 int  light_at(const LightTables *t, int map, float x, float y, float z, float hours, int kind, LightNow *out);
+
+/* light_at in a storm of strength `storm`, 0 (none: light_at's) to 1:
+ * each light's storm set (Light's field 10, under water 11) laid over its
+ * set by that share, where it names one (306's notes: the original's;
+ * 1109 decision 154). Nothing here reads the weather yet: 043 and 089
+ * pass 0. */
+int  light_at_weather(const LightTables *t, int map, float x, float y, float z, float hours, int kind, float storm, LightNow *out);
 
 #endif

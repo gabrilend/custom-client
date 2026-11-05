@@ -53,6 +53,7 @@ int map_fog_apply(const MapFog *f, LightNow *l)
     for (int k = 0; k < 3; ++k) l->fog[k] = f->rgb[k];
     l->fog_start = f->start;
     l->fog_end = f->end;
+    l->fog_mode = 0;                                 /* the map's own fog: none of the original's modes (1109 step 1u) */
     return 1;
 }
 /* }}} */

@@ -48,7 +48,7 @@ skybox row no place has is a placeholder row in a test-map run. With
 any of the four tables in no place, the plain grey day everywhere,
 said once.
 
-A LightNow, field by field (colours are red, green, blue, 0 to 1):
+A LightNow, field by field (colours are red, green, blue, 0 to 1; a light's own in whole 255ths before lights are blended):
   sun[3], shade[3]     the sun's light and the light in shadow
   sky[5][3]            the sky's colours, overhead first, horizon last
   fog[3]               the fog's colour
@@ -58,6 +58,9 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1):
                        ocean shallow, ocean deep, river shallow, river
                        deep (LightParams 8, 9, 6, 7; 173r)
   sun_dir[3]           a unit vector toward the sun (world axes)
+  fog_mode             the original's fog mode the light's fog follows:
+                       1 below map LIGHT_FOG_MODE2_MAP, 2 from it on,
+                       0 for the grey day (this client's own fog)
   skybox[128]          the skybox model the strongest light names
                        (LightParams 3 -> LightSkybox 2), "" for none
 
@@ -90,3 +93,9 @@ A LightNow, field by field (colours are red, green, blue, 0 to 1):
   camera is below the water's surface: 173n). Returns the id of the light whose colours weigh most (for
   reports), or -1 when the map has no lights at all (then `out` holds a
   plain grey day, and the caller is told).
+- `int light_at_weather(const LightTables *t, int map, float x, float y, float z, float hours, int kind, float storm, LightNow *out);`
+  light_at in a storm of strength `storm`, 0 (none: light_at's) to 1:
+  each light's storm set (Light's field 10, under water 11) laid over its
+  set by that share, where it names one (306's notes: the original's;
+  1109 decision 154). Nothing here reads the weather yet: 043 and 089
+  pass 0.

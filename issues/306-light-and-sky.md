@@ -29,24 +29,36 @@ Measured against the clean-room checklist
     a tie within 1/3 yard laid larger inner radius first, so the smaller
     is on top (that reading of the note is not checked against the
     original);
-  - after blending between two times, the original cuts each colour
+  - ~~after blending between two times, the original cuts each colour
     channel down to a whole step of 255; this client keeps the
-    fraction;
-  - fog end is never below 10 yards nor beyond the far clip; the start
+    fraction;~~ Done in 1109 step 1u (decision 151): each colour band
+    cut down to a whole 255th after the time blend, before lights and
+    storms are blended;
+  - ~~fog end is never below 10 yards nor beyond the far clip; the start
     multiplier is held to −1 to 1. This client sets a negative start to
     0 in every mode, while the original does that only in the second fog
-    mode;
-  - fog colour is sky colour 6;
+    mode;~~ Done in 1109 step 1u (decisions 152, 153): on the blended
+    light, the end floored at 10 yards, the share held to −1 to 1, a
+    negative share kept below map 530 and 0 from it; the far clip as
+    before (173b6);
+  - ~~fog colour is sky colour 6;~~ Already so: the fog band, 7, is the
+    sixth sky colour (bands 2 to 7; 1109 decision 155);
   - **the second fog mode** on maps numbered 530 and above when shaders
     are available: fog end pushed to the far clip when it's at least
     27.78 yards, a rate from 1.5 to 7 by how short the fog band is, the
     rate doubled under water; the curve itself is in the original's
-    shipped shader files, which are data to read (note 4.2);
+    shipped shader files, which are data to read (note 4.2). The mode is
+    chosen and its start rule kept (1109 step 1u, decision 153); the
+    end's push, the rate and the curve are not built (no formula for the
+    rate in these notes, the shader files not here);
   - indoors, outdoor fog blends into a building group's own fog over the
     first 25 yards past its boundary (its underwater fog in liquid);
-  - storm sets blended over the normal set by the storm's strength;
-    up to 5 zone lights by percentage; override lights with their own
-    fades;
+  - ~~storm sets blended over the normal set by the storm's
+    strength;~~ Done in 1109 step 1u (decision 154): `light_at_weather`,
+    though nothing reads the weather yet (strength 0);
+  - up to 5 zone lights by percentage; override lights with their own
+    fades (not built: these notes name no table or fade rule; 1109
+    decision 155);
   - ~~a map with no global light uses light record 1. This client instead
     falls back to fixed greys, a fog of 125 to 500 yards and water at
     0.75 when a light or its rows are missing, without saying so: three

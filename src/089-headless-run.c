@@ -364,7 +364,7 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "steps_walled_pathing", r->steps_walled_pathing }, { "steps_on_closed", r->steps_on_closed },
         { "looks_placeholder", r->looks_placeholder }, { "table_placeholders", r->table_placeholders },
         { "light", r->light }, { "light_tables", r->light_tables }, { "light_hours", r->light_hours }, { "fog_from_map", r->fog_from_map },
-        { "fog_start", r->fog_start }, { "fog_end", r->fog_end }, { "fog_red", r->fog_red }, { "fog_green", r->fog_green }, { "fog_blue", r->fog_blue },
+        { "fog_mode", r->fog_mode }, { "fog_start", r->fog_start }, { "fog_end", r->fog_end }, { "fog_red", r->fog_red }, { "fog_green", r->fog_green }, { "fog_blue", r->fog_blue },
         { "sky_red", r->sky_red }, { "sky_green", r->sky_green }, { "sky_blue", r->sky_blue },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
@@ -551,11 +551,11 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             /* as 043 each frame: the map's fog, then the view distance ends it at the latest */
             float farclip = in->start.settings ? (float)settings_num(in->start.settings, "farclip") : 0;
             r.fog_from_map = farclip > 0 ? map_fog_frame(&mf, 0, farclip, &now) : map_fog_apply(&mf, &now);
-            r.fog_start = now.fog_start; r.fog_end = now.fog_end;
+            r.fog_start = now.fog_start; r.fog_end = now.fog_end; r.fog_mode = now.fog_mode;
             r.fog_red = now.fog[0]; r.fog_green = now.fog[1]; r.fog_blue = now.fog[2];
             r.sky_red = now.sky[0][0]; r.sky_green = now.sky[0][1]; r.sky_blue = now.sky[0][2];
-            fprintf(log, "headless: the light at %.2f hours where she ends: %s%d, fog from %.1f to %.1f yards%s, colour (%.3f, %.3f, %.3f), sky overhead (%.3f, %.3f, %.3f)\n",
-                    in->hours, r.light < 0 ? "none (the grey day) " : "light ", r.light, r.fog_start, r.fog_end, r.fog_from_map ? " (the map's own)" : "",
+            fprintf(log, "headless: the light at %.2f hours where she ends: %s%d, fog from %.1f to %.1f yards%s (mode %d), colour (%.3f, %.3f, %.3f), sky overhead (%.3f, %.3f, %.3f)\n",
+                    in->hours, r.light < 0 ? "none (the grey day) " : "light ", r.light, r.fog_start, r.fog_end, r.fog_from_map ? " (the map's own)" : "", r.fog_mode,
                     r.fog_red, r.fog_green, r.fog_blue, r.sky_red, r.sky_green, r.sky_blue);
             light_close(&lt);
         } else fprintf(log, "headless: the light: %s\n", lw.text);   /* a light table there but broken: the run's error, after the rest is let go */
