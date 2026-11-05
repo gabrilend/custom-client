@@ -42,12 +42,17 @@
  * headless run, so both start her the same): facing the town's west side
  * at Astranaar (radians, the game's: 0 north, rising west), 120% of the
  * base speeds (the owner, 2026-10-04), a night-elf woman (ChrRaces 4,
- * sex 1) in a fresh hunter's outfit (ChrClasses 3; CharStartOutfit). */
+ * sex 1) in a fresh hunter's outfit (ChrClasses 3; CharStartOutfit).
+ * Her body against the models' walls (173q; 091-model-solids.h): 0.4
+ * yards round, 2.3 tall (the original's own numbers are 173q's open
+ * question). */
 #define WORLD_START_FACING 3.6
 #define WORLD_START_SPEED  1.2
 #define WORLD_HER_RACE     4
 #define WORLD_HER_SEX      1
 #define WORLD_HER_CLASS    3
+#define WORLD_HER_RADIUS   0.4f
+#define WORLD_HER_HEIGHT   2.3f
 
 /* What the start is given:
  *   client      the original game's Data folder (its archives)

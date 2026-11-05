@@ -94,6 +94,7 @@
 #include "084-map-fog.h"
 #include "087-world-start.h"
 #include "089-headless-run.h"
+#include "091-model-solids.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -115,7 +116,7 @@
 /* {{{ settings */
 #define START_O      WORLD_START_FACING                /* facing the town's west side (087-world-start.h) */
 #define SPEED        WORLD_START_SPEED                 /* 120% of the base speeds (owner, 2026-10-04; 087-world-start.h) */
-#define ELF_HEIGHT   2.3f                              /* yards: the camera looks at her shoulders */
+#define ELF_HEIGHT   WORLD_HER_HEIGHT                              /* yards: the camera looks at her shoulders */
 #define EYE_SHARE    0.92f                             /* first person: her eyes, as a share of her height (this client's guess) */
 #define ZOOM_BASE    20.0f                             /* yards; times cameraDistanceMaxFactor (1 to 2) is the zoom-out limit (173b4) */
 /* her look: ChrRaces id, sex, and the character-creation choices (from 0);
@@ -319,18 +320,7 @@ static void drop_creatures(App *app, int tile)
 static float ground_at(void *ctx, float x, float y, float z_top, float *gx, float *gy)
 {
     App *app = ctx;
-    float tx, ty, mx, my;
-    float t = maps_world_height(&app->ws.world, x, y, &tx, &ty);
-    float m = collide_floor(app->solids, x, y, z_top, &mx, &my);
-    /* the model's floor wins when it is higher than a usable map ground,
-     * or when the map's ground is above her (she is beneath it) */
-    int map_below = t > -10000 && t <= z_top + 0.01f;
-    if (m > -10000 && (!map_below || m > t)) { *gx = mx; *gy = my; return m; }
-    /* otherwise the map's ground, as before models: also when it lies
-     * above her and no model floor does (she lands on it, or the slope
-     * rule decides) */
-    *gx = tx; *gy = ty;
-    return t;
+    return model_solids_ground(&app->ws.world, app->solids, x, y, z_top, gx, gy);   /* 091: the rule the run with no window shares */
 }
 static float water_at(void *ctx, double x, double y)
 {
@@ -343,7 +333,7 @@ static int wall_at(void *ctx, double x0, double y0, double x1, double y1, double
 {
     App *app = ctx;
     (void)ctx;
-    return collide_wall(app->solids, x0, y0, x1, y1, z, 0.4f, (float)MOVER_STEP_UP, ELF_HEIGHT, (float)app->elf.max_grad, nx, ny);
+    return model_solids_wall(app->solids, x0, y0, x1, y1, z, (float)app->elf.max_grad, nx, ny);
 }
 /* }}} */
 

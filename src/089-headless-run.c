@@ -5,7 +5,8 @@
  * each a set of keys held for a whole number of steps. The run opens the
  * world as the windowed client does, finds her figure and the
  * creatures' looks as it would, then steps the mover with a fixed step,
- * reading each tile's ground file as she nears it for its water, and
+ * reading each tile's ground file as she nears it for its water and
+ * its models' floors and walls (091), and
  * counts what happened; the counts go into the goodbye receipt.
  */
 #include "089-headless-run.h"
@@ -20,11 +21,13 @@
 #include "059-loose-folders.h"
 #include "061-mdx.h"
 #include "088-figure-model.h"
+#include "091-model-solids.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* {{{ the moves */
 enum { HOLD_FORWARD, HOLD_BACK, HOLD_LEFT, HOLD_RIGHT, HOLD_STRAFE_LEFT, HOLD_STRAFE_RIGHT, HOLD_JUMP, HOLD_SWIM_DOWN, HOLD_COUNT };
@@ -33,6 +36,7 @@ static const char *const HOLDS[HOLD_COUNT] = { "forward", "back", "left", "right
 typedef struct { unsigned keys; int walking, steps; } Move;
 struct HeadlessMoves {
     char   name[120];
+    char   map[64];                     /* the map's folder the moves are for; "" any */
     double step;
     int    nmoves, steps;
     Move  *moves;
@@ -41,6 +45,7 @@ struct HeadlessMoves {
 int    headless_moves_count(const HeadlessMoves *m) { return m->nmoves; }
 int    headless_moves_steps(const HeadlessMoves *m) { return m->steps; }
 double headless_moves_step(const HeadlessMoves *m)  { return m->step; }
+const char *headless_moves_map(const HeadlessMoves *m) { return m->map; }
 void   headless_moves_free(HeadlessMoves *m) { if (m) { free(m->moves); free(m); } }
 
 /* the keys named in `text` (words with spaces between), or a refusal naming the word */
@@ -73,7 +78,7 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
         const char *key;
         const LuaValue *v = lua_value_at(top, i, &key);
         int line = lua_value_line(v);
-        if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: a value with no name; the moves file has format, name, step and moves", where, line);
+        if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: a value with no name; the moves file has format, name, map, step and moves", where, line);
         if (!strcmp(key, "format")) {
             if (lua_value_type(v) != LUA_DATA_NUMBER || lua_value_number(v) != HEADLESS_MOVES_FORMAT)
                 return w_fail(why, W_ERR_REFUSED, "%s line %d: format must be %d (this client reads that one)", where, line, HEADLESS_MOVES_FORMAT);
@@ -81,6 +86,11 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
         } else if (!strcmp(key, "name")) {
             if (lua_value_type(v) != LUA_DATA_TEXT) return w_fail(why, W_ERR_REFUSED, "%s line %d: name must be text", where, line);
             snprintf(m->name, sizeof m->name, "%s", lua_value_text(v));
+        } else if (!strcmp(key, "map")) {
+            const char *t = lua_value_type(v) == LUA_DATA_TEXT ? lua_value_text(v) : NULL;
+            if (!t || !*t || strlen(t) >= sizeof m->map || strpbrk(t, "/\\"))
+                return w_fail(why, W_ERR_REFUSED, "%s line %d: map must be the map's folder name (World\\Maps\\<name>), 1 to %d characters", where, line, (int)sizeof m->map - 1);
+            snprintf(m->map, sizeof m->map, "%s", t);
         } else if (!strcmp(key, "step")) {
             double s = lua_value_number(v);
             if (lua_value_type(v) != LUA_DATA_NUMBER || !(s >= 0.01 && s <= 0.1))
@@ -89,7 +99,7 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
         } else if (!strcmp(key, "moves")) {
             if (lua_value_type(v) != LUA_DATA_TABLE) return w_fail(why, W_ERR_REFUSED, "%s line %d: moves must be a list of moves", where, line);
             moves = v;
-        } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of the moves file (format, name, step, moves)", where, line, key);
+        } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of the moves file (format, name, map, step, moves)", where, line, key);
     }
     if (!have_format) return w_fail(why, W_ERR_REFUSED, "%s: no format; the moves file says format = %d", where, HEADLESS_MOVES_FORMAT);
     if (!moves) return w_fail(why, W_ERR_REFUSED, "%s: no moves", where);
@@ -166,11 +176,18 @@ WErr headless_moves_read(const char *path, HeadlessMoves **out, WWhy *why)
 }
 /* }}} */
 
-/* {{{ the world the mover asks: the map's ground (no models' floors or
- * walls: those are built by the drawing parts) and the tiles' water */
+/* {{{ the world the mover asks: the map's ground, the placed models'
+ * floors and walls (091, as the window's 042 places them) and the tiles'
+ * water, buildings' pools included */
 typedef struct {
     WorldStart  *ws;
     LiquidWorld *waters;
+    CollideWorld *solids;
+    ModelSolids *models;
+    FILE        *log;
+    double       ox, oy;                /* the solids' origin: where she starts, as 043's */
+    double       max_grad;              /* hers, for the walls */
+    int          walled;                /* this step met a wall */
     unsigned char loaded[64 * 64];      /* 1: its ground file read for its water; 2: none there */
     int          big_alpha, tiles_entered, ground_files;
     unsigned char entered[64 * 64];
@@ -179,8 +196,14 @@ typedef struct {
 static float ground_at(void *ctx, float x, float y, float z_top, float *gx, float *gy)
 {
     Here *h = ctx;
-    (void)z_top;
-    return maps_world_height(&h->ws->world, x, y, gx, gy);
+    return model_solids_ground(&h->ws->world, h->solids, x, y, z_top, gx, gy);
+}
+static int wall_at(void *ctx, double x0, double y0, double x1, double y1, double z, float *nx, float *ny)
+{
+    Here *h = ctx;
+    int hit = model_solids_wall(h->solids, x0, y0, x1, y1, z, (float)h->max_grad, nx, ny);
+    h->walled |= hit;
+    return hit;
 }
 static float water_at(void *ctx, double x, double y)
 {
@@ -188,7 +211,8 @@ static float water_at(void *ctx, double x, double y)
     int kind;
     return liquid_surface(h->waters, x, y, &kind);
 }
-/* the tile she is on and those round it: their water filed, once */
+/* the tile she is on and those round it: their water and their models'
+ * solid shapes filed, once */
 static void near_tiles(Here *h, double x, double y)
 {
     int tx, ty;
@@ -207,6 +231,7 @@ static void near_tiles(Here *h, double x, double y)
             AdtTile *t = calloc(1, sizeof *t);
             if (t && !adt_read(f.data, f.len, h->big_alpha, t, &w)) {
                 liquid_add_tile(h->waters, a, b, t);
+                if (model_solids_add_tile(h->models, t, a * 64 + b, h->ox, h->oy, &w)) fprintf(h->log, "headless: tile %d, %d's models: %s\n", a, b, w.text);
                 h->loaded[a * 64 + b] = 1;
                 ++h->ground_files;
                 adt_free(t);
@@ -312,6 +337,10 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "distance", r->distance }, { "lowest_z", r->lowest_z }, { "highest_z", r->highest_z },
         { "tiles", r->tiles }, { "ground_files", r->ground_files }, { "steps_airborne", r->steps_airborne },
         { "steps_swimming", r->steps_swimming }, { "steps_sliding", r->steps_sliding }, { "steps_no_ground", r->steps_no_ground },
+        { "models", r->models }, { "models_solid", r->models_solid }, { "models_wc3", r->models_wc3 }, { "buildings", r->buildings },
+        { "model_stand_ins", r->model_stand_ins }, { "models_left_out", r->models_left_out }, { "model_copies", r->model_copies },
+        { "solid_copies", r->solid_copies }, { "solid_triangles", r->solid_triangles }, { "building_pools", r->building_pools },
+        { "steps_on_models", r->steps_on_models }, { "steps_walled", r->steps_walled },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -337,6 +366,11 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     WorldStart ws;
     WErr rc = world_start_open(&in->start, &ws, why);
     if (rc) return ended(bye, rc, why);
+    if (in->moves->map[0] && strcasecmp(in->moves->map, ws.map_name)) {   /* a route walked on another map means nothing */
+        w_fail(why, W_ERR_REFUSED, "the moves%s%s are for the map %s; this run's is %s", in->moves->name[0] ? " " : "", in->moves->name, in->moves->map, ws.map_name);
+        world_start_close(&ws);
+        return ended(bye, W_ERR_REFUSED, why);
+    }
     Anim anim;
     memset(&anim, 0, sizeof anim);
     if ((rc = her(&ws, log, &r, &anim, why)) || (rc = creatures(&ws, in->start.map_id, in->world_dir, log, &r, why))) {
@@ -350,13 +384,21 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     /* {{{ the moves */
     Here *h = calloc(1, sizeof *h);
     LiquidWorld *waters = liquid_new();
-    if (!h || !waters) {
-        free(h); liquid_free(waters); anim_free(&anim); world_start_close(&ws);
+    double ox = floor(in->start.start_x), oy = floor(in->start.start_y);   /* 043's origin */
+    CollideWorld *solids = collide_new(ox, oy);
+    double wc3_yards = in->start.conv && in->start.conv->wc3_scale > 0 ? in->start.conv->wc3_scale : 0;   /* as 043 tells its doodads */
+    ModelSolids *models = model_solids_new(ws.assets, &ws.chain, wc3_yards, solids, waters, log);
+    if (!h || !waters || !solids || !models) {
+        free(h); liquid_free(waters); collide_free(solids); model_solids_free(models); anim_free(&anim); world_start_close(&ws);
         w_fail(why, W_ERR_FULL, "no memory for the headless run");
         return ended(bye, W_ERR_FULL, why);
     }
     h->ws = &ws;
     h->waters = waters;
+    h->solids = solids;
+    h->models = models;
+    h->log = log;
+    h->ox = ox; h->oy = oy;
     {
         char wdt[300];
         snprintf(wdt, sizeof wdt, "World\\Maps\\%s\\%s.wdt", ws.map_name, ws.map_name);
@@ -371,7 +413,8 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     const HeadlessMoves *mv = in->moves;
     Mover m;
     mover_init(&m, in->start.start_x, in->start.start_y, ws.z, WORLD_START_FACING, WORLD_START_SPEED, ws.max_slope);
-    MoverWorld mw = { ground_at, NULL, water_at, h };
+    h->max_grad = m.max_grad;
+    MoverWorld mw = { ground_at, wall_at, water_at, h };
     MovesState ms;
     moves_init(&ms, &anim);
     int last_seq = ms.seq;
@@ -390,7 +433,9 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
         for (int s = 0; s < o->steps; ++s) {
             near_tiles(h, m.x, m.y);
             double bx = m.x, by = m.y;
+            h->walled = 0;
             mover_step(&m, &mi, mv->step, &mw);
+            if (h->walled) ++r.steps_walled;
             r.distance += hypot(m.x - bx, m.y - by);
             if (m.z < r.lowest_z) r.lowest_z = m.z;
             if (m.z > r.highest_z) r.highest_z = m.z;
@@ -398,7 +443,12 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             if (m.swimming) ++r.steps_swimming;
             if (m.sliding) ++r.steps_sliding;
             float gx, gy;
-            if (maps_world_height(&ws.world, (float)m.x, (float)m.y, &gx, &gy) < -10000) ++r.steps_no_ground;
+            float map_z = maps_world_height(&ws.world, (float)m.x, (float)m.y, &gx, &gy);
+            if (map_z < -10000) ++r.steps_no_ground;
+            if (m.grounded) {   /* standing on a model's floor: one under her feet, above the map's ground there */
+                float fz = collide_floor(solids, m.x, m.y, m.z + 0.1, &gx, &gy);
+                if (fz > -10000 && fabs(fz - m.z) < 0.1 && fz > map_z + 0.01f) ++r.steps_on_models;
+            }
             /* her animation, chosen as 043 chooses it from what she did */
             MovesInput ai = {
                 .forward = mi.forward, .back = mi.back, .strafe_left = mi.strafe_left, .strafe_right = mi.strafe_right,
@@ -418,8 +468,17 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     r.her_animation = ms.seq >= 0 && ms.seq < anim.nseqs ? anim.seqs[ms.seq].id : -1;
     r.tiles = h->tiles_entered;
     r.ground_files = h->ground_files;
-    fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground\n",
-            r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground);
+    ModelSolidsCounts mc;
+    model_solids_counts(models, &mc);
+    r.models = mc.models; r.models_solid = mc.models_solid; r.models_wc3 = mc.models_wc3; r.buildings = mc.buildings;
+    r.model_stand_ins = mc.stand_ins; r.models_left_out = mc.left_out; r.model_copies = mc.copies; r.solid_copies = mc.solid_copies;
+    r.solid_triangles = mc.triangles; r.building_pools = mc.pools;
+    fprintf(log, "headless: %d models and %d buildings placed %d times (%d WC3 models and %d stand-ins walked through, %d left out); %d copies solid, %d solid triangles, %d buildings' pools\n",
+            r.models, r.buildings, r.model_copies, r.models_wc3, r.model_stand_ins, r.models_left_out, r.solid_copies, r.solid_triangles, r.building_pools);
+    fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground, %d on models' floors, %d against their walls\n",
+            r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground, r.steps_on_models, r.steps_walled);
+    model_solids_free(models);
+    collide_free(solids);
     liquid_free(waters);
     free(h);
     anim_free(&anim);
