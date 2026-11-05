@@ -10,6 +10,7 @@
 #include "081-wc3-water.h"
 #include "017-blp.h"
 #include "077-slk.h"
+#include "084-map-fog.h"
 
 #include <errno.h>
 #include <math.h>
@@ -18,7 +19,6 @@
 #include <string.h>
 
 #define SHEET "TerrainArt\\Water.slk"
-#define W3I_NAME "war3map.w3i"           /* at the build folder's root, where the converter copies it */
 
 /* {{{ the handle */
 struct Wc3Water {
@@ -129,12 +129,9 @@ WErr wc3_water_open(Resolver *r, MpqChain *chain, const W3eGround *g, double sca
     }
 
     /* the map's settings: its water tint */
-    rc = asset_read(r, chain, W3I_NAME, ASSET_GROUND, &a, &inner);
-    if (rc && rc != W_ERR_NOT_FOUND) { rc = w_fail(why, rc, "%s: %s", W3I_NAME, inner.text); goto fail; }
+    rc = map_w3i_read(r, chain, &w->info, &inner);                  /* 084: the one reading of it */
+    if (rc && rc != W_ERR_NOT_FOUND) { rc = w_fail(why, rc, "%s", inner.text); goto fail; }
     if (!rc) {
-        rc = w3i_read(a.data, a.len, &w->info, &inner);
-        asset_answer_free(&a);
-        if (rc) { rc = w_fail(why, rc, "%s: %s", W3I_NAME, inner.text); goto fail; }
         w->has_info = 1;
         if (w->info.water_tinted) { k->tinted = 1; memcpy(k->tint, w->info.water_rgba, 4); }
     }

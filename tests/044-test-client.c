@@ -61,6 +61,7 @@
 #include "../src/081-wc3-water.h"
 #include "../src/082-water-prep.h"
 #include "../src/083-w3i.h"
+#include "../src/084-map-fog.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -3583,6 +3584,179 @@ static void t_w3i(W3eOut *o, int version, uint32_t flags, const uint8_t fog[4], 
     wo32(o, 0); wo32(o, 0);                              /* no players, no forces */
 }
 
+/* a made war3map.w3i as t_w3i makes it, with its fog's style, start and
+ * end set (they lie 37, 33 and 29 bytes before the tint's end) */
+static void t_w3i_fog(W3eOut *o, uint32_t flags, int style, float start, float end, const uint8_t fog[4])
+{
+    static const uint8_t WATER[4] = { 255, 255, 255, 255 };
+    size_t te;
+    t_w3i(o, 25, flags, fog, WATER, &te);
+    union { float f; uint32_t u; } a = { .f = start }, b = { .f = end };
+    t_le32(o->b + te - 37, (uint32_t)style);
+    t_le32(o->b + te - 33, a.u);
+    t_le32(o->b + te - 29, b.u);
+}
+static int t_near(double a, double b) { return fabs(a - b) < 1e-4; }
+/* a zone's light, made: grey fog from 10 to 300 yards, the rest set too */
+static LightNow t_zone_light(void)
+{
+    LightNow l;
+    memset(&l, 0, sizeof l);
+    for (int k = 0; k < 3; ++k) { l.sun[k] = 0.9f; l.shade[k] = 0.3f; l.fog[k] = 0.5f; l.sky[4][k] = 0.6f; }
+    l.fog_start = 10; l.fog_end = 300;
+    l.sun_dir[2] = 1;
+    snprintf(l.skybox, sizeof l.skybox, "Environments\\Stars\\Stars.mdx");
+    return l;
+}
+
+static void map_fog_tests(const char *dir, const char *build)
+{
+    char root[400], line[600];
+    WWhy why;
+    WErr e;
+    W3eOut o = { 0 };
+    W3iInfo in;
+    MapFog f;
+    const double S = 1 / 30.72;
+    static const uint8_t BLUE[4] = { 30, 120, 255, 200 };
+
+    /* {{{ the map's fog from its settings */
+    {
+        t_w3i_fog(&o, 0x1fc7a, 0, 3500, 5000, BLUE);
+        e = w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(e ? NULL : &in, S, &f);
+        check(!e && in.fog_on && f.on && f.style == 0 && t_near(f.start, 3500 * S) && t_near(f.end, 5000 * S) && t_near(f.rgb[0], 30 / 255.0) && t_near(f.rgb[1], 120 / 255.0) && t_near(f.rgb[2], 1),
+              "a map with the editor's \"use terrain fog\" flag (0x2000) set: its fog from 3500 to 5000 WC3 units is 113.9 to 162.8 yards at its 1/30.72, coloured red first over 255, its alpha unused");
+        int styles = 1;
+        for (int st = 1; st <= 2; ++st) {
+            t_w3i_fog(&o, 0x2000, st, 3500, 5000, BLUE);
+            e = w3i_read(o.b, o.n, &in, &why);
+            map_fog_from_w3i(e ? NULL : &in, S, &f);
+            styles &= !e && f.on && f.style == st && t_near(f.start, 3500 * S) && t_near(f.end, 5000 * S);
+        }
+        check(styles, "its exponential styles (1, 2): kept to be said, drawn linear over the same distances");
+        t_w3i_fog(&o, 0x1dc7a, 1, 3500, 5000, BLUE);
+        e = w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(e ? NULL : &in, S, &f);
+        check(!e && !in.fog_on && !f.on && f.why_off && strstr(f.why_off, "no terrain fog"), "without the flag, whatever its style: the zone's fog, said why");
+        size_t te;
+        t_w3i(&o, 18, 0x2000, BLUE, BLUE, &te);
+        e = w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(e ? NULL : &in, S, &f);
+        check(!e && !in.fog_on && !f.on && strstr(f.why_off, "Reign of Chaos"), "a Reign of Chaos file (version 18), its flag set or not: no fog in it, the zone's");
+        map_fog_from_w3i(NULL, S, &f);
+        check(!f.on && strstr(f.why_off, "no war3map.w3i"), "no war3map.w3i: the zone's fog");
+        t_w3i_fog(&o, 0x2000, 0, -200, 100, BLUE);
+        w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(&in, S, &f);
+        int edges = f.on && f.start == 0 && t_near(f.end, 100 * S);
+        t_w3i_fog(&o, 0x2000, 0, 3000, 1000, BLUE);
+        w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(&in, S, &f);
+        edges &= f.on && t_near(f.start, 3000 * S) && f.end == f.start;
+        map_fog_from_w3i(&in, 0, &f);
+        edges &= !f.on && f.why_off != NULL;
+        t_w3i_fog(&o, 0x2000, 0, NAN, 1000, BLUE);
+        w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(&in, S, &f);
+        edges &= !f.on && strstr(f.why_off, "not numbers") != NULL;
+        check(edges, "a start before the eye: from the eye; an end before its start: at its start; a scale not above 0, or a distance that isn't a number: the zone's fog");
+    }
+    /* }}} */
+
+    /* {{{ each frame's light */
+    {
+        t_w3i_fog(&o, 0x2000, 0, 3500, 5000, BLUE);
+        w3i_read(o.b, o.n, &in, &why);
+        map_fog_from_w3i(&in, S, &f);
+        LightNow zone = t_zone_light(), l = zone, want = zone;
+        int used = map_fog_frame(&f, 0, 1000, &l);
+        for (int k = 0; k < 3; ++k) want.fog[k] = f.rgb[k];
+        want.fog_start = f.start; want.fog_end = f.end;
+        check(used && !memcmp(&l, &want, sizeof l), "a frame out of the water: the map's fog colour and distances in the light every drawer reads, the rest of the zone's light as it was");
+        l = zone;
+        used = map_fog_frame(&f, 1, 1000, &l);
+        check(!used && !memcmp(&l, &zone, sizeof l), "with the eye under the water: the zone's underwater light, as it was");
+        l = zone;
+        used = map_fog_frame(&f, 0, 100, &l);
+        check(used && l.fog_end == 100 && t_near(l.fog_start, f.start * 100 / f.end), "a view distance short of the map's fog: its end brought in to it, its start by the same share");
+        MapFog off;
+        map_fog_from_w3i(NULL, S, &off);
+        l = zone;
+        used = map_fog_frame(&off, 0, 1000, &l);
+        int none = !used && !memcmp(&l, &zone, sizeof l);
+        l = zone;
+        none &= !map_fog_frame(NULL, 0, 1000, &l) && !memcmp(&l, &zone, sizeof l);
+        l = zone;
+        map_fog_frame(NULL, 0, 200, &l);
+        none &= l.fog_end == 200 && t_near(l.fog_start, 10 * 200 / 300.0);
+        check(none, "no map fog (a map without one, or not a test map): the zone's fog, brought in to the view distance as before");
+    }
+    /* }}} */
+
+    /* {{{ the file through a resolver: the map's folder first */
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-map-fog", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the fog's fixtures"); free(o.b); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+    {
+        e = map_w3i_read(NULL, NULL, &in, &why);
+        int ok = e == W_ERR_NOT_FOUND;
+        ResolverPlace place = { .distinctness = 0.5, .noverlays = 1 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", root);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        static const struct { int write; int version; WErr want; } CASE[3] = { { 0, 25, W_ERR_NOT_FOUND }, { 1, 25, W_OK }, { 1, 20, W_ERR_UNSUPPORTED } };
+        for (int c = 0; c < 3; ++c) {
+            if (CASE[c].write) {
+                t_w3i_fog(&o, 0x2000, 0, 3500, 5000, BLUE);
+                t_le32(o.b, (uint32_t)CASE[c].version);
+                t_write(root, "war3map.w3i", o.b, o.n);
+            }
+            Resolver *r = NULL;
+            e = resolver_open(&place, &r, &why);
+            if (!e) e = map_w3i_read(r, NULL, &in, &why);
+            ok &= e == CASE[c].want && (e == W_OK ? in.fog_on && in.fog_start == 3500 : strstr(why.text, "war3map.w3i") != NULL);
+            if (r) resolver_free(r);
+        }
+        check(ok, "the map's war3map.w3i read from its folder: not found with none (or no resolver), read when there, refused when unreadable, naming it");
+        fclose(place.log);
+        free(log);
+    }
+    /* }}} */
+
+    /* {{{ the converter's real output, when its build carries war3map.w3i */
+    {
+        ConvertedMap m;
+        e = converted_map_read(build, &m, &why);
+        if (e) { printf("  (no map.lua in %s: its fog checks are skipped)\n", build); free(o.b); return; }
+        ResolverPlace place = { .distinctness = 0.5, .noverlays = 1 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) e = map_w3i_read(r, NULL, &in, &why);
+        if (e == W_ERR_NOT_FOUND) printf("  (no war3map.w3i in %s: the zone's fog stays)\n", build);
+        else {
+            check(!e, e ? why.text : "its war3map.w3i reads");
+            if (!e) {
+                map_fog_from_w3i(&in, m.wc3_scale, &f);
+                if (f.on) snprintf(line, sizeof line, "its own fog (flags %x, style %d): %.0f to %.0f WC3 units, %.1f to %.1f yards at its scale, colour %.0f %.0f %.0f",
+                                   in.flags, f.style, in.fog_start, in.fog_end, f.start, f.end, f.rgb[0] * 255, f.rgb[1] * 255, f.rgb[2] * 255);
+                else snprintf(line, sizeof line, "the zone's fog (flags %x, style %d, %.0f to %.0f): %s", in.flags, in.fog_style, in.fog_start, in.fog_end, f.why_off);
+                check(f.on == ((in.flags & 0x2000) != 0) && (!f.on || (t_near(f.start, fmax(in.fog_start, 0) * m.wc3_scale) && t_near(f.rgb[0], in.fog_rgba[0] / 255.0))), line);
+            }
+        }
+        if (r) resolver_free(r);
+        fclose(place.log);
+        free(log);
+    }
+    /* }}} */
+    free(o.b);
+}
+
 static void wc3_water_tests(const char *dir, const char *build)
 {
     char root[400], folder[520], path[900], line[1000];
@@ -4220,6 +4394,18 @@ int main(int argc, char **argv)
         if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
         else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
         wc3_water_tests(dir, build);
+    }
+    /* }}} */
+
+    /* {{{ a converted map's own fog (1109 step 1j): files made here, and the
+     * converter's output when it carries war3map.w3i; no game data, so
+     * before the archives */
+    printf("a converted map's own fog\n");
+    {
+        char build[700];
+        if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        map_fog_tests(dir, build);
     }
     /* }}} */
 

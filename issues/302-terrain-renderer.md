@@ -82,7 +82,9 @@ every copy). Since step 1i a converted map's water is drawn as WC3's
 (`src/081-wc3-water.c` reads its frames and colour by depth, tinted by
 the map's `war3map.w3i`, `src/083-w3i.c`; `src/082-water-prep.c` lays
 each point at WC3's own surface and holds the water's shader; 040 draws
-them): 1109's decisions 70-75.
+them): 1109's decisions 70-75. Since step 1j the ground, water and
+everything on it fade into the map's own fog when its `war3map.w3i`
+turns terrain fog on (`src/084-map-fog.c`; 1109's decisions 76-80).
 
 ## Intended behavior
 
