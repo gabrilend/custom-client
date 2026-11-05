@@ -13,13 +13,17 @@
  * after that (the settings store, 173b1) are checked here on their own,
  * with no Lua twin.
  *
- * Usage: test-client PROJECT_DIR CLIENT_DATA_DIR [CONVERTED_BUILD_FOLDER [WAR3_MPQ]]
+ * Usage: test-client PROJECT_DIR CLIENT_DATA_DIR [CONVERTED_BUILD_FOLDER [WAR3_MPQ [CONVERTER_TABLES]]]
  *   CONVERTED_BUILD_FOLDER  a converted map's build (default
  *                           PROJECT_DIR/assets/test-map-build; "-" for it)
  *   WAR3_MPQ                Warcraft III's war3.mpq, for the archives'
  *                           WC3 checks (default: world-edit-to-execute's
- *                           wc3-installs copy). Each its own argument
- *                           since 1109's step 1e: both were the third.
+ *                           wc3-installs copy; "-" for it). Each its own
+ *                           argument since 1109's step 1e: both were the third.
+ *   CONVERTER_TABLES        the folder holding the converter's
+ *                           ground_textures.lua and models.lua, for the
+ *                           baseline set made from them (default:
+ *                           world-edit-to-execute's src/wowbuild; "-" for it)
  */
 #include "../src/020-adt.h"
 #include "../src/013-errors.h"
@@ -62,6 +66,7 @@
 #include "../src/082-water-prep.h"
 #include "../src/083-w3i.h"
 #include "../src/084-map-fog.h"
+#include "../src/085-baseline-set.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -4226,6 +4231,473 @@ static void wc3_water_tests(const char *dir, const char *build)
 }
 /* }}} */
 
+/* {{{ the baseline set (085, issue 1109 step 1k): the smallest set made
+ * here from tables written here, then from the converter's own tables
+ * when they are there, and the resolver asking it after the installs;
+ * no game data, so before the archives. Everything is made under
+ * DIR/tmp/shared-memory/test-baseline and removed after. */
+
+/* every file the manifest at `folder` lists is there and hashes to its id */
+static int t_baseline_ids(const char *folder, const PackManifest *m)
+{
+    int bad = 0;
+    for (int i = 0; i < m->count; ++i) {
+        char path[1200], id[65];
+        snprintf(path, sizeof path, "%s/%s", folder, m->entries[i].file);
+        FILE *f = fopen(path, "rb");
+        if (!f) { ++bad; continue; }
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *s = malloc(n > 0 ? (size_t)n : 1);
+        size_t got = fread(s, 1, (size_t)n, f);
+        fclose(f);
+        baseline_sha256_hex(s, got, id);
+        free(s);
+        bad += strcmp(id, m->entries[i].id) != 0;
+    }
+    return bad;
+}
+
+static void baseline_tests(const char *dir, const char *build, const char *tables)
+{
+    char root[400], set[520], line[1200], path[900];
+    WWhy why;
+    WErr e;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-baseline", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the baseline set's fixtures"); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+
+    /* {{{ the pieces */
+    {
+        static const struct { const char *text, *hex; } V[] = {
+            { "", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+            { "abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" },
+            { "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1" },
+        };
+        int same = 0;
+        char id[65];
+        for (int i = 0; i < 3; ++i) { baseline_sha256_hex(V[i].text, strlen(V[i].text), id); same += !strcmp(id, V[i].hex); }
+        check(same == 3, "a manifest entry's id: SHA-256 as FIPS 180-4's examples give it (empty, \"abc\", and 56 bytes, which pad into a second block)");
+
+        static const uint8_t RGB[3] = { 110, 90, 60 };
+        size_t len, len2;
+        unsigned char *s = baseline_ground_picture(RGB, 7, &len), *s2 = baseline_ground_picture(RGB, 7, &len2);
+        BlpImage img = { 0 };
+        e = blp_decode(s, len, &img, &why);
+        check(!e && img.width == BASELINE_PICTURE_SIDE && img.height == BASELINE_PICTURE_SIDE, e ? why.text : "a ground picture is a BLP2 the picture reader takes, 64 x 64");
+        if (!e) {
+            double sum[3] = { 0, 0, 0 };
+            int lo = 255, hi = 0, opaque = 1, seam = 0;
+            for (int i = 0; i < 64 * 64; ++i) {
+                for (int c = 0; c < 3; ++c) sum[c] += img.rgba[i * 4 + c];
+                if (img.rgba[i * 4] < lo) lo = img.rgba[i * 4];
+                if (img.rgba[i * 4] > hi) hi = img.rgba[i * 4];
+                opaque &= img.rgba[i * 4 + 3] == 255;
+            }
+            for (int y = 0; y < 64; ++y) {         /* across the wrap, no bigger a step than between neighbours inside */
+                int d = abs(img.rgba[(y * 64 + 63) * 4] - img.rgba[(y * 64) * 4]);
+                if (d > seam) seam = d;
+            }
+            snprintf(line, sizeof line, "its colour the row's own on the whole (%.1f, %.1f, %.1f for 110, 90, 60), mottled (red %d to %d), opaque, wrapping with no seam (largest step %d)",
+                     sum[0] / 4096, sum[1] / 4096, sum[2] / 4096, lo, hi, seam);
+            check(near(sum[0] / 4096, 110, 4) && near(sum[1] / 4096, 90, 4) && near(sum[2] / 4096, 60, 4) && hi - lo >= 8 && hi - lo <= 40 && opaque && seam <= 12, line);
+            blp_free(&img);
+        }
+        unsigned char *s3 = baseline_ground_picture(RGB, 8, &len2);
+        check(len == len2 && !memcmp(s, s2, len) && memcmp(s, s3, len), "the same path (seed) gives the same picture; another, another");
+        free(s); free(s2); free(s3);
+
+        int frames = 0, moving = 0, loops = 1;
+        unsigned char *first = NULL;
+        size_t first_len = 0;
+        for (int f = 1; f <= BASELINE_WATER_FRAMES + 1; ++f) {
+            s = baseline_water_frame(f, &len);
+            if (!blp_decode(s, len, &img, &why)) {
+                if (f <= BASELINE_WATER_FRAMES && img.width == 64 && img.rgba[2] > img.rgba[0]) ++frames;
+                blp_free(&img);
+            }
+            if (f == 1) { first = s; first_len = len; continue; }
+            if (f == 2) moving = len == first_len && memcmp(s, first, len) != 0;
+            if (f == BASELINE_WATER_FRAMES + 1)    /* one past the run: the first again, to a step of rounding */
+                for (size_t i = 0; i < len && i < first_len; ++i) loops &= abs((int)s[i] - (int)first[i]) <= 1;
+            free(s);
+        }
+        free(first);
+        snprintf(line, sizeof line, "the water's %d frames are bluish 64 x 64 pictures (%d), each a step on from the last, the run repeating with no jump", BASELINE_WATER_FRAMES, frames);
+        check(frames == BASELINE_WATER_FRAMES && moving && loops, line);
+
+        s = baseline_stand_in_picture(&len);
+        e = blp_decode(s, len, &img, &why);
+        check(!e && img.width == 64 && img.rgba[(12 * 64) * 4 + 2] > img.rgba[(12 * 64) * 4], e ? why.text : "the stand-in's picture: grey stone with the set's blue band");
+        if (!e) blp_free(&img);
+        free(s);
+
+        size_t mlen, klen;
+        unsigned char *m2 = baseline_stand_in_model(&mlen), *skin = baseline_stand_in_skin(&klen);
+        M2Model post;
+        e = m2_read(m2, mlen, skin, klen, &post, &why);
+        check(!e && post.nvertices == 41 && post.nindices == 72 && post.npieces == 1 && post.nunits == 1,
+              e ? why.text : "the stand-in model and its .skin are an M2 (version 264) the model reader takes: 41 points, 24 triangles, one piece, one unit");
+        if (!e) {
+            check(post.ntextures == 1 && post.textures[0].kind == 0 && !strcmp(post.textures[0].file, BASELINE_STAND_IN_PICTURE) && post.units[0].texture == 0 && post.units[0].blend == 0,
+                  "its one unit draws, opaque, with the set's own picture by name (042 leaves out a unit with no named picture)");
+            float lo = 1e9f, hi = -1e9f, wide = 0;
+            int outward = 0;
+            for (uint32_t i = 0; i < post.nvertices; ++i) {
+                const M2Vertex *v = &post.vertices[i];
+                if (v->z < lo) lo = v->z;
+                if (v->z > hi) hi = v->z;
+                if (fabsf(v->x) > wide) wide = fabsf(v->x);
+            }
+            for (uint32_t t = 0; t + 2 < post.nindices; t += 3) {   /* each triangle wound to face where its points' normals do */
+                const M2Vertex *a = &post.vertices[post.indices[t]], *b = &post.vertices[post.indices[t + 1]], *c = &post.vertices[post.indices[t + 2]];
+                float ux = b->x - a->x, uy = b->y - a->y, uz = b->z - a->z, vx = c->x - a->x, vy = c->y - a->y, vz = c->z - a->z;
+                float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+                outward += nx * a->nx + ny * a->ny + nz * a->nz > 0;
+            }
+            snprintf(line, sizeof line, "a post standing on the ground, %.2f yards high and %.2f across, its %d triangles of 24 wound outward", hi - lo, 2 * wide, outward);
+            check(lo == 0 && near(hi, 2, 1e-6) && near(wide, 0.5, 1e-6) && outward == 24, line);
+            m2_free(&post);
+        }
+        free(m2); free(skin);
+    }
+    /* }}} */
+
+    /* {{{ made from tables written here */
+    char gt[520], mt[520];
+    snprintf(gt, sizeof gt, "%s/ground_textures.lua", root);
+    snprintf(mt, sizeof mt, "%s/models.lua", root);
+    t_write_text(root, "ground_textures.lua",
+        "--[[ a ground table as the converter writes it ]]\n"
+        "return {\n  format = 1,\n"
+        "  fallback = { name = \"Grey\", wow = [[Tileset\\Generic\\Grey.blp]], rgb = { 128, 128, 128 } },\n"
+        "  tilesets = {\n"
+        "    A = { name = \"Ashenvale\", blight = { wow = [[Tileset\\Ashenvale\\Blight.blp]], rgb = { 90, 70, 60 } },\n"
+        "          grounds = { Adrt = { name = \"Dirt\", wow = [[Tileset\\Ashenvale\\AshenvaleDirt.blp]], rgb = { 110, 90, 60 }, checked = true },\n"
+        "                      Agrs = { name = \"Grass\", wow = [[Tileset\\Ashenvale\\AshenvaleGrass.blp]], rgb = { 60, 110, 50 } } } },\n"
+        "    L = { name = \"Lordaeron\", grounds = { Ldrt = { wow = [[TILESET\\ashenvale\\ashenvaledirt.blp]], rgb = { 1, 2, 3 } } } },\n"
+        "  },\n}\n");
+    t_write_text(root, "models.lua",
+        "return {\n"
+        "  doodads = {\n"
+        "    types = { ATtr = { name = \"Tree\", wow = [[World\\Azeroth\\Elwynn\\PassiveDoodads\\Trees\\ElwynnTreeCanopy01.m2]], scale = 1 },\n"
+        "              LTlp = { wow = [[World\\Generic\\Human\\Passive Doodads\\Lampposts\\Lamppost.m2]] },\n"
+        "              XBld = { wow = [[World\\wmo\\Azeroth\\Buildings\\Human_Farm\\Farm.wmo]] },\n"
+        "              XOth = { wow = [[Sound\\Ambience\\Wind.wav]] } },\n"
+        "    by_model = { [\"Doodads\\\\Ashenvale\\\\Tree.mdx\"] = { wow = [[world\\azeroth\\elwynn\\passivedoodads\\trees\\elwynntreecanopy01.M2]] } },\n"
+        "    classes = { P = { any = { wow = [[World\\Generic\\Passive\\Rock.m2]] } } },\n"
+        "  },\n"
+        "  units = { fallback = { wow = [[Creature\\Wolf\\Wolf.m2]] }, types = { hfoo = { wow = [[Creature\\Footman\\Footman.m2]] } } },\n"
+        "}\n");
+    snprintf(set, sizeof set, "%s/assets/baseline", root);
+    BaselineMade made;
+    e = baseline_set_make(set, gt, mt, &made, &why);
+    snprintf(line, sizeof line, "made: %d grounds (4), %d models (3), %d water frames (%d), %d files (37) and %d entries (41); left out %d buildings (1), %d units (2), %d other (1), %d named twice (2)",
+             made.grounds, made.models, made.water_frames, BASELINE_WATER_FRAMES, made.files, made.entries, made.buildings, made.units, made.other, made.same_path);
+    check(!e && made.grounds == 4 && made.models == 3 && made.water_frames == BASELINE_WATER_FRAMES && made.files == 37 && made.entries == 41
+          && made.buildings == 1 && made.units == 2 && made.other == 1 && made.same_path == 2, e ? why.text : line);
+    PackManifest *pm = NULL;
+    snprintf(path, sizeof path, "%s/manifest.lua", set);
+    e = pack_manifest_read(path, &pm, &why);
+    int hand = 1;
+    for (int i = 0; !e && i < pm->count; ++i) hand &= pm->entries[i].route == PACK_ROUTE_HAND && pm->entries[i].lineage == PACK_LINEAGE_INDEPENDENT && !pm->entries[i].nscores;
+    check(!e && pm->count == 41 && hand, e ? why.text : "its manifest reads as a pack's (059): every entry made by hand here, independent of the original, unscored");
+    if (!e) {
+        snprintf(line, sizeof line, "every file it lists is there and hashes to its entry's id (%d wrong)", t_baseline_ids(set, pm));
+        check(t_baseline_ids(set, pm) == 0, line);
+        pack_manifest_free(pm);
+    }
+    struct stat sb;
+    snprintf(path, sizeof path, "%s/tileset/ashenvale/ashenvaledirt.blp", set);
+    int at_name = !stat(path, &sb);
+    snprintf(path, sizeof path, "%s/%s", set, BASELINE_STAND_IN_MODEL);
+    check(at_name && !stat(path, &sb), "each picture at its own name, folded; the models share one file pair");
+    e = baseline_set_make(set, gt, mt, &made, &why);
+    check(!e && made.entries == 41, e ? why.text : "made again over a set it made: the same");
+
+    /* refusals */
+    snprintf(path, sizeof path, "%s/elsewhere", root);
+    t_write_text(path, "readme.txt", "somebody's own folder");
+    e = baseline_set_make(path, gt, mt, &made, &why);
+    check(e == W_ERR_REFUSED && strstr(why.text, "isn't a baseline set") && strstr(why.text, "1 file"), "a folder holding files but no manifest: refused and left alone");
+    static const struct { const char *row, *finds, *what; } BAD[] = {
+        { "rgb = { 1, 2 }", "three whole numbers", "an rgb of two numbers" },
+        { "rgb = { 1, 2, 256 }", "three whole numbers", "an rgb past 255" },
+        { "rgb = { 1, 2.5, 3 }", "three whole numbers", "an rgb not whole" },
+    };
+    for (int i = 0; i < 3; ++i) {
+        char text[300];
+        snprintf(text, sizeof text, "return { format = 1,\n  fallback = { wow = [[Tileset\\Generic\\Grey.blp]], %s } }\n", BAD[i].row);
+        t_write_text(root, "bad.lua", text);
+        snprintf(path, sizeof path, "%s/bad.lua", root);
+        snprintf(set, sizeof set, "%s/bad-set", root);
+        e = baseline_set_make(set, path, mt, &made, &why);
+        snprintf(line, sizeof line, "%s: refused, naming the file and line (%s)", BAD[i].what, why.text);
+        check(e == W_ERR_REFUSED && strstr(why.text, BAD[i].finds) && strstr(why.text, "bad.lua line 2"), line);
+    }
+    static const char *const PATHS[] = { "\"\"", "12", "[[..\\..\\outside.blp]]", "[[Manifest.lua]]" };
+    int refused = 0;
+    for (int i = 0; i < 4; ++i) {
+        char text[300];
+        snprintf(text, sizeof text, "return { format = 1, fallback = { wow = %s, rgb = { 1, 2, 3 } } }\n", PATHS[i]);
+        t_write_text(root, "bad.lua", text);
+        refused += baseline_set_make(set, path, mt, &made, &why) == W_ERR_REFUSED && strstr(why.text, "not a file's path in the set");
+    }
+    snprintf(line, sizeof line, "a row whose wow is empty, not text, climbs out of the folder or names the manifest: refused (%d of 4)", refused);
+    check(refused == 4, line);
+    snprintf(path, sizeof path, "%s/no-such.lua", root);
+    check(baseline_set_make(set, path, mt, &made, &why) != W_OK && strstr(why.text, "no-such.lua"), "a table that isn't there: refused, named");
+    /* }}} */
+
+    /* {{{ the resolver asks it after the installs, before the placeholder */
+    snprintf(set, sizeof set, "%s/assets/baseline", root);
+    {
+        Settings *st = settings_new();
+        ResolverPlace place;
+        snprintf(path, sizeof path, "%s/assets", root);
+        e = resolver_place_from_settings(st, path, NULL, &place, &why);
+        check(!e && !strcmp(place.baseline, set) && !strcmp(settings_text(st, "assetBaseline"), "baseline"), "the setting assetBaseline names assets/baseline by default");
+        ResolverPlace bare;
+        check(settings_set(st, "assetBaseline", "a,b", &why) == W_ERR_REFUSED && settings_set(st, "assetBaseline", "..", &why) == W_ERR_REFUSED
+              && settings_set(st, "assetBaseline", "", &why) == W_OK && !resolver_place_from_settings(st, path, NULL, &bare, &why) && !bare.baseline[0],
+              "one folder name, never a list or a way out; empty: none");
+        settings_free(st);
+
+        /* an archive holding one ground picture the set has too */
+        char data[520];
+        snprintf(data, sizeof data, "%s/Data", root);
+        t_mkdirs(data);
+        const char *names[] = { "Tileset\\Ashenvale\\AshenvaleGrass.blp" };
+        const char *bytes[] = { "the archive's grass" };
+        snprintf(path, sizeof path, "%s/common.MPQ", data);
+        t_write_mpq(path, names, bytes, 1);
+        MpqChain chain;
+        e = mpq_chain_open(&chain, data, "enUS", &why);
+        check(!e, e ? why.text : "a made archive of the game's opens");
+        place.chain = e ? NULL : &chain;
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        fflush(place.log);
+        check(!e && resolver_baseline(r) && !strcmp(resolver_baseline(r), set) && strstr(log, "the baseline set \"The smallest baseline set\" from") && strstr(log, "after the installs"),
+              e ? why.text : "the resolver opens the set as a pack, and says so");
+        if (!e) {
+            AssetAnswer a;
+            e = asset_resolve(r, "Tileset\\Ashenvale\\AshenvaleDirt.blp", ASSET_TEXTURE, &a, &why);
+            BlpImage img = { 0 };
+            WErr be = e ? e : blp_decode(a.data, a.len, &img, &why);
+            check(!be && a.source == ASSET_FROM_BASELINE && !strcmp(a.from, set) && a.entry && img.width == 64,
+                  be ? why.text : "a ground picture no install has: the set's own, a picture the reader takes, with its entry");
+            if (!be) blp_free(&img);
+            asset_answer_free(&a);
+            e = asset_resolve(r, "tileset/ashenvale/ashenvalegrass.blp", ASSET_TEXTURE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BLIZZARD && a.len == 19, "one both have: the install's first, the set only after it");
+            asset_answer_free(&a);
+            AssetAnswer all[4];
+            int n = 0;
+            check(!asset_resolve_all(r, "Tileset\\Ashenvale\\AshenvaleGrass.blp", ASSET_TEXTURE, all, 4, &n, &why) && n == 2
+                  && all[0].source == ASSET_FROM_BLIZZARD && all[1].source == ASSET_FROM_BASELINE, "every copy: the install's, then the set's, last");
+            for (int i = 0; i < n; ++i) asset_answer_free(&all[i]);
+            PlacedModel pmod;
+            e = placed_model_read(r, NULL, "World\\Azeroth\\Elwynn\\PassiveDoodads\\Trees\\ElwynnTreeCanopy01.mdx", 0, &pmod, &why);
+            const M2Model *d = e ? NULL : placed_model_drawn(&pmod);
+            check(!e && !pmod.wc3 && pmod.source == ASSET_FROM_BASELINE && d->nvertices == 41 && d->nunits == 1,
+                  e ? why.text : "a doodad no install has (named .mdx, as a ground file names it): the set's post, its .m2 and 00.skin, not the box");
+            if (!e) {
+                e = asset_get(r, NULL, d->textures[0].file, ASSET_TEXTURE, &a, &why);
+                check(!e && a.source == ASSET_FROM_BASELINE, "and the post's picture from the set too");
+                asset_answer_free(&a);
+                placed_model_free(&pmod);
+            }
+            e = asset_resolve(r, "World\\Generic\\Passive\\Rock00.skin", ASSET_MODEL, &a, &why);
+            check(!e && a.source == ASSET_FROM_BASELINE, "a row's view (00.skin) is listed beside its .m2");
+            asset_answer_free(&a);
+            char frame[200];
+            snprintf(frame, sizeof frame, BASELINE_WATER_PATTERN, BASELINE_WATER_FRAMES);
+            e = asset_read(r, NULL, frame, ASSET_TEXTURE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BASELINE, "the water's last frame, asked as 040 asks (asset_read, no placeholder): the set's");
+            asset_answer_free(&a);
+            snprintf(frame, sizeof frame, BASELINE_WATER_PATTERN, BASELINE_WATER_FRAMES + 1);
+            check(asset_read(r, NULL, frame, ASSET_TEXTURE, &a, &why) == W_ERR_NOT_FOUND, "one past the run: not found, so 040's run ends there");
+            check(asset_resolve(r, "Tileset\\Ashenvale\\AshenvaleDirt.blp", ASSET_MODEL, &a, &why) == W_ERR_REFUSED && strstr(why.text, "the baseline set"),
+                  "asked as another kind than its entry: refused, naming the set");
+            e = asset_resolve(r, "Creature\\Wolf\\Wolf.m2", ASSET_MODEL, &a, &why);
+            fflush(place.log);
+            check(!e && a.source == ASSET_FROM_PLACEHOLDER && strstr(log, "the archives or the baseline set; a box stands in"),
+                  "a creature (the set has none): the box, the warning naming the set among the places");
+            asset_answer_free(&a);
+            AssetCounts c;
+            asset_counts(r, &c);
+            check(c.by[ASSET_TEXTURE][ASSET_FROM_BASELINE] == 3 && c.by[ASSET_MODEL][ASSET_FROM_BASELINE] == 3 && c.distinct[ASSET_TEXTURE] == 0 && c.distinct[ASSET_MODEL] == 0 && c.placeholder_answers == 1,
+                  "the set's answers counted as its own place (pictures 3, models 3), not as placeholders, and none as replaced past the threshold");
+            char *table = NULL;
+            size_t table_len = 0;
+            FILE *tf = open_memstream(&table, &table_len);
+            resolver_report(r, tf);
+            fclose(tf);
+            check(table && strstr(table, "blizzard  baseline  placeholder"), "the counts table has a baseline column, between the installs and the placeholder");
+            free(table);
+            resolver_free(r);
+        }
+        fclose(place.log); free(log);
+
+        /* strict mode: the set's answers are no placeholders */
+        place.strict = 1;
+        place.log = open_memstream(&log, &log_len);
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            AssetAnswer a;
+            e = asset_resolve(r, "Tileset\\Ashenvale\\Blight.blp", ASSET_TEXTURE, &a, &why);
+            check(!e && a.source == ASSET_FROM_BASELINE && resolver_exit_status(r) == 0, "strict mode takes the set's answers: no error, the exit status 0");
+            asset_answer_free(&a);
+            resolver_free(r);
+        } else check(0, why.text);
+        fclose(place.log); free(log);
+        place.strict = 0;
+
+        /* a folder named but not there: said, not a failure */
+        snprintf(place.baseline, sizeof place.baseline, "%s/nowhere", root);
+        place.log = open_memstream(&log, &log_len);
+        e = resolver_open(&place, &r, &why);
+        fflush(place.log);
+        check(!e && !resolver_baseline(r) && strstr(log, "no baseline set at") && strstr(log, "(assetBaseline)"), e ? why.text : "a set folder that isn't there: said in the log, and left out");
+        if (!e) {
+            AssetAnswer a;
+            e = asset_resolve(r, "Tileset\\Ashenvale\\AshenvaleDirt.blp", ASSET_TEXTURE, &a, &why);
+            fflush(place.log);
+            check(!e && a.source == ASSET_FROM_PLACEHOLDER && strstr(log, "or the archives; the magenta checker stands in") && !strstr(log, "baseline set;"), "then the checker, as before, the warning as before");
+            asset_answer_free(&a);
+            resolver_free(r);
+        }
+        fclose(place.log); free(log);
+        /* a folder there without a manifest, or with a broken one: the start stops, naming the setting */
+        snprintf(place.baseline, sizeof place.baseline, "%s/elsewhere", root);
+        place.log = open_memstream(&log, &log_len);
+        check(resolver_open(&place, &r, &why) != W_OK && strstr(why.text, "assetBaseline") && strstr(why.text, "no manifest.lua"), "a set folder with no manifest: refused at the start, naming the setting");
+        fclose(place.log); free(log);
+        snprintf(place.baseline, sizeof place.baseline, "%s/broken", root);
+        t_write_text(place.baseline, "manifest.lua", "return { format = 1, name = \"no end }");
+        place.log = open_memstream(&log, &log_len);
+        check(resolver_open(&place, &r, &why) != W_OK && strstr(why.text, "assetBaseline") && strstr(why.text, "doesn't close"), "a set whose manifest is broken: refused at the start, naming the setting and the fault");
+        fclose(place.log); free(log);
+        if (place.chain) mpq_chain_close(&chain);
+    }
+    /* }}} */
+
+    /* {{{ from the converter's own tables, when they are there, and the
+     * converted build drawn from it with no install */
+    char rg[700], rm[700];
+    snprintf(rg, sizeof rg, "%s/ground_textures.lua", tables);
+    snprintf(rm, sizeof rm, "%s/models.lua", tables);
+    struct stat tsb;
+    if (stat(rg, &tsb) || stat(rm, &tsb)) {
+        printf("  (no converter tables at %s: the real set's checks are skipped; give world-edit-to-execute's src/wowbuild as the fifth argument)\n", tables);
+        t_remove_tree(root);
+        return;
+    }
+    snprintf(set, sizeof set, "%s/real", root);
+    e = baseline_set_make(set, rg, rm, &made, &why);
+    snprintf(line, sizeof line, "the converter's own tables make a set: %d grounds, %d doodad models, %d water frames, %d files, %d entries; left out %d buildings, %d units' models, %d other, %d named twice",
+             made.grounds, made.models, made.water_frames, made.files, made.entries, made.buildings, made.units, made.other, made.same_path);
+    check(!e && made.grounds > 0 && made.models > 0 && made.water_frames == BASELINE_WATER_FRAMES && !made.other, e ? why.text : line);
+    if (e) { t_remove_tree(root); return; }
+    char conv_file[700];
+    snprintf(conv_file, sizeof conv_file, "%s/map.lua", build);
+    ConvertedMap m;
+    if (stat(conv_file, &tsb) || converted_map_read(build, &m, &why)) {
+        printf("  (no converted build folder at %s: drawing it from the set is skipped)\n", build);
+        t_remove_tree(root);
+        return;
+    }
+    ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+    snprintf(place.overlays[0], sizeof place.overlays[0], "%s", build);
+    snprintf(place.baseline, sizeof place.baseline, "%s", set);
+    char *log = NULL;
+    size_t log_len = 0;
+    place.log = open_memstream(&log, &log_len);
+    Resolver *r = NULL;
+    e = resolver_open(&place, &r, &why);
+    check(!e, e ? why.text : "the build folder as the test map's overlay, the set after it, no install");
+    if (!e) {
+        AssetAnswer wdt;
+        snprintf(path, sizeof path, "World\\Maps\\%s\\%s.wdt", m.directory, m.directory);
+        int big = asset_read(r, NULL, path, ASSET_GROUND, &wdt, &why) ? -1 : adt_wdt_big_alpha(wdt.data, wdt.len, &why);
+        if (big >= 0) asset_answer_free(&wdt);
+        char (*seen)[260] = NULL;
+        int nseen = 0, cap = 0, tiles = 0, pics = 0, pics_set = 0, pics_own = 0, models = 0, models_set = 0, models_own = 0, models_refused = 0, buildings = 0, liquid = 0;
+        char missing[300] = "";
+        AdtTile *t = malloc(sizeof *t);
+        for (int tx = 0; big >= 0 && tx < 64; ++tx)
+            for (int ty = 0; ty < 64; ++ty) {
+                AssetAnswer a;
+                snprintf(path, sizeof path, "World\\Maps\\%s\\%s_%d_%d.adt", m.directory, m.directory, tx, ty);
+                if (asset_read(r, NULL, path, ASSET_GROUND, &a, &why)) continue;
+                WErr bad = adt_read(a.data, a.len, big, t, &why);
+                asset_answer_free(&a);
+                if (bad) { check(0, why.text); continue; }
+                ++tiles;
+                buildings += t->nbuildings;
+                liquid += t->nliquids;
+                for (int k = 0; k < t->ntextures + t->nmodels; ++k) {
+                    const char *name = k < t->ntextures ? t->textures[k] : t->models[k - t->ntextures];
+                    int known = 0;
+                    for (int q = 0; q < nseen && !known; ++q) known = !strcasecmp(seen[q], name);
+                    if (known) continue;
+                    if (nseen == cap) { cap = cap ? cap * 2 : 64; seen = realloc(seen, sizeof *seen * (size_t)cap); }
+                    snprintf(seen[nseen++], sizeof seen[0], "%s", name);
+                    if (k < t->ntextures) {
+                        ++pics;
+                        if (asset_get(r, NULL, name, ASSET_TEXTURE, &a, &why)) continue;
+                        if (a.source == ASSET_FROM_BASELINE) ++pics_set;
+                        else if (a.source == ASSET_FROM_OVERLAY) ++pics_own;
+                        else if (!missing[0]) snprintf(missing, sizeof missing, "%s", name);
+                        asset_answer_free(&a);
+                    } else {
+                        PlacedModel pmod;
+                        ++models;
+                        if (placed_model_read(r, NULL, name, m.wc3_scale, &pmod, &why)) {
+                            /* a WC3 model of its own that 061 refuses (the converted build's checks above name it): not the set's */
+                            int wc3 = !asset_read(r, NULL, name, ASSET_MODEL, &a, &why) && a.len >= 4 && !memcmp(a.data, "MDLX", 4);
+                            if (wc3) { asset_answer_free(&a); ++models_refused; }
+                            else if (!missing[0]) snprintf(missing, sizeof missing, "%s", name);
+                            continue;
+                        }
+                        if (pmod.wc3) ++models_own;
+                        else if (pmod.source == ASSET_FROM_BASELINE) ++models_set;
+                        else if (!missing[0]) snprintf(missing, sizeof missing, "%s", name);
+                        placed_model_free(&pmod);
+                    }
+                }
+                adt_free(t);
+            }
+        free(t);
+        free(seen);
+        snprintf(line, sizeof line, "with no install, its %d tiles' %d ground pictures come from the set (%d) or its own folder (%d), and its %d doodad models are the set's post (%d) or its own WC3 models (%d, and %d that 061 refuses)%s%s",
+                 tiles, pics, pics_set, pics_own, models, models_set, models_own, models_refused, missing[0] ? "; first left to a placeholder: " : "", missing);
+        check(tiles > 0 && pics > 0 && pics_set + pics_own == pics && models_set + models_own + models_refused == models, line);
+        if (buildings) printf("  (%d building placements: buildings are not in the smallest set, so a WMO is still left out)\n", buildings);
+        if (liquid) {
+            int frames = 0;
+            for (int f = 1; f <= BASELINE_WATER_FRAMES; ++f) {
+                char frame[200];
+                AssetAnswer a;
+                snprintf(frame, sizeof frame, BASELINE_WATER_PATTERN, f);
+                if (!asset_read(r, NULL, frame, ASSET_TEXTURE, &a, &why)) { frames += a.source == ASSET_FROM_BASELINE; asset_answer_free(&a); }
+            }
+            snprintf(line, sizeof line, "its %d water layers' run of frames: all %d from the set (%d)", liquid, BASELINE_WATER_FRAMES, frames);
+            check(frames == BASELINE_WATER_FRAMES, line);
+        }
+        resolver_free(r);
+    }
+    fclose(place.log); free(log);
+    /* }}} */
+    t_remove_tree(root);
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -4406,6 +4878,19 @@ int main(int argc, char **argv)
         if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
         else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
         map_fog_tests(dir, build);
+    }
+    /* }}} */
+
+    /* {{{ the baseline set (085; 1109 step 1k): made here, and from the
+     * converter's tables when given; no game data, so before the archives */
+    printf("the baseline set\n");
+    {
+        char build[700], tables[700];
+        if (argc > 3 && strcmp(argv[3], "-")) snprintf(build, sizeof build, "%s", argv[3]);
+        else snprintf(build, sizeof build, "%s/assets/test-map-build", dir);
+        if (argc > 5 && strcmp(argv[5], "-")) snprintf(tables, sizeof tables, "%s", argv[5]);
+        else snprintf(tables, sizeof tables, "%s", "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/src/wowbuild");
+        baseline_tests(dir, build, tables);
     }
     /* }}} */
 
@@ -4614,7 +5099,7 @@ int main(int argc, char **argv)
         check(jpeg_decode(not_jpeg, 4, &ji, &why) == W_ERR_CORRUPT, "a JPEG that stops after its first mark: corrupt");
 
         /* WC3's own: the install world-edit-to-execute reads (its wc3-installs/) */
-        const char *war3 = argc > 4 ? argv[4] : "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/wc3-installs/frozen-throne/war3.mpq";
+        const char *war3 = argc > 4 && strcmp(argv[4], "-") ? argv[4] : "/mnt/mtwo/programming/ai-stuff/world-edit-to-execute/wc3-installs/frozen-throne/war3.mpq";
         MpqArchive wa = { 0 };
         check(mpq_open(&wa, war3, &why) == W_OK, "WC3's war3.mpq opens with this client's own archive reader");
         size_t flen2 = 0;

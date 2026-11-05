@@ -193,6 +193,11 @@ const char *lua_value_text(const LuaValue *v);
 const LuaValue *lua_value_field(const LuaValue *t, const char *key);
 int             lua_value_listed(const LuaValue *t);
 const LuaValue *lua_value_item(const LuaValue *t, int i);
+/* Every value a table holds, keyed or not, in the order written: how
+ * many, and the i-th from 1 (NULL past the end), with its key in `*key`
+ * (NULL for a value listed without one) when `key` is not NULL. */
+int             lua_value_count(const LuaValue *t);
+const LuaValue *lua_value_at(const LuaValue *t, int i, const char **key);
 /* }}} */
 
 #endif

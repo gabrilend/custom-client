@@ -13,7 +13,7 @@ of this client.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 1108 | [Phase 11 demo](./1108-phase-demo.md) | pending | Phase 4, Phase 7 |
-| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05; step 1g (its ground laid cell by cell by the ground's shader: every tileset in a chunk, each cell's variation) 2026-11-05; step 1h (its cliffs and ramps bent to the ground, and WC3's water read: the first of four water steps) 2026-11-05; step 1i (its water drawn as WC3's, tinted by its `war3map.w3i`, each point at WC3's own surface) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
+| 1109 | [Test Map: the editor opens its map in the W client](./1109-test-map-from-the-editor.md) | in progress: step 1 built 2026-11-04 (the launch option and the goodbye receipt; on 105a's resolver, not on main yet); step 1b (the converted map opened) 2026-11-04; step 1c (its doodads and buildings, with their own models and pictures, through the resolver) 2026-11-05; step 1d (the player's Warcraft III install as a resolver place, and the converted ground painted with WC3's own tilesets from `war3map.w3e`) 2026-11-05; step 1e (its cliffs as WC3's own cliff models, on their cliff's ground) 2026-11-05; step 1f (its ramps as WC3's ramp models, and its blight) 2026-11-05; step 1g (its ground laid cell by cell by the ground's shader: every tileset in a chunk, each cell's variation) 2026-11-05; step 1h (its cliffs and ramps bent to the ground, and WC3's water read: the first of four water steps) 2026-11-05; step 1i (its water drawn as WC3's, tinted by its `war3map.w3i`, each point at WC3's own surface) 2026-11-05; step 1j (its own fog from `war3map.w3i`) 2026-11-05; step 1k (the baseline set as the resolver's place after the Blizzard installs, and its smallest form made from the converter's tables) 2026-11-05. Decided 2026-10-07, reshaped 2026-11-04: the editor keeps its own renderer | 401, 302, 105a, world-edit-to-execute's W02 |
 | 1110 | [A hosted map's models come with it](./1110-a-hosted-maps-models-come-with-it.md) | pending (decided 2026-11-04; from world-edit-to-execute's pull request #227) | 105a, Phase 7, 707, 1101-1107 |
 
 The capstone names the issues to be written when the phase begins
@@ -128,6 +128,23 @@ The four shaders drew it on Mesa's software renderer under a virtual
 display, matching on every checked pixel. The map's fog in WC3 itself,
 the exponential styles' look and a window unchecked. Decisions 76 to
 80 in 1109; open question 13 updated.
+
+2026-11-05: 1109's step 1k. The baseline set has its place in the
+resolver: after the Blizzard installs (the game's archives, then
+Warcraft III's) and before the placeholder, as the owner ordered it. It
+is a folder laid out as a pack (setting `assetBaseline`, default
+`assets/baseline`), and its answers count as their own place, not as
+placeholders. Nothing defined its contents, so the smallest set is
+made by a new program, `make-baseline` (085, 086), from the converter's
+own tables alone: 179 ground pictures in each row's own colour, one
+grey post standing in for 47 doodad models, and the water's 30 frames
+(212 files). With it and no install, every ground picture and every
+game doodad on War in the Plaguelands and Master Crafters comes from
+the set rather than the checker or the box, and their water finds its
+frames. The water (040) now asks the resolver too. Buildings,
+creatures, WC3's stock art and the client's tables are not in it, so
+a run still needs the game's archives to start; the water frames'
+names are recalled, unchecked. Decisions 81 to 88 in 1109.
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

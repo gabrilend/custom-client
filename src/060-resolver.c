@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* {{{ the resolver's state */
 typedef struct {
@@ -34,6 +35,8 @@ struct Resolver {
     MpqChain       wc3;               /* the player's Warcraft III archives, when has_wc3 (the resolver's own) */
     int            has_wc3;
     char           wc3_folder[600];
+    Pack           baseline;          /* the baseline set, when has_baseline: laid out as a pack */
+    int            has_baseline;
     int            strict;
     double         distinctness;
     FILE          *log;
@@ -51,7 +54,7 @@ struct Resolver {
 /* {{{ asset_source_name */
 static const char *const SOURCE_NAMES[ASSET_SOURCE_COUNT] = {
     [ASSET_FROM_PACK] = "pack", [ASSET_FROM_SERVER] = "server", [ASSET_FROM_OVERLAY] = "overlay",
-    [ASSET_FROM_BLIZZARD] = "blizzard", [ASSET_FROM_PLACEHOLDER] = "placeholder",
+    [ASSET_FROM_BLIZZARD] = "blizzard", [ASSET_FROM_BASELINE] = "baseline", [ASSET_FROM_PLACEHOLDER] = "placeholder",
 };
 const char *asset_source_name(AssetSource s) { return (s >= 0 && s < ASSET_SOURCE_COUNT) ? SOURCE_NAMES[s] : "(not a place)"; }
 /* }}} */
@@ -218,6 +221,8 @@ WErr resolver_place_from_settings(const Settings *st, const char *assets_dir, Mp
     out->chain = chain;
     const char *wc3 = settings_text(st, "assetWc3");
     if (wc3[0] && assets_dir[0]) snprintf(out->wc3, sizeof out->wc3, "%s/%s", assets_dir, wc3);
+    const char *baseline = settings_text(st, "assetBaseline");
+    if (baseline[0] && assets_dir[0]) snprintf(out->baseline, sizeof out->baseline, "%s/%s", assets_dir, baseline);
     out->strict = (int)settings_num(st, "assetsStrict");
     out->distinctness = settings_num(st, "assetsDistinctness");
     return W_OK;
@@ -225,15 +230,19 @@ WErr resolver_place_from_settings(const Settings *st, const char *assets_dir, Mp
 /* }}} */
 
 /* {{{ resolver_open, resolver_free */
+static void pack_free(Pack *p)
+{
+    fs_index_free(p->ix);
+    pack_manifest_free(p->m);
+    free(p->by_key);
+    free(p->real);
+    memset(p, 0, sizeof *p);
+}
 void resolver_free(Resolver *r)
 {
     if (!r) return;
-    for (int i = 0; i < r->npacks; ++i) {
-        fs_index_free(r->packs[i].ix);
-        pack_manifest_free(r->packs[i].m);
-        free(r->packs[i].by_key);
-        free(r->packs[i].real);
-    }
+    for (int i = 0; i < r->npacks; ++i) pack_free(&r->packs[i]);
+    pack_free(&r->baseline);
     for (int i = 0; i < r->nserver; ++i) fs_index_free(r->server[i].ix);
     for (int i = 0; i < r->noverlays; ++i) fs_index_free(r->overlays[i].ix);
     if (r->has_wc3) mpq_chain_close(&r->wc3);
@@ -249,15 +258,16 @@ static int entry_order(const void *a, const void *b)
     return strcmp((*(const PackEntry *const *)a)->key, (*(const PackEntry *const *)b)->key);
 }
 
-/* {{{ static open_pack: index the folder, read the manifest, find each entry's file */
-static WErr open_pack(Resolver *r, Pack *p, const char *folder, WWhy *why)
+/* {{{ static open_pack: index the folder, read the manifest, find each entry's file
+ * (`what`: "pack", or "baseline set" for the baseline set, which is laid out as one) */
+static WErr open_pack(Resolver *r, Pack *p, const char *folder, const char *what, WWhy *why)
 {
     snprintf(p->folder, sizeof p->folder, "%s", folder);
     WErr rc = fs_index_folder(folder, &p->ix, why);
     if (rc) return rc == W_ERR_NOT_FOUND ? w_fail(why, rc, "the pack folder %s is not there (assetPacks names it)", folder) : rc;
     const char *manifest = fs_index_find(p->ix, "manifest.lua");
     if (!manifest)
-        return w_fail(why, W_ERR_NOT_FOUND, "the pack %s has no manifest.lua: a pack lists each file's provenance (docs/012); a folder of files without one is an overlay", folder);
+        return w_fail(why, W_ERR_NOT_FOUND, "the %s %s has no manifest.lua: a %s lists each file's provenance (docs/012); a folder of files without one is an overlay", what, folder, what);
     if ((rc = pack_manifest_read(manifest, &p->m, why))) return rc;
     int n = p->m->count;
     p->by_key = malloc(sizeof *p->by_key * (size_t)(n ? n : 1));
@@ -288,8 +298,8 @@ static WErr open_pack(Resolver *r, Pack *p, const char *folder, WWhy *why)
         ++unlisted;
     }
     if (unlisted)
-        fprintf(r->log, "assets: pack \"%s\" (%s): %d file%s with no entry in its manifest, never served: %s%s\n",
-                p->m->name, folder, unlisted, unlisted == 1 ? "" : "s", names, unlisted > 5 ? ", ..." : "");
+        fprintf(r->log, "assets: %s \"%s\" (%s): %d file%s with no entry in its manifest, never served: %s%s\n",
+                what, p->m->name, folder, unlisted, unlisted == 1 ? "" : "s", names, unlisted > 5 ? ", ..." : "");
     return W_OK;
 }
 /* }}} */
@@ -315,7 +325,7 @@ WErr resolver_open(const ResolverPlace *place, Resolver **out, WWhy *why)
     r->box_skin = make_box_skin(&r->box_skin_len);
     r->beep = make_beep(&r->beep_len);
     WErr rc = W_OK;
-    for (int i = 0; !rc && i < place->npacks; ++i, ++r->npacks) rc = open_pack(r, &r->packs[i], place->packs[i], why);
+    for (int i = 0; !rc && i < place->npacks; ++i, ++r->npacks) rc = open_pack(r, &r->packs[i], place->packs[i], "pack", why);
     for (int k = 0; k < 2 && !rc; ++k) {
         Loose *list = k ? r->overlays : r->server;
         int want = k ? place->noverlays : place->nserver, *have = k ? &r->noverlays : &r->nserver;
@@ -339,11 +349,39 @@ WErr resolver_open(const ResolverPlace *place, Resolver **out, WWhy *why)
         } else if (w == W_ERR_NOT_FOUND) fprintf(r->log, "assets: %s; a converted map's Warcraft III pictures and models stand in\n", inner.text);
         else rc = w_fail(why, w, "the Warcraft III install (assetWc3): %s", inner.text);
     }
+    /* the baseline set, after the installs: a folder that isn't there is
+     * said and left out (until one is made); one there is read as a pack
+     * is, and a broken one stops the start, naming the setting */
+    if (!rc && place->baseline[0]) {
+        struct stat st;
+        if (stat(place->baseline, &st) != 0 || !S_ISDIR(st.st_mode))
+            fprintf(r->log, "assets: no baseline set at %s (assetBaseline), so what no other place has stands in as a placeholder\n", place->baseline);
+        else {
+            WWhy inner;
+            WErr w = open_pack(r, &r->baseline, place->baseline, "baseline set", &inner);
+            if (w) { pack_free(&r->baseline); rc = w_fail(why, w, "the baseline set (assetBaseline): %s", inner.text); }
+            else {
+                r->has_baseline = 1;
+                fprintf(r->log, "assets: the baseline set \"%s\" from %s (%d files), after the installs\n", r->baseline.m->name, place->baseline, r->baseline.m->count);
+            }
+        }
+    }
     if (rc) { resolver_free(r); return rc; }
     r->seen_cap = 256;
     r->seen = calloc(r->seen_cap, sizeof *r->seen);
     *out = r;
     return W_OK;
+}
+/* }}} */
+
+/* {{{ static pack_find: the entry for `key` in a pack (and its file on disk), or NULL */
+static const PackEntry *pack_find(const Pack *p, const char *key, const char **real)
+{
+    PackEntry probe = { .key = key };
+    const PackEntry *pp = &probe, **hit = p->m && p->m->count ? bsearch(&pp, p->by_key, (size_t)p->m->count, sizeof *p->by_key, entry_order) : NULL;
+    if (!hit) return NULL;
+    *real = p->real[hit - p->by_key];
+    return *hit;
 }
 /* }}} */
 
@@ -420,10 +458,13 @@ static WErr stand_in_for(Resolver *r, const char *logical, const char *key, Asse
     const unsigned char *bytes = placeholder(r, kind, key, &len, &what);
     if (!what) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
     count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
-    char where[200];
+    char where[240];
+    const char *tail = r->has_baseline
+        ? (r->chain ? (r->has_wc3 ? ", the archives, Warcraft III's or the baseline set" : ", the archives or the baseline set")
+                    : (r->has_wc3 ? ", Warcraft III's archives or the baseline set" : ", no archives open, or the baseline set"))
+        : (r->chain ? (r->has_wc3 ? ", the archives or Warcraft III's" : " or the archives") : (r->has_wc3 ? " or Warcraft III's archives" : ", no archives open"));
     snprintf(where, sizeof where, "%d pack%s, %d server folder%s, %d overlay%s%s", r->npacks, r->npacks == 1 ? "" : "s",
-             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s",
-             r->chain ? (r->has_wc3 ? ", the archives or Warcraft III's" : " or the archives") : (r->has_wc3 ? " or Warcraft III's archives" : ", no archives open"));
+             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s", tail);
     if (r->strict) {
         fprintf(r->log, "assets: ERROR: the %s %s is in none of %s; strict mode (assetsStrict) refuses a placeholder\n", kname, logical, where);
         return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of %s, and strict mode refuses a placeholder", kname, logical, where);
@@ -517,7 +558,25 @@ static WErr resolve(Resolver *r, const char *logical, AssetKind kind, int stand_
             return W_OK;
         }
     }
-    /* 5. the placeholder, said every time; a kind with none is not found, quietly (open sea; a table its reader names) */
+    /* 5. the baseline set: the project's own, under the original's name */
+    if (r->has_baseline) {
+        const char *real;
+        const PackEntry *e = pack_find(&r->baseline, key, &real);
+        if (e) {
+            if (e->kind != kind)
+                return w_fail(why, W_ERR_REFUSED, "%s was asked for as a %s, but the baseline set (%s, line %d) lists it as a %s: one of the two is wrong",
+                              logical, kname, r->baseline.folder, e->line, asset_kind_name(e->kind));
+            WErr rc = read_file(real, &out->data, &out->len, why);
+            if (rc) return rc;
+            count(r, kind, key, ASSET_FROM_BASELINE, NULL);
+            out->source = ASSET_FROM_BASELINE;
+            out->from = r->baseline.folder;
+            out->entry = e;
+            if (r->trace) fprintf(r->log, "assets: %s %s <- baseline (%s)\n", kname, logical, real);
+            return W_OK;
+        }
+    }
+    /* 6. the placeholder, said every time; a kind with none is not found, quietly (open sea; a table its reader names) */
     if (!stand_in) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
     return stand_in_for(r, logical, key, kind, 0, out, why);
 }
@@ -537,6 +596,7 @@ WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswe
 
 /* {{{ resolver_wc3 */
 const char *resolver_wc3(const Resolver *r) { return r && r->has_wc3 ? r->wc3_folder : NULL; }
+const char *resolver_baseline(const Resolver *r) { return r && r->has_baseline ? r->baseline.folder : NULL; }
 /* }}} */
 
 /* {{{ asset_get: the resolver's answer, a placeholder included, when there is one; else the archives alone */
@@ -606,6 +666,22 @@ WErr asset_resolve_all(Resolver *r, const char *logical, AssetKind kind, AssetAn
             ++*n;
         }
     }
+    if (r->has_baseline) {
+        const char *real;
+        const PackEntry *e = pack_find(&r->baseline, key, &real);
+        if (e) {
+            if (e->kind != kind) {
+                rc = w_fail(why, W_ERR_REFUSED, "%s was asked for as a %s, but the baseline set (%s, line %d) lists it as a %s: one of the two is wrong",
+                            logical, kname, r->baseline.folder, e->line, asset_kind_name(e->kind));
+                goto done;
+            }
+            ROOM();
+            if ((rc = read_file(real, &out[*n].data, &out[*n].len, why))) goto done;
+            count(r, kind, key, ASSET_FROM_BASELINE, NULL);
+            out[*n].source = ASSET_FROM_BASELINE; out[*n].from = r->baseline.folder; out[*n].entry = e;
+            ++*n;
+        }
+    }
 #undef ROOM
 done:
     if (rc) { for (int i = 0; i < *n; ++i) asset_answer_free(&out[i]); *n = 0; return rc; }
@@ -644,7 +720,7 @@ void resolver_report(Resolver *r, FILE *to)
     asset_counts(r, &c);
     fprintf(to, "assets this session: different assets asked for, by kind and where each came from\n");
     fprintf(to, "(pack: how many are past the distinctness threshold, %.2f, in brackets)\n", r->distinctness);
-    fprintf(to, "%-10s %12s %8s %8s %9s %12s %7s\n", "kind", "pack", "server", "overlay", "blizzard", "placeholder", "total");
+    fprintf(to, "%-10s %12s %8s %8s %9s %9s %12s %7s\n", "kind", "pack", "server", "overlay", "blizzard", "baseline", "placeholder", "total");
     uint32_t col[ASSET_SOURCE_COUNT] = { 0 }, distinct = 0, all = 0;
     for (int k = 0; k <= ASSET_KIND_COUNT; ++k) {
         const uint32_t *row = k < ASSET_KIND_COUNT ? c.by[k] : col;
@@ -652,8 +728,8 @@ void resolver_report(Resolver *r, FILE *to)
         for (int s = 0; s < ASSET_SOURCE_COUNT; ++s) total += row[s];
         char pack[32];
         snprintf(pack, sizeof pack, "%u (%u)", row[ASSET_FROM_PACK], d);
-        fprintf(to, "%-10s %12s %8u %8u %9u %12u %7u\n", k < ASSET_KIND_COUNT ? asset_kind_name((AssetKind)k) : "total", pack,
-                row[ASSET_FROM_SERVER], row[ASSET_FROM_OVERLAY], row[ASSET_FROM_BLIZZARD], row[ASSET_FROM_PLACEHOLDER], k < ASSET_KIND_COUNT ? total : all);
+        fprintf(to, "%-10s %12s %8u %8u %9u %9u %12u %7u\n", k < ASSET_KIND_COUNT ? asset_kind_name((AssetKind)k) : "total", pack,
+                row[ASSET_FROM_SERVER], row[ASSET_FROM_OVERLAY], row[ASSET_FROM_BLIZZARD], row[ASSET_FROM_BASELINE], row[ASSET_FROM_PLACEHOLDER], k < ASSET_KIND_COUNT ? total : all);
         if (k < ASSET_KIND_COUNT) {
             for (int s = 0; s < ASSET_SOURCE_COUNT; ++s) col[s] += row[s];
             distinct += d;

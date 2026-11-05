@@ -21,9 +21,13 @@ shader's text; issue 1109's water plan).
 
 - `typedef struct Water Water;`
   A water drawer (the handle: docs/001, "Handles"), with the liquid
-  table read; the chain must outlive it. NULL with `why` when the table
-  or the shader can't be had. Freed with water_free.
-- `Water *water_new(MpqChain *chain, const Textures *textures, WWhy *why);`
+  table read; the chain must outlive it. Its pictures are asked of
+  `assets` (a test-map run's resolver, 060: so the baseline set's frames
+  answer where no install has them; NULL for the archives alone), never
+  as a placeholder: a kind's run ends at its first missing frame. NULL
+  with `why` when the table or the shader can't be had. Freed with
+  water_free.
+- `Water *water_new(MpqChain *chain, Resolver *assets, const Textures *textures, WWhy *why);`
 - `void water_free(Water *w);`
 - `void water_use_wc3(Water *w, const Wc3Water *wc3);`
   Draws water and sea layers added from now on as `wc3`'s (a converted

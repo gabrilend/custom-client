@@ -137,3 +137,8 @@ hold only 53 bits exactly. Dates are YYYY-MM-DD.
   many values it lists without keys; the i-th of them, from 1 (NULL past the end).
 - `int lua_value_listed(const LuaValue *t);`
 - `const LuaValue *lua_value_item(const LuaValue *t, int i);`
+- `int lua_value_count(const LuaValue *t);`
+  Every value a table holds, keyed or not, in the order written: how
+  many, and the i-th from 1 (NULL past the end), with its key in `*key`
+  (NULL for a value listed without one) when `key` is not NULL.
+- `const LuaValue *lua_value_at(const LuaValue *t, int i, const char **key);`

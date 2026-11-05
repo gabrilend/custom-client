@@ -71,6 +71,14 @@
  *   install (as assets/server-data links to the server's). The default
  *   "wc3": assets/wc3, used when it is there and quietly left out when
  *   it isn't.
+ * assetBaseline: the baseline set, the project's own stand-ins under the
+ *   original names, asked after the Blizzard installs and before the
+ *   placeholder (1109's decisions 81 to 88; world-edit-to-execute's
+ *   docs/wow-client-bridge.md, "Our own models are the default"). One
+ *   folder name under the profile's assets, laid out as a pack (its
+ *   manifest.lua lists every file). The default "baseline":
+ *   assets/baseline, used when it is there and said and left out when it
+ *   isn't (until the player makes one: make-baseline, 085-baseline-set.h).
  */
 static const char *check_resolution(const char *value);
 static const char *check_folder_names(const char *value);
@@ -137,6 +145,8 @@ static const SettingDecl DECLS[] = {
       .label = "Distinctness Threshold", .explain = "The similarity score from which a pack's asset counts as replaced: 0 is the original itself, 1 unrelated to it." },
     { .name = "assetWc3",                .section = "Assets",     .kind = SETTING_TEXT,   .def = "wc3", .check = check_folder_name, .restart = 1,
       .label = "Warcraft III Install", .explain = "A folder under assets holding your own Warcraft III archives (war3.mpq, War3x.mpq, War3Patch.mpq), or a link to your install: converted maps take its pictures, models and ground from there. Empty for none." },
+    { .name = "assetBaseline",           .section = "Assets",     .kind = SETTING_TEXT,   .def = "baseline", .check = check_folder_name, .restart = 1,
+      .label = "Baseline Set", .explain = "A folder under assets holding the project's own stand-ins for what neither your packs, the server nor your Blizzard installs have, asked before a placeholder. Empty for none." },
 };
 #define DECL_COUNT ((int)(sizeof DECLS / sizeof DECLS[0]))
 

@@ -703,12 +703,97 @@ and added-light modes and the doodads alike. Not checked here: the
 map's fog as WC3 draws it (open question 13), the exponential styles'
 look (decision 78), and Raylib drawing it in a window.
 
+**Step 1k is built** (2026-11-05, the same background work): the
+baseline set's place in the resolver, and the smallest set, made from
+the converter's own tables. Decisions 81 to 88.
+
+- **The place (060, 014):** the resolver asks a fifth place after the
+  Blizzard installs (the game's archives, then Warcraft III's) and
+  before the placeholder, the owner's order (2026-11-04: "the player's
+  packs, the server's files, the player's own Blizzard install if they
+  plugged it in, the baseline set, and only then the wire-frame"). It
+  is a folder laid out as a pack, its `manifest.lua` read by 059 as a
+  pack's, named by the new setting `assetBaseline` (one folder name
+  under the profile's assets, default `baseline`): not there, said and
+  left out; there with no manifest or a broken one, the start stops,
+  naming the setting (decisions 81, 82). Its answers are their own
+  place (`ASSET_FROM_BASELINE`, "baseline" in the trace and a column in
+  the counts table), not placeholders: no warning, strict mode takes
+  them, and none counts as replaced past the threshold. A placeholder's
+  warning names the set among the places when it is there (decision
+  83). `asset_resolve_all` gives its copy last.
+- **The water through the resolver (040):** its frames are asked with
+  `asset_read` (never a placeholder; a run ends at its first missing
+  frame, as before), so a pack, an overlay or the set can answer them.
+  It was one of the parts still reading the archives directly.
+- **The smallest set (085, 086):** nothing in either repository says
+  what the set holds, beyond world-edit-to-execute's
+  `docs/wow-client-bridge.md` (the asset forge, W05 and W06, will make
+  it) and the converter's `models.lua` (its WoW paths are "the names
+  the baseline set has to cover"), and neither tracks any art. So it is
+  made by code from the converter's tables (decision 84):
+  `ground_textures.lua`'s every ground, blight and fallback path as a
+  64 x 64 picture of the row's own `rgb`, mottled and seamless, the
+  same path always the same picture; `models.lua`'s every doodad `.m2`
+  path (types, by model, classes) and its `00.skin` answered by one
+  stand-in, a grey eight-sided post a yard across and two high, with
+  its own picture `Baseline\StandIn.blp` (decision 85); LiquidType 1's
+  run of 30 water frames, `XTextures\river\lake_a.1.blp` onward
+  (decision 86). Each file at its folded name with a manifest entry
+  (its SHA-256, route `hand`, lineage `independent`, no scores). A new
+  program, `make-baseline`, writes it (`scripts/build` builds it;
+  `scripts/run` runs it once when `assets/baseline` isn't there and
+  the tables are, under `WETE`; decision 87). From the converter's
+  tables (world-edit-to-execute's branch with W02's `wowbuild`): 179
+  ground pictures, 47 doodad paths on the post (24 paths named twice,
+  38 creature rows left out), 30 frames: 212 files, 304 entries, 4.4 MB.
+
+Checked (`tests/044-test-client.c`, a section of its own after the
+fog, before the archives): SHA-256 against FIPS 180-4's examples; a
+ground picture decoded by 017 (64 x 64, its colour the row's on the
+whole, mottled, opaque, no seam), the same seed the same bytes; the
+water's 30 frames decoded, each a step on, the run repeating; the post
+read by 022 (41 points, 24 triangles all wound outward, one piece, one
+unit drawing its named picture, standing on the ground two yards
+high); a set made from tables written here (every count, the manifest
+read by 059, every file hashing to its id, made again over itself) and
+its refusals (a folder of someone else's files, an `rgb` of two
+numbers, past 255 or not whole, with file and line; a `wow` empty, not
+text, climbing out of the folder or naming the manifest; a table not
+there); the setting (its default, a list or `..` refused, empty for
+none); and the resolver with it: a picture no install has from the set
+with its entry, one both have from the install first, every copy with
+the set's last, a doodad named `.mdx` as a ground file names it drawn
+as the post (not the box) with the post's picture from the set, a
+row's `00.skin`, the water's last frame through `asset_read` and one
+past it not found, another kind refused naming the set, a creature
+still the box with the set named in the warning, the counts and the
+report's column, strict mode taking its answers, a folder not there
+(said; the checker as before), and a folder with no manifest or a
+broken one stopping the start. With the converter's real tables and
+the real conversions, no install:
+
+- **War in the Plaguelands:** its 4 tiles' 17 ground pictures all from
+  the set, its 147 doodad models the set's post (28) or its own WC3
+  models (118; one, `war3mapImported\glow.mdx`, refused by 061 as
+  before), its 223 water layers' 30 frames from the set.
+- **Master Crafters:** 11 ground pictures and 11 doodad models, all
+  from the set; 358 water layers' frames from the set.
+
+No memory errors under the address and undefined-behaviour checkers.
+Not checked here: the water frames' names against a 3.3.5a client
+(recalled: decision 86), the set drawn in a window, and a run with no
+WoW install, which still stops at the start: the client's tables
+(`LiquidType`, `Light`, `Map` ...), her model and the creatures come
+from the archives (decision 88).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
-its replaceable pictures are left off); 034's prefetch, 040's water and
+its replaceable pictures are left off); 034's prefetch and
 041's game models through the resolver (they read the archives alone);
-the baseline model set as a place (it doesn't exist yet: decision 32);
+the baseline set's buildings, creatures, WC3 stock art and tables (the
+smallest set has none: decision 88), and the asset forge's real set;
 a missing table row as a placeholder (106 wants one: still an error
 naming the table and row); logging in, and the `lost-connection` ending
 (Phase 5's 609).
@@ -862,6 +947,11 @@ return {
 1j. ~~The map's own WC3 fog drawn.~~ Done (2026-11-05): 084 reading the
    map's `war3map.w3i` fog into yards, 043 putting it in each frame's
    light, under every drawer (decisions 76 to 80).
+1k. ~~The baseline set as a place, and its smallest form.~~ Done
+   (2026-11-05): 060 asking it after the Blizzard installs (setting
+   `assetBaseline`), 040's water through the resolver, 085 and
+   `make-baseline` (086) making it from the converter's tables
+   (decisions 81 to 88).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1030,7 +1120,8 @@ return {
 29. **034's prefetch still warms the archives alone**, and 040's water
     and 041's game models still read them: none of them stands in a
     placeholder, and a converted map's water and creatures still draw.
-    Moving them is the next slice of 105a.
+    Moving them is the next slice of 105a. (040's water moved in step
+    1k, decision 86, never as a placeholder.)
 30. **A model 061 refuses is left out, said**, as any unreadable file
     is; 061 isn't changed here (open item below).
 31. **The tests read the converter's real output when given it**, as
@@ -1046,7 +1137,8 @@ return {
     packs, the server's files (and overlays, the test map's stand-in for
     them), the player's Blizzard install, then the placeholder. The
     baseline set has no place until the asset forge makes it; it goes
-    between the install and the placeholder.
+    between the install and the placeholder. (Since step 1k it has
+    that place, and its smallest form: decisions 81 to 88.)
 33. **Where the install is: `assetWc3`**, a setting row beside the
     resolver's others, holding one folder name under the profile's
     assets (default `wc3`), not a path: the other rows name folders, not
@@ -1404,6 +1496,81 @@ return {
     stays, said at the start. 081 and the fog read the file through
     one function (084's `map_w3i_read`).
 
+## Decisions (2026-11-05, step 1k, answered here; the owner may overturn any)
+
+81. **The baseline set is the fifth place, laid out as a pack.** After
+    the Blizzard installs (the game's archives, then Warcraft III's) and
+    before the placeholder, the owner's order. Its folder holds the
+    files at their names and a `manifest.lua` of format 1 (docs/012),
+    read by the reader packs use: the asset forge's set can drop in
+    with its scores and seals, and the smallest set records its own
+    provenance the same way. A name the set lists is answered from it;
+    a name it doesn't list goes on to the placeholder (a file there
+    that no entry names is said at the start and never served, as in a
+    pack).
+82. **Where: `assetBaseline`**, a setting row beside `assetWc3`, one
+    folder name under the profile's assets (default `baseline`, so
+    `assets/baseline`); empty for none. A folder that isn't there is
+    said in the log and left out (a player who hasn't made it gets the
+    placeholders, as before); one there with no manifest, or a broken
+    one, stops the start, naming the setting, as a broken pack does.
+83. **Its answers are their own place, not placeholders.** Counted
+    under "baseline" (a column of the counts table between the
+    installs and the placeholders), no warning, taken by strict mode
+    (`assetsStrict` refuses placeholders, and the set is a real answer
+    the player can see), and never counted as replaced past the
+    distinctness threshold (it has no scores yet; the forge's will).
+    The placeholder's warning names the set among the places looked
+    in when it is open, and is as before when it isn't.
+84. **The smallest set's contents, where none were defined: made by
+    code from the converter's tables.** The repositories track no art,
+    and the converter's two tables are the list of names a converted
+    map can carry (`models.lua`: "the names the baseline set has to
+    cover"). The ground: each row of `ground_textures.lua` with a `wow`
+    (every tileset's grounds and blight, and the fallback) as a 64 x 64
+    plain BLP2 of the row's own `rgb`, the colour the converter already
+    uses for it, mottled by a smooth wrapping noise (12% deep, a little
+    grain) seeded by its folded path, so it reads as ground, tiles with
+    no seam and is the same on every make. A path named twice keeps the
+    first row's colour.
+85. **One stand-in model for every doodad; buildings and creatures
+    left out.** Each `.m2` path in `models.lua`'s `doodads` (types, by
+    model, classes) and its `00.skin` is answered by one shared file
+    pair: a grey eight-sided post, a yard across at its foot, 0.8 at
+    its top, two yards high, an M2 of version 264 with one opaque unit
+    drawing its own picture (`Baseline\StandIn.blp`, grey stone with
+    a blue band: the set's own name, so it never stands for a game
+    picture). It is visibly not the original and visibly not the
+    magenta box. A `.wmo` row (a building is a root and its groups) and
+    the `units` rows (a creature needs a skeleton and animations) are
+    left out and counted; creatures stay the box.
+86. **Water: LiquidType 1's run, as recalled.** The converter writes
+    one liquid, LiquidType 1 (water); its 30 frames are named
+    `XTextures\river\lake_a.1.blp` to `lake_a.30.blp`, recalled from
+    3.3.5a rather than read here (no client); a wrong recollection
+    leaves the water with no frames, as before. Each frame is a 64 x 64
+    blue ripple that moves a step a frame and repeats over the run. 040
+    now reads its frames through the resolver (`asset_read`), so the
+    set's answer.
+87. **Made by a program, not committed.** `make-baseline FOLDER
+    GROUND_TABLE MODEL_TABLE` (086, built by `scripts/build`) writes the
+    set; `assets/` is git-ignored, as every other asset folder is, and
+    the 4.4 MB of made files would only repeat what the code makes.
+    `scripts/run` makes it once when `assets/baseline` isn't there and
+    the tables are (`WETE`, default world-edit-to-execute's folder). A
+    make refuses a folder holding files but no manifest (someone
+    else's), a path that climbs out of the folder or names the
+    manifest, and a ground row without three whole numbers from 0 to
+    255; it writes the manifest last, through a new name, so a make
+    that stops part way leaves the last whole one.
+88. **What the smallest set doesn't cover.** The client's tables
+    (`LiquidType`, `Light`, `Map`, `AreaTable` ...), her model and the
+    creatures still come from the game's archives, so a run with no WoW
+    install still stops at the start; buildings, WC3's stock pictures
+    and models (named by a map's own WC3 models), sounds and the
+    interface stay placeholders without an install. Each is the asset
+    forge's, or a later step's.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -1577,7 +1744,9 @@ return {
   `src/082-water-prep.info.md` (the water's points and shader),
   `src/083-w3i.info.md` (the map's settings), `src/040-water.info.md`
   and 081. For step 1j: `src/084-map-fog.info.md` (the map's fog), with
-  083, 026 and 059.
+  083, 026 and 059. For step 1k: `src/085-baseline-set.info.md` (the
+  smallest set), `src/086-make-baseline.info.md` (its program),
+  `src/060-resolver.info.md`, 014 and 040.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

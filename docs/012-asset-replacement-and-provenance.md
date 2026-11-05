@@ -57,9 +57,26 @@ folder the `assetWc3` setting names under the profile's assets (default
 WC3 models name WC3's stock pictures, and its ground WC3's tilesets
 and (since steps 1e and 1f) cliff and ramp models and the blight; with no install those stand in as
 the checker, or (the ground) keep the converter's own pictures and no
-cliff models stand. The baseline set (the asset forge's) has no
-place yet: it will sit between the Blizzard install and the placeholder
-when it exists.
+cliff models stand.
+
+The baseline set is the fifth place (issue 1109's step 1k, decisions 81
+to 88): the project's own stand-ins under the original names, asked
+after the Blizzard installs and before the placeholder, so a player
+without Blizzard's files sees ours rather than the checker or the
+wire-frame. It is a folder laid out as a pack (its `manifest.lua` gives
+every file's provenance, read by the same reader), named by the
+`assetBaseline` setting (default `assets/baseline`; not there: said and
+left out). Its answers are its own place, not placeholders: no warning,
+strict mode takes them, and the counts table has a column for them.
+The asset forge (world-edit-to-execute's W05, W06) will make the real
+set. Until then `make-baseline` (`src/086-make-baseline.c`) makes the
+smallest one from the converter's own tables (`ground_textures.lua`,
+`models.lua`): a picture of each ground in its own colour, one grey
+post for every doodad, and water's run of frames, every file made by
+the client's code (route `hand`, lineage `independent`, no scores yet).
+Buildings, creatures, WC3's stock pictures and models, and the tables
+the client reads (`LiquidType`, `Light`, `Map` ...) are not in it yet,
+so the original game's archives are still needed to start.
 
 Overlays (issue 105a's second step) sit after the server's assets: the
 server holds the truth about the world it runs (docs/001), so where a
@@ -294,7 +311,11 @@ while any source can give a real one.
    - **A requirement, for now:** the player supplies the original game's
      models from their own copy of the game, until the project has its
      own baseline standard model set. That set is then what stands in
-     while a server's asset is on its way.
+     while a server's asset is on its way. (Since 1109's step 1k the set
+     has its place, after the Blizzard install, and its smallest form,
+     made from the converter's tables; it doesn't yet lift the
+     requirement: the tables and creature models still come from the
+     player's copy.)
    - **rmail's consent form** (every attachment waits for the receiver's
      yes) has to be answered for the player when the sender is the server
      they connected to: 609's "remembered choices" hook, which answers
