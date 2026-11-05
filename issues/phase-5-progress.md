@@ -8,7 +8,7 @@ no crypto yet.
 
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
-| 509 | [The cache files (WDB)](./509-the-cache-files.md) | not started | the world connection (not yet written) |
+| 509 | [The cache files (WDB)](./509-the-cache-files.md) | partly built (the files, caches and limits; 2026-11-05) | the world connection (not yet written); docs/057 note 10.1 |
 | 508 | [Phase 5 demo](./508-phase-demo.md) | pending | Phase 1, 509 |
 
 509 was written 2026-10-16 from the clean-room checklist's note 10.1
