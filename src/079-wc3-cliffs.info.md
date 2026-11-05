@@ -17,9 +17,9 @@ the doodad drawer (042) draws them as it draws any WC3 model, and the
 ground painter (078) lays the cliff's own ground under it.
 
 A cell is a cliff cell when its corners are on different levels and
-none is on a ramp (063's rule for a bare cell; a ramp's own models are
-a next step: issue 1109). Its model, as the published map viewers
-build it:
+none is on a ramp (063's rule for a bare cell), and a ramp cell when
+they are on different levels and one is (issue 1109's step 1f). Its
+model, as the published map viewers build it:
   Doodads\Terrain\<dir>\<dir><letters><variation>.mdx
   dir        its cliff tileset's cliffModelDir in TerrainArt\
              CliffTypes.slk ("Cliffs", "CityCliffs"); "Cliffs" when
@@ -31,6 +31,13 @@ build it:
              levels up is cut to 'C' (no model reaches further)
   variation  its south-west point's cliff variation (0-7), or the
              highest below it that some place has, else 0
+A ramp cell's is the same in its tileset's rampModelDir ("CliffTrans";
+"CliffTrans" when the sheet has none), its letters a ramp corner's
+'L' on the lowest level and 'H' one up ('D' two: 'L' less four a
+level), a corner off the ramp's 'A', 'B' or 'C' as a cliff's
+("HLLH": a ramp down to the east). A ramp cell on one level (the
+ramp's lower half) gets no model: the ramp model of the cell beside
+it reaches over it (1109's decision 51).
 The cliff tileset is its south-west point's, else the first of its
 south-east, north-west and north-east points' that the map lists; a
 cell none of whose corners names one gets no model (and is laid as
@@ -42,6 +49,9 @@ model stands on its cell's south-west corner moved one cell east
 them), at (base level - 2) x 128 units plus its corners' mean height,
 turned as WC3 lays models, unbent (the game bends each point to the
 ground under it; issue 1109's decision 46).
+
+The cliffs list holds both: a ramp's has `ramp` set, and the counts
+keep them apart.
 
 Window-free: in the test program and the executable (it asks the
 resolver which variations exist). Opening reads everything once; after
@@ -56,6 +66,7 @@ it the handle is only read, so it is safe on any thread.
     picture   its cliff picture (texDir\texFile.blp), or TerrainArt\<id>.blp
               when the sheet has no row for it
     ground    the ground tileset laid under its cliffs (groundTile), "" none
+    ramp_dir  its ramps' folder under Doodads\Terrain (rampModelDir)
     known     1 when the sheet has a row for it
 - `type Wc3Cliff`
   One cliff model on a cell. Field by field:
@@ -63,6 +74,7 @@ it the handle is only read, so it is safe on any thread.
     type    its cliff tileset (into wc3_cliffs_type)
     base    its lowest corner's cliff level
     model   its model's name (into wc3_cliffs_model)
+    ramp    1: a ramp's model (its cell keeps its ground: 078)
     x, y, z its origin in WC3's world (units): the cell's south-west
             corner one cell east, at the height above
 - `type Wc3CliffCounts`
@@ -91,3 +103,6 @@ it the handle is only read, so it is safe on any thread.
   A cell's letters (see above) from its corners' cliff levels, ended by
   a zero; returns the lowest level. `steep` (may be NULL) is set to 1
   when a corner was cut to 'C'.
+- `int wc3_ramp_letters(int nw, int ne, int se, int sw, int rnw, int rne, int rse, int rsw, char out[5], int *steep);`
+  A ramp cell's letters (see above) from its corners' levels and ramp
+  marks (1: on the ramp); returns the lowest level. `steep` as above.

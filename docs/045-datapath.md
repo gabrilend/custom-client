@@ -48,8 +48,9 @@ else the `.m2` and its view) and a creature look's own WC3 model come
 through the resolver (stock WC3 ones from the player's Warcraft III
 install, `assetWc3`, after the game's archives; a converted map's
 ground painted with WC3's own tilesets when its build carries
-`war3map.w3e`, `078-wc3-ground.c`, and its cliffs standing as WC3's
-own cliff models among its doodads, `079-wc3-cliffs.c`), with the magenta checker for a missing picture
+`war3map.w3e`, `078-wc3-ground.c`, with WC3's blight on blighted
+ground, and its cliffs and ramps standing as WC3's own models among
+its doodads, `079-wc3-cliffs.c`), with the magenta checker for a missing picture
 and a magenta wire-frame box for a missing model; and while the server
 has no map files for the map, her ground's heights are made from its
 ADTs (`075-adt-heights.c`). The prefetch (034), the water (040) and the

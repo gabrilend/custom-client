@@ -64,9 +64,11 @@ WC3 lays its cells (1109 decisions 32-41). Since 1109's step 1e
 (`src/079-wc3-cliffs.c`, placed among the tile's doodads so 042 draws
 them, each cliff cell laid with its cliff tileset's ground: decisions
 42-50), seated whole on their cell rather than bent to the mesh point
-by point. Still to come: ramps (their cells show the converted slope),
-cliffs bent to the ground, blight (laid whole with its south-west
-tileset for now), the tilesets' variation pictures (one whole tile a
+by point. Since step 1f its ramps stand as WC3's ramp models on their
+own ground, and blighted ground wears the main tileset's blight
+picture from the editor's data, blended on its blighted corners
+(decisions 51-56). Still to come: cliffs and ramps bent to the ground,
+the tilesets' variation pictures (one whole tile a
 tileset for now), and chunks with more than four tilesets (the rest
 folded): the last two are where a ground shader for WC3's own blend
 would earn its place, and the bending where a cliff shader reading the

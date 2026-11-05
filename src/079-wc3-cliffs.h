@@ -14,9 +14,9 @@
  * ground painter (078) lays the cliff's own ground under it.
  *
  * A cell is a cliff cell when its corners are on different levels and
- * none is on a ramp (063's rule for a bare cell; a ramp's own models are
- * a next step: issue 1109). Its model, as the published map viewers
- * build it:
+ * none is on a ramp (063's rule for a bare cell), and a ramp cell when
+ * they are on different levels and one is (issue 1109's step 1f). Its
+ * model, as the published map viewers build it:
  *   Doodads\Terrain\<dir>\<dir><letters><variation>.mdx
  *   dir        its cliff tileset's cliffModelDir in TerrainArt\
  *              CliffTypes.slk ("Cliffs", "CityCliffs"); "Cliffs" when
@@ -28,6 +28,13 @@
  *              levels up is cut to 'C' (no model reaches further)
  *   variation  its south-west point's cliff variation (0-7), or the
  *              highest below it that some place has, else 0
+ * A ramp cell's is the same in its tileset's rampModelDir ("CliffTrans";
+ * "CliffTrans" when the sheet has none), its letters a ramp corner's
+ * 'L' on the lowest level and 'H' one up ('D' two: 'L' less four a
+ * level), a corner off the ramp's 'A', 'B' or 'C' as a cliff's
+ * ("HLLH": a ramp down to the east). A ramp cell on one level (the
+ * ramp's lower half) gets no model: the ramp model of the cell beside
+ * it reaches over it (1109's decision 51).
  * The cliff tileset is its south-west point's, else the first of its
  * south-east, north-west and north-east points' that the map lists; a
  * cell none of whose corners names one gets no model (and is laid as
@@ -39,6 +46,9 @@
  * them), at (base level - 2) x 128 units plus its corners' mean height,
  * turned as WC3 lays models, unbent (the game bends each point to the
  * ground under it; issue 1109's decision 46).
+ *
+ * The cliffs list holds both: a ramp's has `ramp` set, and the counts
+ * keep them apart.
  *
  * Window-free: in the test program and the executable (it asks the
  * resolver which variations exist). Opening reads everything once; after
@@ -63,10 +73,12 @@
  *   picture   its cliff picture (texDir\texFile.blp), or TerrainArt\<id>.blp
  *             when the sheet has no row for it
  *   ground    the ground tileset laid under its cliffs (groundTile), "" none
+ *   ramp_dir  its ramps' folder under Doodads\Terrain (rampModelDir)
  *   known     1 when the sheet has a row for it */
 typedef struct {
     char id[5];
     char model_dir[64];
+    char ramp_dir[64];
     char picture[160];
     char ground[5];
     int  known;
@@ -77,10 +89,11 @@ typedef struct {
  *   type    its cliff tileset (into wc3_cliffs_type)
  *   base    its lowest corner's cliff level
  *   model   its model's name (into wc3_cliffs_model)
+ *   ramp    1: a ramp's model (its cell keeps its ground: 078)
  *   x, y, z its origin in WC3's world (units): the cell's south-west
  *           corner one cell east, at the height above */
 typedef struct {
-    int    i, j, type, base, model;
+    int    i, j, type, base, model, ramp;
     double x, y, z;
 } Wc3Cliff;
 
@@ -89,8 +102,10 @@ typedef struct {
     int cells;       /* cliff cells (corners on different levels, none on a ramp) */
     int placed;      /* of them with a model */
     int no_tileset;  /* of them with none: no corner names a cliff tileset the map lists */
-    int steep;       /* of them with corners more than two levels apart (cut to 'C') */
-    int ramps;       /* cells on different levels with a ramp corner: no model yet */
+    int steep;       /* cliffs and ramps with corners more than two levels apart (cut) */
+    int ramps;       /* ramp cells: on different levels, a ramp corner */
+    int ramps_placed;      /* of them with a model */
+    int ramps_no_tileset;  /* of them with none: no corner names a cliff tileset */
     int models;      /* distinct models named */
     int found;       /* of them some place has (the rest stand in as the box) */
     int fallback;    /* cliffs whose model is a lower variation than asked, no place having that one */
@@ -125,5 +140,9 @@ const char *wc3_cliffs_model(const Wc3Cliffs *c, int m);
  * a zero; returns the lowest level. `steep` (may be NULL) is set to 1
  * when a corner was cut to 'C'. */
 int  wc3_cliff_letters(int nw, int ne, int se, int sw, char out[5], int *steep);
+
+/* A ramp cell's letters (see above) from its corners' levels and ramp
+ * marks (1: on the ramp); returns the lowest level. `steep` as above. */
+int  wc3_ramp_letters(int nw, int ne, int se, int sw, int rnw, int rne, int rse, int rsw, char out[5], int *steep);
 
 #endif

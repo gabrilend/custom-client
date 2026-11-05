@@ -55,7 +55,7 @@ read after the game's own, by the client's own archive reader, from the
 folder the `assetWc3` setting names under the profile's assets (default
 `assets/wc3`; a link to the install will do). A converted map's own
 WC3 models name WC3's stock pictures, and its ground WC3's tilesets
-and (since step 1e) cliff models; with no install those stand in as
+and (since steps 1e and 1f) cliff and ramp models and the blight; with no install those stand in as
 the checker, or (the ground) keep the converter's own pictures and no
 cliff models stand. The baseline set (the asset forge's) has no
 place yet: it will sit between the Blizzard install and the placeholder

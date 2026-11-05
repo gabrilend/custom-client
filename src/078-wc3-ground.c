@@ -15,11 +15,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #define POINT_SETS   16                  /* a tile point names 0 to 15 (063: four bits) */
-#define TILESETS_MAX 32                  /* those, and the ground under each cliff tileset when the map lists it not */
+#define TILESETS_MAX 32                  /* those, the ground under each cliff tileset when the map lists it not, and the blight */
 #define W3E_NAME "war3map.w3e"           /* at the build folder's root, where the converter copies it */
 #define SHEET    "TerrainArt\\Terrain.slk"
+#define EDIT_DATA "UI\\WorldEditData.txt"      /* the editor's data: [TileSets] names each main tileset's blight */
 
 /* {{{ the handle */
 typedef struct { Wc3Tileset t; unsigned char *rgba; } Tileset;
@@ -30,6 +32,7 @@ struct Wc3Ground {
     int        nsets, npoint;            /* all, and those the points name (the map's ground list) */
     Wc3Cliffs *cliffs;                   /* NULL: no cliff sheet in any place */
     int        cliff_ground[16];         /* per cliff tileset: the tileset laid under it, or -1 */
+    int        blight;                   /* the blight's tileset, or -1: none named */
     double     scale, x0, y0;
 };
 /* }}} */
@@ -47,14 +50,15 @@ void wc3_ground_free(Wc3Ground *w)
 
 /* a tileset's picture by its id, through the sheet's row (the checker
  * when it has none, or no place has the picture) */
-static WErr load_tileset(Resolver *r, MpqChain *chain, const Slk *sheet, const char *id, Tileset *ts, WWhy *why)
+static WErr load_tileset(Resolver *r, MpqChain *chain, const Slk *sheet, const char *id, const char *path, Tileset *ts, WWhy *why)
 {
     WWhy inner;
     AssetAnswer a;
     memcpy(ts->t.id, id, 4);
     ts->t.id[4] = '\0';
-    const char *dir = slk_value(sheet, ts->t.id, "dir"), *file = slk_value(sheet, ts->t.id, "file");
-    if (dir && file) snprintf(ts->t.path, sizeof ts->t.path, "%s\\%s.blp", dir, file);
+    const char *dir = sheet ? slk_value(sheet, ts->t.id, "dir") : NULL, *file = sheet ? slk_value(sheet, ts->t.id, "file") : NULL;
+    if (path) snprintf(ts->t.path, sizeof ts->t.path, "%s", path);   /* named by the caller (the blight's) */
+    else if (dir && file) snprintf(ts->t.path, sizeof ts->t.path, "%s\\%s.blp", dir, file);
     char named[128];
     snprintf(named, sizeof named, "%s", ts->t.path[0] ? ts->t.path : "");
     if (!named[0]) snprintf(named, sizeof named, "TerrainArt\\%s.blp", ts->t.id);
@@ -72,6 +76,45 @@ static WErr load_tileset(Resolver *r, MpqChain *chain, const Slk *sheet, const c
     ts->t.width = img.width; ts->t.height = img.height;
     ts->t.extended = img.width > img.height;
     return W_OK;
+}
+
+/* the blight picture of main tileset `code`: UI\WorldEditData.txt's
+ * [TileSets] row for it, its second field (".blp" added when it has no
+ * ending); W_ERR_NOT_FOUND when no place has the file or it names none */
+static WErr blight_path(Resolver *r, MpqChain *chain, char code, char *out, size_t n, WWhy *why)
+{
+    AssetAnswer a;
+    WWhy inner;
+    WErr rc = asset_read(r, chain, EDIT_DATA, ASSET_TABLE, &a, &inner);
+    if (rc == W_ERR_NOT_FOUND) return w_fail(why, rc, "no %s in any place", EDIT_DATA);
+    if (rc) return w_fail(why, rc, "%s: %s", EDIT_DATA, inner.text);
+    const char *p = (const char *)a.data, *end = p + a.len;
+    int in = 0, got = 0;
+    while (p < end && !got) {
+        const char *eol = memchr(p, '\n', (size_t)(end - p));
+        const char *stop = eol ? eol : end, *next = eol ? eol + 1 : end;
+        while (stop > p && (stop[-1] == '\r' || stop[-1] == ' ' || stop[-1] == '\t')) --stop;
+        while (p < stop && (*p == ' ' || *p == '\t')) ++p;
+        if (p < stop && *p == '[') in = (size_t)(stop - p) == 10 && !strncasecmp(p, "[TileSets]", 10);
+        else if (in && stop - p >= 2 && p[0] == code && memchr(p + 1, '=', (size_t)(stop - p - 1))
+                 && strspn(p + 1, " \t") == (size_t)((const char *)memchr(p + 1, '=', (size_t)(stop - p - 1)) - p - 1)) {   /* "A=" or "A = " */
+            const char *f = memchr(p, ',', (size_t)(stop - p));     /* the second field */
+            if (f) {
+                const char *fe = memchr(f + 1, ',', (size_t)(stop - f - 1));
+                if (!fe) fe = stop;
+                const char *fs = f + 1;
+                while (fs < fe && (*fs == ' ' || *fs == '"')) ++fs;
+                while (fe > fs && (fe[-1] == ' ' || fe[-1] == '"')) --fe;
+                size_t len = (size_t)(fe - fs);
+                int ends = len > 4 && !strncasecmp(fe - 4, ".blp", 4);
+                if (len && len + 5 < n) { snprintf(out, n, "%.*s%s", (int)len, fs, ends ? "" : ".blp"); got = 1; }
+            }
+            if (!got) break;
+        }
+        p = next;
+    }
+    asset_answer_free(&a);
+    return got ? W_OK : w_fail(why, W_ERR_NOT_FOUND, "%s names no blight for main tileset %c", EDIT_DATA, code);
 }
 
 WErr wc3_ground_open(Resolver *r, MpqChain *chain, double scale, double x0, double y0, Wc3Ground **out, WWhy *why)
@@ -102,7 +145,7 @@ WErr wc3_ground_open(Resolver *r, MpqChain *chain, double scale, double x0, doub
     w->npoint = w->g->nground < POINT_SETS ? w->g->nground : POINT_SETS;
     uint8_t extended[POINT_SETS] = { 0 };
     for (int k = 0; k < w->npoint && !rc; ++k, ++w->nsets) {
-        rc = load_tileset(r, chain, sheet, w->g->ground_ids + 4 * k, &w->sets[k], why);
+        rc = load_tileset(r, chain, sheet, w->g->ground_ids + 4 * k, NULL, &w->sets[k], why);
         extended[k] = (uint8_t)w->sets[k].t.extended;
     }
     /* the cliffs (079), when the cliff sheet is somewhere: each cliff
@@ -120,13 +163,24 @@ WErr wc3_ground_open(Resolver *r, MpqChain *chain, double scale, double x0, doub
         while (t < w->nsets && memcmp(w->sets[t].t.id, ground, 4)) ++t;
         if (t == w->nsets) {
             if (w->nsets == TILESETS_MAX) continue;
-            rc = load_tileset(r, chain, sheet, ground, &w->sets[t], why);
+            rc = load_tileset(r, chain, sheet, ground, NULL, &w->sets[t], why);
             if (rc) break;
             ++w->nsets;
         }
         w->cliff_ground[k] = t;
     }
     slk_free(sheet);
+    /* the blight: the main tileset's blight picture, as the editor's data names it */
+    w->blight = -1;
+    char blight[128];
+    if (!rc && w->nsets < TILESETS_MAX) {
+        rc = blight_path(r, chain, w->g->tileset_code, blight, sizeof blight, why);
+        if (rc == W_ERR_NOT_FOUND) rc = W_OK;            /* none named: blighted cells laid as before */
+        else if (!rc) {
+            rc = load_tileset(r, chain, NULL, WC3_BLIGHT_ID, blight, &w->sets[w->nsets], why);
+            if (!rc) w->blight = w->nsets++;
+        }
+    }
     if (!rc) {
         rc = w3e_prep(w->g, extended, w->npoint, &w->prep, &inner);
         if (rc) rc = w_fail(why, rc, "%s: %s", W3E_NAME, inner.text);
@@ -142,6 +196,7 @@ int wc3_ground_tilesets(const Wc3Ground *w) { return w->nsets; }
 const Wc3Tileset *wc3_ground_tileset(const Wc3Ground *w, int k) { return k >= 0 && k < w->nsets ? &w->sets[k].t : NULL; }
 const W3eGround *wc3_ground_w3e(const Wc3Ground *w) { return w->g; }
 const Wc3Cliffs *wc3_ground_cliffs(const Wc3Ground *w) { return w->cliffs; }
+int wc3_ground_blight(const Wc3Ground *w) { return w->blight; }
 /* }}} */
 
 /* {{{ wc3_ground_cell_at */
@@ -180,9 +235,11 @@ WErr wc3_ground_layer(const Wc3Ground *w, const char *name, unsigned char **rgba
 
 /* {{{ wc3_ground_paint_tile */
 /* a cell's (tileset, subtile) pairs, lowest first: 063's; for a cliff
- * cell with a model, its cliff tileset's ground whole; for another bare
- * (cliff or blighted) cell its south-west point's tileset whole */
-typedef struct { int n; uint8_t t[4], s[4]; int inside, bare, cliff; } Cell;
+ * cell with a model (not a ramp's), its cliff tileset's ground whole;
+ * for a blighted cell, when the blight is named, its corners' tilesets
+ * with the blight for each blighted one; for another bare (cliff or
+ * blighted) cell its south-west point's tileset whole */
+typedef struct { int n; uint8_t t[4], s[4]; int inside, bare, cliff, blight; } Cell;
 static Cell cell_pairs(const Wc3Ground *w, int i, int j)
 {
     Cell c = { 0 };
@@ -190,9 +247,31 @@ static Cell cell_pairs(const Wc3Ground *w, int i, int j)
     int cw = w->g->width - 1;
     const uint8_t *e = w->prep->cells + ((size_t)j * cw + i) * 8;
     int cl = w->cliffs ? wc3_cliffs_at(w->cliffs, i, j) : -1;
-    if (cl >= 0) {
+    if (cl >= 0 && !wc3_cliffs_get(w->cliffs, cl)->ramp) {   /* a ramp's cell keeps its ground */
         int t = w->cliff_ground[wc3_cliffs_get(w->cliffs, cl)->type];
         if (t >= 0) { c.cliff = 1; c.t[0] = (uint8_t)t; c.s[0] = 15; c.n = 1; return c; }
+    }
+    if (w->blight >= 0 && w->prep->cell_kind[(size_t)j * cw + i] == W3E_CELL_BLIGHT) {
+        /* each corner the blight where blighted, its tileset where not, laid as 063 lays tilesets */
+        const W3ePoint *p[4] = { w3e_point(w->g, i, j), w3e_point(w->g, i + 1, j), w3e_point(w->g, i, j + 1), w3e_point(w->g, i + 1, j + 1) };
+        static const uint8_t BIT[4] = { 2, 1, 8, 4 };    /* south-west, south-east, north-west, north-east */
+        int t[4];
+        for (int q = 0; q < 4; ++q) t[q] = p[q]->is_blight ? w->blight : p[q]->ground_texture < w->npoint ? p[q]->ground_texture : -1;
+        c.blight = 1;
+        for (int q = 0; q < 4; ++q) {
+            if (t[q] < 0) continue;
+            int seen = 0;
+            for (int k = 0; k < c.n; ++k) seen |= c.t[k] == t[q];
+            if (!seen) c.t[c.n++] = (uint8_t)t[q];
+        }
+        for (int a = 1; a < c.n; ++a)
+            for (int b = a; b > 0 && c.t[b - 1] > c.t[b]; --b) { uint8_t s = c.t[b]; c.t[b] = c.t[b - 1]; c.t[b - 1] = s; }
+        for (int k = 0; k < c.n; ++k) {
+            int bits = 0;
+            for (int q = 0; q < 4; ++q) if (t[q] == c.t[k]) bits |= BIT[q];
+            c.s[k] = (uint8_t)(k ? bits : 15);
+        }
+        return c;
     }
     if (w->prep->cell_kind[(size_t)j * cw + i] != W3E_CELL_TEXTURED) {
         c.bare = 1;
@@ -280,6 +359,7 @@ WErr wc3_ground_paint_tile(const Wc3Ground *w, AdtTile *adt, int chunk_tex[256][
                 ++counts->cells;
                 counts->bare += e->bare;
                 counts->cliff_ground += e->cliff;
+                counts->blight += e->blight;
                 int n = 0, dropped = 0;
                 for (int q = 0; q < e->n; ++q) {
                     if (layer_of[e->t[q]] < 0) { dropped = 1; continue; }
