@@ -69,6 +69,7 @@
 #include "../src/085-baseline-set.h"
 #include "../src/087-world-start.h"
 #include "../src/088-figure-model.h"
+#include "../src/089-headless-run.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -4733,6 +4734,37 @@ static void baseline_tests(const char *dir, const char *build, const char *table
 }
 /* }}} */
 
+/* {{{ static t_receipts_same: two goodbye receipts (068) hold the same
+ * fields and values, but for when each ran (started, ended, seconds);
+ * the first difference into `diff` */
+static int t_receipts_same(const char *a_path, const char *b_path, char *diff, size_t n)
+{
+    LuaData *a = NULL, *b = NULL;
+    WWhy why;
+    int same = 0;
+    if (lua_data_read(a_path, 65536, &a, &why) || lua_data_read(b_path, 65536, &b, &why)) { snprintf(diff, n, "%.250s", why.text); goto done; }
+    const LuaValue *ta = lua_data_top(a), *tb = lua_data_top(b);
+    if (lua_value_count(ta) != lua_value_count(tb)) { snprintf(diff, n, "%d fields against %d", lua_value_count(ta), lua_value_count(tb)); goto done; }
+    for (int i = 1; i <= lua_value_count(ta); ++i) {
+        const char *key;
+        const LuaValue *va = lua_value_at(ta, i, &key);
+        if (!key) { snprintf(diff, n, "a value with no name"); goto done; }
+        if (!strcmp(key, "started") || !strcmp(key, "ended") || !strcmp(key, "seconds")) continue;
+        const LuaValue *vb = lua_value_field(tb, key);
+        int eq = vb && lua_value_type(va) == lua_value_type(vb)
+                 && (lua_value_type(va) == LUA_DATA_NUMBER ? lua_value_number(va) == lua_value_number(vb)
+                     : lua_value_type(va) == LUA_DATA_TEXT ? !strcmp(lua_value_text(va), lua_value_text(vb)) : 1);
+        if (!eq) { snprintf(diff, n, "%s: %.17g against %.17g", key, lua_value_number(va), vb ? lua_value_number(vb) : -1.0); goto done; }
+    }
+    same = 1;
+    snprintf(diff, n, "the same");
+done:
+    lua_data_free(a);
+    lua_data_free(b);
+    return same;
+}
+/* }}} */
+
 /* {{{ a test-map start with no install (087, 088; 1109 step 1l): the
  * baseline set's tables and stand-in figure, 074's rule for a set's table
  * of another width, and 043's start, as far as it runs without a window,
@@ -4932,6 +4964,85 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
     }
     /* }}} */
 
+    /* {{{ a headless run's moves (089), the receipt's counts (068) and
+     * the option (067) (1109 step 1n) */
+    {
+        char moves_path[600];
+        snprintf(moves_path, sizeof moves_path, "%s", __FILE__);
+        char *slash = strrchr(moves_path, '/');
+        size_t at = slash ? (size_t)(slash + 1 - moves_path) : 0;
+        snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
+        HeadlessMoves *hm = NULL;
+        e = headless_moves_read(moves_path, &hm, &why);
+        check(!e && headless_moves_count(hm) == 14 && headless_moves_steps(hm) == 480 && headless_moves_step(hm) == 0.05,
+              e ? why.text : "the project's moves (tests/090-test-map-moves.lua): 14 moves, 24 seconds, 480 steps of 0.05");
+        headless_moves_free(hm);
+        static const struct { const char *text, *names; } BAD[] = {
+            { "return { format = 1, moves = { { hold = \"forwad\", seconds = 1 } } }", "forwad" },
+            { "return { format = 1, moves = { { hold = \"forward\", secs = 1 } } }", "secs" },
+            { "return { format = 1, moves = { { hold = \"forward\" } } }", "needs hold and seconds" },
+            { "return { format = 2, moves = { { hold = \"\", seconds = 1 } } }", "format" },
+            { "return { format = 1, step = 0.5, moves = { { hold = \"\", seconds = 1 } } }", "step" },
+            { "return { format = 1, moves = { } }", "moves" },
+            { "return { format = 1, speed = 2, moves = { { hold = \"\", seconds = 1 } } }", "speed" },
+            { "return { format = 1, moves = { { hold = \"\", seconds = 3600 }, { hold = \"\", seconds = 1 } } }", "72000" },
+            { "return { format = 1, moves = { { hold = \"jump\", seconds = 1, walking = 1 } } }", "walking" },
+        };
+        int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
+        for (int i = 0; i < nbad; ++i) {
+            e = headless_moves_parse(BAD[i].text, strlen(BAD[i].text), "made", &hm, &why);
+            if (e == W_ERR_REFUSED && strstr(why.text, BAD[i].names) && !hm) ++refused;
+            else printf("    (moves %d: %s)\n", i, e ? why.text : "taken");
+            if (!e) headless_moves_free(hm);
+        }
+        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false", refused, nbad);
+        check(refused == nbad, line);
+        const char *tiny = "return { format = 1, moves = { { hold = \"\", seconds = 0.001 }, { hold = \"left right\", seconds = 0.08 } } }";
+        e = headless_moves_parse(tiny, strlen(tiny), "made", &hm, &why);
+        check(!e && headless_moves_steps(hm) == 3, e ? why.text : "a move shorter than a step still takes one; 0.08 seconds (1.6 steps) takes two");
+        if (!e) headless_moves_free(hm);
+
+        /* the counts in the receipt, and LuaJIT reading it as the editor does */
+        snprintf(path, sizeof path, "%s/counted-receipt", root);
+        Goodbye *g = NULL;
+        e = goodbye_begin(path, "/the/map", &g, &why);
+        int took = !e && !goodbye_count(g, "steps", 480, &why) && !goodbye_count(g, "end_x", -0.0, &why) && !goodbye_count(g, "end_y", 0.1, &why)
+                   && !goodbye_count(g, "steps", 481, &why);
+        int bad_names = goodbye_count(g, "Steps", 1, &why) == W_ERR_REFUSED && goodbye_count(g, "reason", 1, &why) == W_ERR_REFUSED
+                        && goodbye_count(g, "2x", 1, &why) == W_ERR_REFUSED && goodbye_count(g, "nan_x", NAN, &why) == W_ERR_REFUSED
+                        && goodbye_count(g, "a_name_of_more_than_thirty_one_ch", 1, &why) == W_ERR_REFUSED;
+        e = e ? e : goodbye_end(g, GOODBYE_CLOSED, NULL, &why);
+        int after = g && goodbye_count(g, "later", 1, &why) == W_ERR_REFUSED;
+        goodbye_free(g);
+        LuaData *rd = NULL;
+        WErr re = e ? e : lua_data_read(path, 65536, &rd, &why);
+        const LuaValue *rt = re ? NULL : lua_data_top(rd);
+        check(!re && took && bad_names && after && lua_value_number(lua_value_field(rt, "steps")) == 481 && lua_value_number(lua_value_field(rt, "end_y")) == 0.1
+              && lua_value_type(lua_value_field(rt, "end_x")) == LUA_DATA_NUMBER && lua_value_number(lua_value_field(rt, "end_x")) == 0
+              && !strcmp(lua_value_text(lua_value_field(rt, "reason")), "closed"),
+              re ? why.text : "the receipt's own counts: after its fields, each exactly (0.1 reads back as 0.1), a name given again keeps its place, names checked, none after it is written");
+        if (rd) lua_data_free(rd);
+        char lj[600];
+        t_luajit_read(path, lj, sizeof lj);
+        if (lj[0]) check(!strncmp(lj, "1|", 2) && strstr(lj, "|0|closed|nil"), "and LuaJIT reads it as the editor does, the counts beside its fields");
+        else printf("  (no LuaJIT at /usr/bin/luajit: the editor's reading is not checked)\n");
+
+        /* the option */
+        TestMap *htm = NULL;
+        e = t_parse("pw", &htm, &why, "--test-map", root, "--receipt", path, "--headless", moves_path, NULL);
+        check(!e && htm && !strcmp(test_map_headless(htm), moves_path), e ? why.text : "--headless MOVES read with the test map's options");
+        test_map_free(htm);
+        htm = NULL;
+        e = t_parse("pw", &htm, &why, "--test-map", root, "--receipt", path, NULL);
+        check(!e && htm && !test_map_headless(htm)[0], e ? why.text : "without it, a run with a window (\"\")");
+        test_map_free(htm);
+        htm = NULL;
+        e = t_parse("pw", &htm, &why, "--headless", moves_path, NULL);
+        check(e == W_ERR_REFUSED && strstr(why.text, "--headless") && strstr(why.text, "--test-map"), "--headless outside a test-map run: refused by name");
+        test_map_free(htm);
+    }
+    /* }}} */
+
     /* {{{ an ordinary run with no archives still stops, named */
     {
         Settings *st = settings_new();
@@ -5095,6 +5206,84 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
         if (gpr) ground_prep_free(gpr, 0);
         world_start_close(&ws);
     }
+    /* {{{ the headless run (089, 1109 step 1n) twice on the same build,
+     * the project's moves: the same receipt but for when each ran */
+    if (tm) {
+        char moves_path[600], world[700], r1[700], r2[700], diff[300];
+        snprintf(moves_path, sizeof moves_path, "%s", __FILE__);
+        char *slash = strrchr(moves_path, '/');
+        size_t at = slash ? (size_t)(slash + 1 - moves_path) : 0;
+        snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
+        snprintf(world, sizeof world, "%s/world", build);
+        snprintf(r1, sizeof r1, "%s/headless-1", root);
+        snprintf(r2, sizeof r2, "%s/headless-2", root);
+        HeadlessMoves *hm = NULL;
+        e = headless_moves_read(moves_path, &hm, &why);
+        HeadlessResult res[2];
+        memset(res, 0, sizeof res);
+        int ran = 0;
+        for (int k = 0; !e && k < 2; ++k) {
+            Goodbye *g = NULL;
+            e = goodbye_begin(k ? r2 : r1, build, &g, &why);
+            HeadlessIn hin = { .start = in, .moves = hm, .world_dir = world };
+            hin.start.log = lf;
+            if (!e) e = headless_run(&hin, g, &res[k], &why);
+            goodbye_free(g);
+            ran += !e;
+        }
+        headless_moves_free(hm);
+        const HeadlessResult *h = &res[0];
+        snprintf(line, sizeof line, "headless on %s: %d steps, %s for her, %d creatures' %d looks (%d WC3, %d game, %d stand-in, %d missing), %.1f yards to (%.2f, %.2f, %.2f), %d tiles, %d in the air, %d swimming, %d with no ground",
+                 m.directory, h->steps, h->her_stand_in ? "the stand-in" : "her character", h->creature_spawns, h->creature_looks, h->looks_wc3, h->looks_game,
+                 h->looks_stand_in, h->looks_missing, h->distance, h->end_x, h->end_y, h->end_z, h->tiles, h->steps_airborne, h->steps_swimming, h->steps_no_ground);
+        check(ran == 2 && h->steps == 480 && h->moves == 14 && h->her_stand_in == 1 && h->her_bones == 1 && h->distance > 20 && h->steps_no_ground == 0
+              && h->looks_missing == 0 && h->looks_unreadable == 0 && h->tiles >= 1 && h->ground_files >= 1, e ? why.text : line);
+        int same = ran == 2 && t_receipts_same(r1, r2, diff, sizeof diff);
+        snprintf(line, sizeof line, "run twice (1109 step 5): the two receipts' counts are %s (all but started, ended and seconds)", diff);
+        check(same && res[0].end_x == res[1].end_x && res[0].end_y == res[1].end_y && res[0].end_z == res[1].end_z && res[0].distance == res[1].distance, line);
+        /* and the comparison sees a difference: one move changed (a second
+         * less of the first run) gives another receipt */
+        {
+            char r3[700];
+            snprintf(r3, sizeof r3, "%s/headless-3", root);
+            const char *other = "return { format = 1, moves = { { hold = \"\", seconds = 1 }, { hold = \"forward\", seconds = 3 } } }";
+            HeadlessMoves *om = NULL;
+            Goodbye *g = NULL;
+            WErr oe = headless_moves_parse(other, strlen(other), "made", &om, &why);
+            if (!oe) oe = goodbye_begin(r3, build, &g, &why);
+            HeadlessIn hin = { .start = in, .moves = om, .world_dir = world };
+            hin.start.log = lf;
+            if (!oe) oe = headless_run(&hin, g, NULL, &why);
+            goodbye_free(g);
+            headless_moves_free(om);
+            check(!oe && !t_receipts_same(r1, r3, diff, sizeof diff) && strstr(diff, "moves"), oe ? why.text : "other moves: another receipt (the comparison finds the difference)");
+        }
+        LuaData *rd = NULL;
+        WErr re = ran ? lua_data_read(r1, 65536, &rd, &why) : W_ERR_NOT_FOUND;
+        const LuaValue *rt = re ? NULL : lua_data_top(rd);
+        check(!re && !strcmp(lua_value_text(lua_value_field(rt, "reason")), "closed") && lua_value_number(lua_value_field(rt, "frames")) == 0
+              && lua_value_number(lua_value_field(rt, "steps")) == 480 && lua_value_number(lua_value_field(rt, "end_x")) == h->end_x
+              && !strcmp(lua_value_text(lua_value_field(rt, "map")), build),
+              re ? why.text : "its receipt: closed, no frames drawn, the steps and where she ended, exactly as found");
+        if (rd) lua_data_free(rd);
+        /* a start that fails: the receipt says error and why (an ordinary run with no install) */
+        Goodbye *g = NULL;
+        snprintf(r2, sizeof r2, "%s/headless-failed", root);
+        WErr ge = goodbye_begin(r2, build, &g, &why);
+        e = headless_moves_read(moves_path, &hm, &why);
+        HeadlessIn bad = { .start = in, .moves = hm, .world_dir = world };
+        bad.start.test_map = NULL; bad.start.conv = NULL; bad.start.log = lf;
+        WErr be = ge || e ? W_OK : headless_run(&bad, g, NULL, &why);
+        goodbye_free(g);
+        headless_moves_free(hm);
+        rd = NULL;
+        re = be ? lua_data_read(r2, 65536, &rd, &why) : W_ERR_NOT_FOUND;
+        rt = re ? NULL : lua_data_top(rd);
+        check(be && !re && !strcmp(lua_value_text(lua_value_field(rt, "reason")), "error") && strstr(lua_value_text(lua_value_field(rt, "why")), "/nowhere/Data")
+              && !lua_value_field(rt, "steps"), "a headless start that fails: the receipt says error, naming what stopped it, with no counts");
+        if (rd) lua_data_free(rd);
+    }
+    /* }}} */
     /* with no install and no baseline set: the start opens on the map's own files, and the light is what stops */
     if (tm) {
         settings_set(st, "assetBaseline", "", &why);

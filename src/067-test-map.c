@@ -2,7 +2,7 @@
  * 067-test-map.c (issue 1109) - see 067-test-map.h
  *
  * For a general audience: one pass over the arguments reads the test
- * map's five options and checks the client's own against their list,
+ * map's six options and checks the client's own against their list,
  * keeping the first thing wrong; the pass goes on after it, so that a
  * receipt named later on the line can still be written to say what was
  * wrong. Then the run is decided: a test-map run or not, and good or not.
@@ -24,11 +24,12 @@ struct TestMap {
     int    port;
     char   account[64];               /* --account; "" when none */
     char   password[256];             /* W_CLIENT_PASSWORD's value; wiped when freed */
+    char   headless[600];             /* --headless's moves file; "" for a run with a window */
 };
 
 /* the test map's own options, each taking one value */
-enum { OPT_TEST_MAP, OPT_RECEIPT, OPT_CAMERA, OPT_REALM, OPT_ACCOUNT, OPT_COUNT };
-static const char *const OWN[OPT_COUNT] = { "--test-map", "--receipt", "--camera", "--realm", "--account" };
+enum { OPT_TEST_MAP, OPT_RECEIPT, OPT_CAMERA, OPT_REALM, OPT_ACCOUNT, OPT_HEADLESS, OPT_COUNT };
+static const char *const OWN[OPT_COUNT] = { "--test-map", "--receipt", "--camera", "--realm", "--account", "--headless" };
 /* }}} */
 
 /* {{{ static the values' readers: each fills why and returns its code on
@@ -113,6 +114,7 @@ WErr test_map_parse(int argc, char *const *argv, const ClientOption *others, con
             case OPT_CAMERA:   rc = read_camera(tm, v, &w); break;
             case OPT_REALM:    rc = read_realm(tm, v, &w); break;
             case OPT_ACCOUNT:  rc = read_account(tm, v, &w); break;
+            case OPT_HEADLESS: rc = read_path(tm->headless, sizeof tm->headless, a, v, &w); break;
             }
             if (rc && !wrong.code) wrong = w;
             continue;
@@ -175,6 +177,7 @@ const char *test_map_receipt(const TestMap *tm)    { return tm->receipt; }
 const char *test_map_realm_host(const TestMap *tm) { return tm->host; }
 int         test_map_realm_port(const TestMap *tm) { return tm->port; }
 const char *test_map_account(const TestMap *tm)    { return tm->account; }
+const char *test_map_headless(const TestMap *tm)   { return tm->headless; }
 const char *test_map_password(const TestMap *tm)   { return tm->password; }
 int test_map_camera(const TestMap *tm, double *x, double *y)
 {

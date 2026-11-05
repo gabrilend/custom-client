@@ -40,7 +40,7 @@
 #            on map ID at world X, Y: 0 Eastern Kingdoms, 1 Kalimdor, 530
 #            Outland, 571 Northrend).
 #   --no-read-ahead (with or without --shot) no second thread reading tiles ahead
-#   --test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME]
+#   --test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME] [--headless MOVES]
 #            a map handed in by world-edit-to-execute's editor (its Test Map
 #            button; issue 1109): passed on to the client as they are, the
 #            password in W_CLIENT_PASSWORD. A failure here, before the client
@@ -49,6 +49,10 @@
 #            message says why. The client opens the map the folder's map.lua
 #            names, its creatures from the folder's world/ (no --world is
 #            given then).
+#            --headless MOVES: no window; the start, the figures' lookups and
+#            the moves in MOVES, a Lua data file such as
+#            tests/090-test-map-moves.lua, then the receipt with their counts;
+#            exit 0 when the moves ran, 1 on an error, 2 on a bad option.
 
 # {{{ set_dir
 DIR="/mnt/kaun/custom-client"

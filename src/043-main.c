@@ -93,6 +93,7 @@
 #include "081-wc3-water.h"
 #include "084-map-fog.h"
 #include "087-world-start.h"
+#include "089-headless-run.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -112,14 +113,14 @@
 /* }}} */
 
 /* {{{ settings */
-#define START_O      3.6                               /* facing the town's west side */
-#define SPEED        1.2                               /* 120% of the base speeds (owner, 2026-10-04) */
+#define START_O      WORLD_START_FACING                /* facing the town's west side (087-world-start.h) */
+#define SPEED        WORLD_START_SPEED                 /* 120% of the base speeds (owner, 2026-10-04; 087-world-start.h) */
 #define ELF_HEIGHT   2.3f                              /* yards: the camera looks at her shoulders */
 #define EYE_SHARE    0.92f                             /* first person: her eyes, as a share of her height (this client's guess) */
 #define ZOOM_BASE    20.0f                             /* yards; times cameraDistanceMaxFactor (1 to 2) is the zoom-out limit (173b4) */
 /* her look: ChrRaces id, sex, and the character-creation choices (from 0);
  * a stand-in for the ids the server will send (173d, 617r5) */
-#define HER_CLASS 3                                       /* she wears a fresh hunter's outfit (CharStartOutfit; 3 hunter, 11 druid ...); --wear changes single slots over it */
+#define HER_CLASS WORLD_HER_CLASS                                       /* she wears a fresh hunter's outfit (CharStartOutfit; 3 hunter, 11 druid ...); --wear changes single slots over it */
 
 /* }}} */
 
@@ -453,7 +454,7 @@ int main(int argc, char **argv)
     App *app = calloc(1, sizeof *app);
     app->map_id = 1;                                     /* Kalimdor */
     app->start_x = 2717.0; app->start_y = -400.0;        /* Astranaar, Ashenvale */
-    app->LOOK = (CharacterLook){ 4, 1, 0, 0, 0, 0, { 0 }, 0, 0 };
+    app->LOOK = (CharacterLook){ WORLD_HER_RACE, WORLD_HER_SEX, 0, 0, 0, 0, { 0 }, 0, 0 };
     app->view = (FollowCam){ .yaw = (float)START_O, .pitch = 0.35f, .dist = 12.0f, .rest_pitch = 0.35f };
     app->read_ahead = 1;
     const char *maps = NULL, *client = NULL, *shot = NULL, *settings_file = NULL, *assets_dir = NULL;
@@ -520,7 +521,7 @@ int main(int argc, char **argv)
     }
     if (!maps || !client) {
         fprintf(stderr, "usage: custom-client --maps DIR --client DIR [--settings FILE] [--world DIR] [--assets DIR] [--shot FILE] [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]\n"
-                        "       [--test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME]]   (the password from W_CLIENT_PASSWORD)\n");
+                        "       [--test-map FOLDER --receipt FILE [--camera X,Y] [--realm HOST:PORT] [--account NAME] [--headless MOVES]]   (the password from W_CLIENT_PASSWORD)\n");
         return start_failed(app, 2, "the client needs --maps (the server's map files) and --client (the game's Data folder); scripts/run gives both");
     }
     /* {{{ a test map's own map (1109, open question 4): map.lua in its
@@ -560,6 +561,22 @@ int main(int argc, char **argv)
      * steepest walkable ground. A failure stops the start by name. */
     WorldStartIn wsi = { .client = client, .maps = maps, .assets_dir = assets_dir, .settings = app->settings, .test_map = app->test_map,
                          .conv = &app->conv, .map_id = app->map_id, .start_x = app->start_x, .start_y = app->start_y, .log = stdout };
+    /* a headless test-map run (1109 step 1n, 089-headless-run.h): the
+     * start, the figures' lookups and the scripted moves, no window; its
+     * receipt carries their counts, and the client ends here */
+    if (app->test_map && test_map_headless(app->test_map)[0]) {
+        if (shot) return start_failed(app, 2, "--shot draws a picture, and --headless opens no window: give one or the other");
+        HeadlessMoves *moves;
+        if (headless_moves_read(test_map_headless(app->test_map), &moves, &why)) return start_failed(app, 2, "--headless: %s", why.text);
+        HeadlessIn hin = { .start = wsi, .moves = moves, .world_dir = app->world_dir };
+        WErr ran = headless_run(&hin, app->bye, NULL, &why);
+        headless_moves_free(moves);
+        if (ran) fprintf(stderr, "%s\n", why.text);
+        goodbye_free(app->bye);
+        test_map_free(app->test_map);
+        free(app);
+        return ran == W_OK ? 0 : 1;
+    }
     if (world_start_open(&wsi, &app->ws, &why)) return start_failed(app, 1, "%s", why.text);
     float gx, gy;
     float z = app->ws.z, max_slope = app->ws.max_slope;

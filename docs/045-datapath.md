@@ -92,6 +92,7 @@ stand-in figure stands in her place.
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |
 | `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
 | `087-world-start.c` | the archives (none in a test map), the resolver, the tables, the map's `Map` row, the server's or the map's own heights, the navigation tiles | the start before the window: the map's folder, her height at the start and the steepest walkable slope |
+| `089-headless-run.c` | a test map's start (087), her figure and the creatures' looks (025, 088), a moves file (Lua data, `tests/090-test-map-moves.lua`) | with `--headless`, no window: her path over the map's ground and water step by step, and the counts in the goodbye receipt (068) |
 | `088-figure-model.c` | a creature's display row (`CreatureDisplayInfo`, `CreatureModelData`, through the tables) and the resolver | which files a figure is made from: the map's own WC3 model, the game's `.m2` and view, a character look, or the baseline set's stand-in figure |
 | `084-map-fog.c` | a converted map's `war3map.w3i` (read by `083-w3i.c`, through the resolver) | in a test-map run, the map's own fog (its distances in yards, its colour) put in place of the zone's in that light each frame, out of the water |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
