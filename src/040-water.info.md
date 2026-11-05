@@ -11,7 +11,11 @@ pictures (lake_a.1.blp, lake_a.2.blp ...) shown one after another so
 the surface ripples. Water and the sea are tinted by the zone's water
 colours (026-light.h: river and ocean, near and deep, by time of day) and
 drawn see-through over the ground, after the solid world; lava and
-slime are drawn as their pictures, unlit and solid.
+slime are drawn as their pictures, unlit and solid. A converted map's
+water, when the player has Warcraft III (081), is drawn as WC3 draws
+it: WC3's own run of pictures, each point coloured by its depth and
+standing at WC3's own surface (082 works the points out and holds the
+shader's text; issue 1109's water plan).
 
 ## What it offers
 
@@ -21,6 +25,11 @@ slime are drawn as their pictures, unlit and solid.
   or the shader can't be had. Freed with water_free.
 - `Water *water_new(MpqChain *chain, const Textures *textures, WWhy *why);`
 - `void water_free(Water *w);`
+- `void water_use_wc3(Water *w, const Wc3Water *wc3);`
+  Draws water and sea layers added from now on as `wc3`'s (a converted
+  map's WC3 water; it must outlive the drawer), its frames sent to the
+  card now; NULL goes back to the game's own water. Layers already added
+  stay as they were (043 calls it before the first tile).
 - `void water_add_tile(Water *w, const AdtTile *t, int tile, double ox, double oy);`
   Adds a tile's water (tile = tx * 64 + ty), placed relative to the
   drawing origin; drops it again (173s).

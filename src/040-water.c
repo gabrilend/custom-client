@@ -2,7 +2,10 @@
  * 040-water.c (issue 173r) - drawing the water; see 040-water.h
  *
  * For a general audience: one mesh per water layer, one run of ripple
- * pictures per kind of water, and a shader that tints and fogs them.
+ * pictures per kind of water, and a shader that tints and fogs them; a
+ * converted map's water, when the player has Warcraft III, with WC3's
+ * own run of pictures and each point's colour (082 works the points
+ * out, and holds the shader's text).
  */
 #include "040-water.h"
 #include "013-errors.h"
@@ -11,6 +14,7 @@
 #include "032-sight.h"
 #include "037-sky.h"
 #include "036-texture.h"
+#include "082-water-prep.h"
 
 #include "raymath.h"
 #include "rlgl.h"
@@ -19,43 +23,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* {{{ the shader
- * The ripple picture, tinted by the zone's water colours (water and sea),
- * lit a little by the sun, fogged, see-through. Each point carries its
- * depth as a share (the file's depth byte over 255, in the second picture
- * position's x): the tint goes from the near colour to the deep one, and
- * the opacity from the shallow to the deep (the light's water_alpha), by
- * that share. The straight 0-255 reading is this client's guess at the
- * original's curve (check list). Lava and slime (`raw`): the picture
- * alone, solid. */
-static const char *VS =
-    "#version 330\n"
-    "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec2 vertexTexCoord2;\n"
-    "uniform mat4 mvp; uniform vec3 eye;\n"
-    "out vec2 uv; out float dist; out float depth;\n"
-    "void main() { uv = vertexTexCoord; depth = vertexTexCoord2.x; dist = length(vertexPosition - eye); gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
-static const char *FS =
-    "#version 330\n"
-    "in vec2 uv; in float dist; in float depth; out vec4 frag;\n"
-    "uniform sampler2D texture0; uniform vec3 tint_near, tint_deep; uniform vec2 opacity; uniform float raw;\n"
-    "uniform vec3 sun_dir, sun_col, shade_col, fog_col; uniform vec2 fog_range;\n"
-    "void main() {\n"
-    "  vec3 t = texture(texture0, uv).rgb;\n"
-    "  vec3 tint = mix(tint_near, tint_deep, depth);\n"
-    "  vec3 c = mix(t * 0.6 + tint * 0.6, t, raw);\n"
-    "  c *= mix(shade_col + sun_col * max(sun_dir.z, 0.0), vec3(1.0), raw);\n"
-    "  float fog = clamp((dist - fog_range.x) / max(fog_range.y - fog_range.x, 1.0), 0.0, 1.0);\n"
-    "  frag = vec4(mix(c, fog_col, fog), mix(mix(opacity.x, opacity.y, depth), 1.0, raw));\n"
-    "}\n";
-/* }}} */
+/* (the shader's text is 082-water-prep.c's WATER_VS and WATER_FS) */
 
 /* {{{ a water drawer (the handle: 040-water.h)
  * kinds: per LiquidType id met so far, its run of pictures and its type
  * (0 water, 1 ocean, 2 magma, 3 slime). layers: one mesh per water layer
- * with the kind it uses; centre, radius: its bounding ball (173u). */
+ * with the kind it uses (and whether it is drawn as WC3's water); centre,
+ * radius: its bounding ball (173u). wc3: a converted map's WC3 water
+ * (081), with its frames on the card. */
 #define MAX_FRAMES 32
 typedef struct { int id, type; Texture2D frames[MAX_FRAMES]; int nframes; } Kind;
-typedef struct { Mesh mesh; int kind, tile; Vector3 centre; float radius; } Layer;
+typedef struct { Mesh mesh; int kind, tile, wc3; Vector3 centre; float radius; } Layer;
 struct Water {
     Kind      kinds[64];  int nkinds;
     Layer    *layers;     int nlayers, layers_cap;
@@ -64,7 +42,10 @@ struct Water {
     Dbc       table;      unsigned char *table_bytes;
     Shader    shader;
     Material  material;
-    int       loc_eye, loc_near, loc_deep, loc_opacity, loc_raw;
+    int       loc_eye, loc_near, loc_deep, loc_opacity, loc_raw, loc_wc3;
+    const Wc3Water *wc3;
+    Texture2D wc3_frames[WC3_WATER_FRAMES_MAX];
+    int       nwc3_frames;
 };
 /* }}} */
 
@@ -73,6 +54,7 @@ void water_free(Water *w)
 {
     for (int i = 0; i < w->nlayers; ++i) UnloadMesh(w->layers[i].mesh);
     for (int i = 0; i < w->nkinds; ++i) for (int f = 0; f < w->kinds[i].nframes; ++f) UnloadTexture(w->kinds[i].frames[f]);
+    for (int f = 0; f < w->nwc3_frames; ++f) UnloadTexture(w->wc3_frames[f]);
     free(w->layers);
     free(w->table_bytes);
     if (IsShaderReady(w->shader)) UnloadShader(w->shader);
@@ -89,16 +71,41 @@ Water *water_new(MpqChain *c, const Textures *textures, WWhy *why)
     if (!w->table_bytes) { w_fail(why, W_ERR_NOT_FOUND, "LiquidType.dbc is in none of the client's archives"); water_free(w); return NULL; }
     WWhy inner;
     if (dbc_open(&w->table, w->table_bytes, len, &inner)) { w_fail(why, inner.code, "LiquidType.dbc: %s", inner.text); water_free(w); return NULL; }
-    w->shader = LoadShaderFromMemory(VS, FS);
+    w->shader = LoadShaderFromMemory(WATER_VS, WATER_FS);
     if (!IsShaderReady(w->shader)) { w_fail(why, W_ERR_GPU, "the water shader didn't compile (see Raylib's messages above)"); water_free(w); return NULL; }
     w->loc_eye = GetShaderLocation(w->shader, "eye");
     w->loc_near = GetShaderLocation(w->shader, "tint_near");
     w->loc_deep = GetShaderLocation(w->shader, "tint_deep");
     w->loc_opacity = GetShaderLocation(w->shader, "opacity");
     w->loc_raw = GetShaderLocation(w->shader, "raw");
+    w->loc_wc3 = GetShaderLocation(w->shader, "wc3");
     w->material = LoadMaterialDefault();
     w->material.shader = w->shader;
     return w;
+}
+/* }}} */
+
+/* {{{ static to_card: a picture (RGBA, rows from the top) as a repeating texture */
+static Texture2D to_card(const Water *w, unsigned char *rgba, int width, int height)
+{
+    Image im = { .data = rgba, .width = width, .height = height, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    Texture2D t = LoadTextureFromImage(im);
+    GenTextureMipmaps(&t);
+    SetTextureWrap(t, TEXTURE_WRAP_REPEAT);
+    texture_filter(w->textures, t.id, 0x0DE1, t.mipmaps);   /* a 2D picture, as Texture Filtering says (173b6) */
+    return t;
+}
+/* }}} */
+
+/* {{{ water_use_wc3 */
+void water_use_wc3(Water *w, const Wc3Water *wc3)
+{
+    for (int f = 0; f < w->nwc3_frames; ++f) UnloadTexture(w->wc3_frames[f]);
+    w->nwc3_frames = 0;
+    w->wc3 = wc3;
+    if (!wc3) return;
+    for (const Wc3WaterFrame *fr; (fr = wc3_water_frame(wc3, w->nwc3_frames)); ++w->nwc3_frames)
+        w->wc3_frames[w->nwc3_frames] = to_card(w, fr->rgba, fr->width, fr->height);
 }
 /* }}} */
 
@@ -129,13 +136,8 @@ static int kind_of(Water *w, int id)
         int bad = blp_decode(s, len, &img, &why);
         free(s);
         if (bad) { fprintf(stderr, "water: %s: %s\n", name, why.text); break; }
-        Image im = { .data = img.rgba, .width = img.width, .height = img.height, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-        k->frames[k->nframes] = LoadTextureFromImage(im);
+        k->frames[k->nframes++] = to_card(w, img.rgba, img.width, img.height);
         blp_free(&img);
-        GenTextureMipmaps(&k->frames[k->nframes]);
-        SetTextureWrap(k->frames[k->nframes], TEXTURE_WRAP_REPEAT);
-        texture_filter(w->textures, k->frames[k->nframes].id, 0x0DE1, k->frames[k->nframes].mipmaps);   /* a 2D picture, as Texture Filtering says (173b6) */
-        ++k->nframes;
     }
     return w->nkinds++;
 }
@@ -153,47 +155,34 @@ static void bounds(const Mesh *m, Vector3 *centre, float *radius)
 /* }}} */
 
 /* {{{ water_add_tile
- * Each wet cell: two triangles over its four corners; the picture
- * repeats once a cell (4.2 yards), placed by world position so
- * neighbouring layers meet seamlessly. */
+ * Each layer's points from 082 (two triangles a wet cell); a water or sea
+ * layer drawn as WC3's water when the map has it (water_use_wc3). */
 void water_add_tile(Water *w, const AdtTile *t, int tile, double ox, double oy)
 {
-    const float step = ADT_CHUNK_SIZE / 8;
     for (int i = 0; i < t->nliquids; ++i) {
-        const AdtLiquid *q = &t->liquids[i];
-        const AdtChunk *c = &t->chunks[q->chunk];
-        int cells = 0;
-        for (int r = 0; r < 8; ++r) for (int col = 0; col < 8; ++col) cells += q->wet[r][col];
-        if (!cells) continue;
+        int kind = kind_of(w, t->liquids[i].kind);
+        int wc3 = w->wc3 && w->nwc3_frames && kind >= 0 && w->kinds[kind].type <= 1;
+        WaterVerts pv;
+        WWhy why;
+        if (water_prep_layer(t, i, ox, oy, wc3 ? w->wc3 : NULL, &pv, &why)) { fprintf(stderr, "water: %s\n", why.text); continue; }
+        if (!pv.count) { water_verts_free(&pv); continue; }
         Mesh m = { 0 };
-        m.vertexCount = cells * 6;
-        m.triangleCount = cells * 2;
+        m.vertexCount = pv.count;
+        m.triangleCount = pv.count / 3;
         m.vertices = MemAlloc(sizeof(float) * 3 * m.vertexCount);
         m.texcoords = MemAlloc(sizeof(float) * 2 * m.vertexCount);
         m.texcoords2 = MemAlloc(sizeof(float) * 2 * m.vertexCount);
-        int v = 0;
-        for (int r = 0; r < 8; ++r)
-            for (int col = 0; col < 8; ++col) {
-                if (!q->wet[r][col]) continue;
-                static const int CORNER[6][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 1, 0 } };
-                for (int k = 0; k < 6; ++k) {
-                    int rr = r + CORNER[k][0], cc = col + CORNER[k][1];
-                    double wx = c->x - rr * step, wy = c->y - cc * step;
-                    m.vertices[v * 3] = (float)(wx - ox);
-                    m.vertices[v * 3 + 1] = (float)(wy - oy);
-                    m.vertices[v * 3 + 2] = q->height[rr][cc];
-                    m.texcoords[v * 2] = (float)(wy / step);
-                    m.texcoords[v * 2 + 1] = (float)(wx / step);
-                    m.texcoords2[v * 2] = q->depth[rr][cc] / 255.0f;
-                    m.texcoords2[v * 2 + 1] = 0;
-                    ++v;
-                }
-            }
+        memcpy(m.vertices, pv.vertices, sizeof(float) * 3 * m.vertexCount);
+        memcpy(m.texcoords, pv.texcoords, sizeof(float) * 2 * m.vertexCount);
+        memcpy(m.texcoords2, pv.texcoords2, sizeof(float) * 2 * m.vertexCount);
+        if (pv.colors) { m.colors = MemAlloc(4 * m.vertexCount); memcpy(m.colors, pv.colors, 4 * (size_t)m.vertexCount); }
+        water_verts_free(&pv);
         UploadMesh(&m, false);
         if (w->nlayers == w->layers_cap) { w->layers_cap = w->layers_cap ? w->layers_cap * 2 : 128; w->layers = realloc(w->layers, sizeof *w->layers * w->layers_cap); }
         w->layers[w->nlayers].mesh = m;
-        w->layers[w->nlayers].kind = kind_of(w, q->kind);
+        w->layers[w->nlayers].kind = kind;
         w->layers[w->nlayers].tile = tile;
+        w->layers[w->nlayers].wc3 = wc3;
         bounds(&m, &w->layers[w->nlayers].centre, &w->layers[w->nlayers].radius);
         ++w->nlayers;
     }
@@ -231,6 +220,7 @@ void water_add_pool(Water *w, int tile, const float at[16], const WmoPool *p, in
     w->layers[w->nlayers].mesh = m;
     w->layers[w->nlayers].kind = kind_of(w, kind);
     w->layers[w->nlayers].tile = tile;
+    w->layers[w->nlayers].wc3 = 0;                    /* a building's pool: the game's own water */
     bounds(&m, &w->layers[w->nlayers].centre, &w->layers[w->nlayers].radius);
     ++w->nlayers;
 }
@@ -249,7 +239,8 @@ void water_drop_tile(Water *w, int tile)
 /* }}} */
 
 /* {{{ water_draw
- * Ripples at 15 pictures a second. Drawn with depth testing but without
+ * Ripples at 15 pictures a second (WC3's water: its own rate, 081).
+ * Drawn with depth testing but without
  * depth writing, see-through, after everything solid. */
 void water_draw(Water *w, Vector3 eye, const LightNow *light, double seconds)
 {
@@ -262,14 +253,16 @@ void water_draw(Water *w, Vector3 eye, const LightNow *light, double seconds)
     for (int i = 0; i < w->nlayers; ++i) {
         if (w->layers[i].kind < 0 || !sight_ball(&sight, w->layers[i].centre, w->layers[i].radius)) continue;   /* out of sight: not sent */
         Kind *k = &w->kinds[w->layers[i].kind];
-        float raw = k->type >= 2 ? 1.0f : 0.0f;
+        float raw = k->type >= 2 ? 1.0f : 0.0f, wc3 = w->layers[i].wc3 ? 1.0f : 0.0f;
+        SetShaderValue(w->shader, w->loc_wc3, &wc3, SHADER_UNIFORM_FLOAT);
         int sea = k->type == 1;                         /* the sea's colours and opacity, or a river's */
         float opacity[2] = { light->water_alpha[sea ? 0 : 2], light->water_alpha[sea ? 1 : 3] };
         SetShaderValue(w->shader, w->loc_near, light->water[sea ? 0 : 2], SHADER_UNIFORM_VEC3);
         SetShaderValue(w->shader, w->loc_deep, light->water[sea ? 1 : 3], SHADER_UNIFORM_VEC3);
         SetShaderValue(w->shader, w->loc_opacity, opacity, SHADER_UNIFORM_VEC2);
         SetShaderValue(w->shader, w->loc_raw, &raw, SHADER_UNIFORM_FLOAT);
-        if (k->nframes) w->material.maps[MATERIAL_MAP_DIFFUSE].texture = k->frames[(int)(seconds * 15.0) % k->nframes];
+        if (w->layers[i].wc3) w->material.maps[MATERIAL_MAP_DIFFUSE].texture = w->wc3_frames[wc3_water_frame_at(w->wc3, seconds)];
+        else if (k->nframes) w->material.maps[MATERIAL_MAP_DIFFUSE].texture = k->frames[(int)(seconds * 15.0) % k->nframes];
         DrawMesh(w->layers[i].mesh, w->material, MatrixIdentity());
     }
     EndBlendMode();

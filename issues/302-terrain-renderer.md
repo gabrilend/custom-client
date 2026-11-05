@@ -78,9 +78,11 @@ them: the ground's heights round its cell ride in its model's name and
 076 raises each point by them when it reads the model, so a bent cliff
 is a model of its own and a flat one still shared (decisions 64-65; a
 shader reading the ground was passed over: 042 draws one mesh for
-every copy). WC3's own water is read (`src/081-wc3-water.c`: its
-frames and its colour by depth) but not drawn yet: 1109's decision 67
-is the plan.
+every copy). Since step 1i a converted map's water is drawn as WC3's
+(`src/081-wc3-water.c` reads its frames and colour by depth, tinted by
+the map's `war3map.w3i`, `src/083-w3i.c`; `src/082-water-prep.c` lays
+each point at WC3's own surface and holds the water's shader; 040 draws
+them): 1109's decisions 70-75.
 
 ## Intended behavior
 
