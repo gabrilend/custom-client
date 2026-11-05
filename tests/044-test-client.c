@@ -48,6 +48,7 @@
 #include "../src/074-tables.h"
 #include "../src/075-adt-heights.h"
 #include "../src/076-placed-models.h"
+#include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -62,6 +63,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #undef W_OK                              /* <unistd.h>'s access() mode (2) would hide 013-errors.h's W_OK (0): every == W_OK below would test for 2 */
+#include <time.h>
 
 static int checks, fails;
 
@@ -328,6 +330,286 @@ static void made_mdx(Bytes *o)
     c = open_chunk(o, "PIVT");
     for (int i = 0; i < 9; ++i) putf(o, (float)i);
     close_chunk(o, c);
+}
+/* }}} */
+
+/* {{{ 302a: WC3's ground, written here and read back (no game data needed).
+ * The writer's pieces: the head, then one 7-byte tile point at a time
+ * (063-w3e.h has the layout). */
+typedef struct { unsigned char *b; size_t n, cap; } W3eOut;
+static void wo_raw(W3eOut *o, const void *p, size_t n)
+{
+    if (o->n + n > o->cap) {
+        size_t cap = (o->n + n) * 2;
+        unsigned char *b = realloc(o->b, cap);
+        if (!b) { fprintf(stderr, "no memory for a WC3 ground file\n"); exit(1); }
+        o->b = b; o->cap = cap;
+    }
+    memcpy(o->b + o->n, p, n);
+    o->n += n;
+}
+static void wo32(W3eOut *o, uint32_t v) { unsigned char b[4] = { (unsigned char)v, (unsigned char)(v >> 8), (unsigned char)(v >> 16), (unsigned char)(v >> 24) }; wo_raw(o, b, 4); }
+static void wo16(W3eOut *o, uint16_t v) { unsigned char b[2] = { (unsigned char)v, (unsigned char)(v >> 8) }; wo_raw(o, b, 2); }
+static void wo8(W3eOut *o, unsigned v) { unsigned char b = (unsigned char)v; wo_raw(o, &b, 1); }
+static void wof(W3eOut *o, float f) { uint32_t v; memcpy(&v, &f, 4); wo32(o, v); }
+/* ground and cliff: the tileset ids run together ("LdrtLgrs") */
+static void w3e_head(W3eOut *o, int version, char code, const char *ground, const char *cliff, int w, int h, float ox, float oy)
+{
+    o->n = 0;
+    wo_raw(o, "W3E!", 4); wo32(o, (uint32_t)version); wo8(o, (unsigned char)code); wo32(o, 1);
+    wo32(o, (uint32_t)(strlen(ground) / 4)); wo_raw(o, ground, strlen(ground));
+    wo32(o, (uint32_t)(strlen(cliff) / 4)); wo_raw(o, cliff, strlen(cliff));
+    wo32(o, (uint32_t)w); wo32(o, (uint32_t)h); wof(o, ox); wof(o, oy);
+}
+/* marks: byte 4's high bits (0x10 ramp, 0x20 blight, 0x40 water, 0x80 boundary) */
+static void w3e_pt(W3eOut *o, int raw_h, unsigned water_word, int tex, int marks, int details, int cvar, int layer, int ctex)
+{
+    wo16(o, (uint16_t)raw_h); wo16(o, (uint16_t)water_word);
+    wo8(o, (unsigned)(tex | marks)); wo8(o, (unsigned)(details | cvar << 5)); wo8(o, (unsigned)(layer | ctex << 4));
+}
+
+/* The first ground, 5 x 4 tile points (rows from the south), three ground
+ * tilesets (0 and 2 extended), one cliff tileset. Its cells, worked out
+ * by hand from 063-w3e.h's rules:
+ *   (0,0) bare: its south-west corner is blighted
+ *   (3,1) bare: point (4,2) is a cliff level up and no corner is a ramp
+ *   (2,2) and (3,2) textured although on two levels: point (3,3) is a ramp
+ * Point (1,1) has water over it; (2,1) has the mark but the water is
+ * below its ground; (0,3), (4,3) and (2,3) carry the boundary marks. */
+static const int W3E_A_TEX[4][5] = { { 0, 0, 1, 1, 2 }, { 0, 1, 1, 2, 2 }, { 0, 0, 0, 2, 2 }, { 1, 1, 0, 0, 0 } };
+static const int W3E_A_DETAILS[4][5] = { { 0, 5, 7, 0, 9 }, { 3, 0, 20, 1, 2 }, { 16, 4, 6, 11, 3 }, { 0, 0, 0, 0, 0 } };
+static void w3e_fixture_a(W3eOut *o, int version)
+{
+    w3e_head(o, version, 'L', "LdrtLgrsLrok", "CLdi", 5, 4, -256.0f, -192.0f);
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 5; ++x) {
+            int raw = 8192 + 4 * (x * 10 + y * 3), marks = 0, layer = 2, ctex = 15, cvar = 0;
+            unsigned water = 8192;                                  /* level 0 */
+            if (x == 4 && y == 0) raw = -100;                        /* a height stored below 0 */
+            if (x == 0 && y == 0) marks |= 0x20;
+            if (x == 1 && y == 1) { marks |= 0x40; water = 8192 + 4 * 200; }
+            if (x == 2 && y == 1) { marks |= 0x40; water = 8192 + 4 * 10; }
+            if (x == 0 && y == 3) marks |= 0x80;
+            if (x == 4 && y == 3) water |= 0x4000;
+            if (x == 2 && y == 3) water |= 0xC000;
+            if ((x == 3 && y == 3) || (x == 4 && y == 3) || (x == 4 && y == 2)) layer = 3;
+            if (x == 3 && y == 3) marks |= 0x10;
+            if (x == 4 && y == 2) { cvar = 5; ctex = 0; }
+            w3e_pt(o, raw, water, W3E_A_TEX[y][x], marks, W3E_A_DETAILS[y][x], cvar, layer, ctex);
+        }
+}
+/* A ground of every bit at random, width x height, from `seed` (the same
+ * small generator each run): nground tilesets named "T0aa".. */
+static uint32_t w3e_rand(uint32_t *s) { *s = *s * 1664525u + 1013904223u; return *s >> 8; }
+static void w3e_fixture_random(W3eOut *o, int version, int w, int h, int nground, uint32_t seed)
+{
+    char ids[16 * 4 + 1] = "";
+    for (int k = 0; k < nground; ++k) snprintf(ids + 4 * k, 5, "T%xaa", k);
+    w3e_head(o, version, 'Z', ids, "CLdiCLgr", w, h, 1024.5f, -3072.25f);
+    for (int k = 0; k < w * h; ++k) {
+        unsigned char b[7];
+        for (int i = 0; i < 7; ++i) b[i] = (unsigned char)w3e_rand(&seed);
+        b[4] = (unsigned char)((b[4] & 0xF0) | (b[4] & 0x0F) % nground);
+        b[4] &= (unsigned char)~(w3e_rand(&seed) % 4 ? 0x20 : 0);   /* blight on about a quarter */
+        b[6] = (unsigned char)((b[6] & 0xF0) | (2 + w3e_rand(&seed) % 3));   /* levels 2 to 4: cliffs here and there */
+        wo_raw(o, b, 7);
+    }
+}
+/* the preparations of the same ground agree to the byte */
+static int w3e_preps_same(const W3ePrep *a, const W3ePrep *b)
+{
+    size_t np = (size_t)a->width * a->height, nc = (size_t)(a->width - 1) * (a->height - 1);
+    return a->width == b->width && a->height == b->height && a->used == b->used
+        && !memcmp(a->ground_z, b->ground_z, np * sizeof(float)) && !memcmp(a->water_z, b->water_z, np * sizeof(float))
+        && !memcmp(a->wet, b->wet, np) && !memcmp(a->cells, b->cells, nc * 8) && !memcmp(a->cell_kind, b->cell_kind, nc);
+}
+static const uint8_t *w3e_cell(const W3ePrep *p, int i, int j) { return p->cells + ((size_t)j * (p->width - 1) + i) * 8; }
+static int w3e_cell_is(const W3ePrep *p, int i, int j, const int *want, int n)
+{
+    const uint8_t *c = w3e_cell(p, i, j);
+    for (int k = 0; k < 8; ++k) if (c[k] != (k < n * 2 ? want[k] : W3E_NONE)) return 0;
+    return 1;
+}
+static double w3e_seconds(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
+
+static void check_wc3_ground(void)
+{
+    W3eOut o = { 0 };
+    W3eGround *g = NULL;
+    W3ePrep *p = NULL;
+    WWhy why;
+    char line[700];
+
+    printf("WC3's ground (war3map.w3e, issue 302a)\n");
+    for (int version = 11; version <= 12; ++version) {
+        w3e_fixture_a(&o, version);
+        WErr e = w3e_read(o.b, o.n, &g, &why);
+        snprintf(line, sizeof line, "a 5 x 4 ground written here, version %d, is read (%s)", version, e ? why.text : "W_OK");
+        check(!e && g->version == version && g->width == 5 && g->height == 4, line);
+        if (e) return;
+        if (version == 12) break;
+        w3e_free(g);
+    }
+    check(g->tileset_code == 'L' && !strcmp(g->tileset, "lordaeron_summer") && g->custom_tileset == 1,
+          "its main tileset: L, lordaeron_summer; its own tileset list");
+    check(g->nground == 3 && !memcmp(g->ground_ids, "LdrtLgrsLrok", 12) && g->ncliff == 1 && !memcmp(g->cliff_ids, "CLdi", 4),
+          "three ground tilesets and one cliff tileset, by id");
+    check(g->offset_x == -256.0f && g->offset_y == -192.0f, "its south-west corner at (-256, -192)");
+    const W3ePoint *a = w3e_point(g, 1, 2), *low = w3e_point(g, 4, 0), *cl = w3e_point(g, 4, 2);
+    check(a->height_raw == 8192 + 4 * 16 && a->height == 16.0f, "a point's height: (raw - 8192) / 4 = 16");
+    check(low->height_raw == -100 && low->height == -2073.0f, "a height stored below 0 (-100) reads as -2073");
+    check(cl->layer_height == 3 && cl->cliff_texture == 0 && cl->cliff_variation == 5 && cl->texture_details == 3,
+          "byte 6: the cliff level in the low half, the cliff tileset in the high; byte 5: variation low, cliff variation high");
+    check(a->cliff_texture == 15 && a->layer_height == 2 && a->ground_texture == 0 && w3e_point(g, 4, 1)->ground_texture == 2,
+          "byte 4's low half is the ground tileset; no cliff is 15");
+    check(w3e_point(g, 0, 0)->is_blight && w3e_point(g, 3, 3)->is_ramp && w3e_point(g, 1, 1)->has_water
+          && w3e_point(g, 0, 3)->is_boundary && !w3e_point(g, 1, 0)->is_blight, "byte 4's marks: blight, ramp, water, boundary");
+    check(w3e_point(g, 4, 3)->water_flags == 0x4000 && w3e_point(g, 4, 3)->boundary && w3e_point(g, 2, 3)->water_flags == 0xC000
+          && !w3e_point(g, 1, 2)->boundary && w3e_point(g, 2, 3)->water_raw == 8192,
+          "the water word's top bits are the other boundary mark, its low 14 bits the level");
+    check(w3e_point(g, 5, 0) == NULL && w3e_point(g, 0, -1) == NULL, "outside the grid: no point");
+    check(!memcmp(w3e_texture_name(g, 4, 1), "Lrok", 4) && w3e_texture_name(g, 9, 9) == NULL, "a point's tileset by id");
+    check(w3e_walkable(g, 1, 0) && !w3e_walkable(g, 1, 1) && !w3e_walkable(g, 0, 3) && !w3e_walkable(g, 4, 3) && !w3e_walkable(g, 5, 0),
+          "walkable: not with water, not on either boundary mark, not outside");
+    double wx, wy, tx, ty;
+    w3e_tile_to_world(g, 2, 3, &wx, &wy);
+    w3e_world_to_tile(g, -1.0, -193.0, &tx, &ty);
+    check(wx == 0 && wy == 192 && tx == 1 && ty == -1, "tile point (2, 3) is at (0, 192); (-1, -193) is in the cell of (1, -1)");
+    check(w3e_ground_z(cl) == 46.0 + 128 && w3e_ground_z(a) == 16.0, "ground z: the height and 128 for each cliff level over 2");
+    check(w3e_water_z(w3e_point(g, 1, 1)) == 200 - 89.6 && w3e_is_wet(w3e_point(g, 1, 1)), "water z: the level less 89.6; over the ground, wet");
+    check(!w3e_is_wet(w3e_point(g, 2, 1)) && !w3e_is_wet(a), "water below its ground, or no water mark: not wet");
+    W3eStats st;
+    w3e_stats(g, &st);
+    check(st.total == 20 && st.water == 2 && st.blight == 1 && st.ramp == 1 && st.boundary == 3 && st.layers[2] == 17 && st.layers[3] == 3
+          && st.min_height == -2073 && st.max_height == 49, "counts: 20 points, 2 with water, 1 blighted, 1 ramp, 3 on the boundary, 3 a level up");
+
+    /* the preparation */
+    static const uint8_t EXT[3] = { 1, 0, 1 };
+    WErr e = w3e_prep(g, EXT, 3, &p, &why);
+    check(!e, e ? why.text : "the ground is prepared");
+    if (e) { w3e_free(g); free(o.b); return; }
+    check(p->ground_z[2 * 5 + 4] == 174.0f && p->water_z[1 * 5 + 1] == (float)(200 - 89.6) && p->water_z[0] == (float)-1e30
+          && p->wet[1 * 5 + 1] == 1 && p->wet[1 * 5 + 2] == 0, "its heights in floats, water -1e30 where there's none");
+    check(p->cell_kind[0] == W3E_CELL_BLIGHT && w3e_cell_is(p, 0, 0, NULL, 0), "cell (0, 0), a corner blighted: bare");
+    check(p->cell_kind[1 * 4 + 3] == W3E_CELL_CLIFF && w3e_cell_is(p, 3, 1, NULL, 0), "cell (3, 1), a cliff with no ramp: bare");
+    check(w3e_cell_is(p, 1, 0, (int[]){ 0, 21, 1, 1 + 8 + 4 }, 2),
+          "cell (1, 0): tileset 0 whole (extended, variation 5: subtile 21), then 1 on south-east, north-west, north-east");
+    check(w3e_cell_is(p, 2, 1, (int[]){ 0, 0, 1, 2, 2, 1 + 4 }, 3),
+          "cell (2, 1): three tilesets, lowest first; extended variation 20 is subtile 0; 1 south-west, 2 south-east and north-east");
+    check(w3e_cell_is(p, 3, 0, (int[]){ 1, 15, 2, 13 }, 2), "cell (3, 0): a plain tileset at variation 0 is the whole tile, 15");
+    check(w3e_cell_is(p, 0, 2, (int[]){ 0, 15, 1, 8 + 4 }, 2), "cell (0, 2): extended variation 16 is the whole tile, 15");
+    check(w3e_cell_is(p, 3, 2, (int[]){ 0, 16 + 11, 2, 2 + 1 }, 2) && w3e_cell_is(p, 2, 2, (int[]){ 0, 16 + 6, 2, 1 }, 2),
+          "cells (2, 2) and (3, 2): on two levels but by a ramp, so textured");
+    check(w3e_cell_is(p, 0, 1, (int[]){ 0, 16 + 3, 1, 1 }, 2) && p->used == 10, "10 of the 12 cells textured");
+    check(w3e_variation(0, 3) == 0 && w3e_variation(1, 15) == 31 && w3e_variation(1, 31) == 0, "subtiles from variations at the edges");
+    W3ePrep *plain = NULL;
+    if (!w3e_prep(g, NULL, 0, &plain, &why)) {
+        check(w3e_cell(plain, 1, 0)[1] == 0 && w3e_cell(plain, 0, 2)[1] == 0 && plain->used == 10, "with no tileset extended: variations 5 and 16 are subtile 0");
+        w3e_prep_free(plain);
+    } else check(0, why.text);
+
+    /* an editor's stroke: one point changed, only its cells redone */
+    W3ePoint *edit = &g->points[1 * 5 + 2];
+    edit->ground_texture = 2; edit->layer_height = 4; edit->height = 99;
+    W3eArea t;
+    e = w3e_prep_area(p, g, 2, 1, 2, 1, &t, &why);
+    W3ePrep *fresh = NULL;
+    if (!e) e = w3e_prep(g, EXT, 3, &fresh, &why);
+    check(!e && t.x0 == 1 && t.y0 == 0 && t.x1 == 2 && t.y1 == 1 && fresh && w3e_preps_same(p, fresh),
+          "after one point is raised a cliff level: its four cells redone, and the same bytes as preparing it all again");
+    snprintf(line, sizeof line, "with %d textured cells now (the cliff left four bare)", p->used);
+    check(p->used == 6 && p->cell_kind[0 * 4 + 1] == W3E_CELL_CLIFF, line);
+    w3e_prep_free(fresh); fresh = NULL;
+    check(w3e_prep_area(p, g, 7, 0, 9, 3, &t, &why) == W_ERR_REFUSED && t.x1 < t.x0, "an area beside the grid: refused, nothing touched");
+    w3e_prep_area(p, g, -5, -5, 0, 0, &t, &why);
+    check(t.x0 == 0 && t.y0 == 0 && t.x1 == 0 && t.y1 == 0, "an area over the corner is cut to the grid: one cell");
+
+    /* the same reader on the random ground: every edit's area against a whole preparation */
+    w3e_fixture_random(&o, 11, 33, 25, 6, 7);
+    W3eGround *r = NULL;
+    e = w3e_read(o.b, o.n, &r, &why);
+    check(!e && r->nground == 6 && r->ncliff == 2 && !strcmp(r->tileset, "sunken_ruins"), e ? why.text : "a 33 x 25 ground of random points is read");
+    if (!e) {
+        check(w3e_prep_area(p, r, 0, 0, 1, 1, NULL, &why) == W_ERR_REFUSED, "a preparation refuses a ground of another size");
+        static const uint8_t EXT6[6] = { 1, 1, 0, 1, 0, 0 };
+        W3ePrep *rp = NULL, *whole = NULL;
+        int same = 0, tries = 200;
+        uint32_t seed = 99;
+        e = w3e_prep(r, EXT6, 6, &rp, &why);
+        for (int k = 0; !e && k < tries; ++k) {
+            int x0 = (int)(w3e_rand(&seed) % 40) - 4, y0 = (int)(w3e_rand(&seed) % 30) - 4;
+            int x1 = x0 + (int)(w3e_rand(&seed) % 6), y1 = y0 + (int)(w3e_rand(&seed) % 6);
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x) {
+                    W3ePoint *q = (W3ePoint *)w3e_point(r, x, y);
+                    if (!q) continue;
+                    q->ground_texture = (uint8_t)(w3e_rand(&seed) % 6); q->layer_height = (uint8_t)(2 + w3e_rand(&seed) % 3);
+                    q->is_ramp = w3e_rand(&seed) % 5 == 0; q->is_blight = w3e_rand(&seed) % 7 == 0;
+                    q->texture_details = (uint8_t)(w3e_rand(&seed) % 32); q->has_water = (uint8_t)(w3e_rand(&seed) % 2);
+                    q->height = (float)(w3e_rand(&seed) % 400) - 200; q->water_level = (float)(w3e_rand(&seed) % 400) - 200;
+                }
+            WErr a2 = w3e_prep_area(rp, r, x0, y0, x1, y1, NULL, &why);
+            if (a2 == W_ERR_REFUSED) { ++same; continue; }        /* the whole area off the grid: nothing to compare */
+            if (a2 || w3e_prep(r, EXT6, 6, &whole, &why)) break;
+            same += w3e_preps_same(rp, whole);
+            w3e_prep_free(whole); whole = NULL;
+        }
+        snprintf(line, sizeof line, "%d of %d random strokes: redoing their area alone gives the bytes of preparing it all again", same, tries);
+        check(!e && same == tries, line);
+        w3e_prep_free(rp);
+        w3e_free(r);
+    }
+
+    /* the time a stroke costs on a large map */
+    w3e_fixture_random(&o, 11, 257, 257, 16, 3);
+    if (!w3e_read(o.b, o.n, &r, &why)) {
+        W3ePrep *big = NULL;
+        double t0 = w3e_seconds();
+        e = w3e_prep(r, NULL, 0, &big, &why);
+        double t1 = w3e_seconds();
+        for (int k = 0; !e && k < 100; ++k) w3e_prep_area(big, r, 100 + k, 100, 104 + k, 104, NULL, &why);
+        double t2 = w3e_seconds();
+        snprintf(line, sizeof line, "a 257 x 257 ground prepared in %.2f ms; a 5 x 5 stroke redone in %.4f ms", (t1 - t0) * 1e3, (t2 - t1) * 1e3 / 100);
+        check(!e && (t2 - t1) / 100 < (t1 - t0), line);
+        w3e_prep_free(big);
+        w3e_free(r);
+    } else check(0, why.text);
+
+    /* files that aren't, each refused with its reason */
+    w3e_fixture_a(&o, 11);
+    size_t whole_len = o.n;
+    static const struct { size_t len; const char *what; } CUT[] = {
+        { 3, "three bytes" }, { 10, "cut in its head" }, { 25, "cut in its tileset ids" }, { 50, "cut before its size" },
+        { 70, "cut in its points" }, { 0, "nothing" },
+    };
+    int refused = 0;
+    for (size_t k = 0; k < sizeof CUT / sizeof CUT[0]; ++k) {
+        size_t n = CUT[k].len ? CUT[k].len : 0;
+        if (k == 4) n = whole_len - 1;
+        W3eGround *bad = NULL;
+        refused += w3e_read(o.b, n, &bad, &why) == W_ERR_CORRUPT && bad == NULL && why.text[0];
+    }
+    snprintf(line, sizeof line, "%d of 6 grounds cut short refused as corrupt, each with its sentence", refused);
+    check(refused == 6, line);
+    o.b[0] = 'X';
+    W3eGround *bad = NULL;
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "W3E!"), "a file not starting W3E!: corrupt");
+    o.b[0] = 'W';
+    memcpy(o.b + 13, (uint8_t[]){ 0xFF, 0xFF, 0xFF, 0xFF }, 4);    /* the ground tileset count: -1 */
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "below 0"), "a tileset count below 0: corrupt (the Lua reads it as none)");
+    w3e_head(&o, 11, 'P', "", "", 0, 3, 0, 0);
+    check(w3e_read(o.b, o.n, &bad, &why) == W_ERR_CORRUPT && strstr(why.text, "0 x 3"), "a ground 0 points wide: corrupt (the Lua reads it as empty)");
+    w3e_head(&o, 11, 'P', "Ldrt", "", 1, 1, 0, 0);
+    w3e_pt(&o, 8192, 8192, 0, 0, 0, 0, 2, 15);
+    W3ePrep *one = NULL;
+    check(!w3e_read(o.b, o.n, &bad, &why) && !strcmp(bad->tileset, "unknown_P") && !w3e_prep(bad, NULL, 0, &one, &why) && one->used == 0,
+          "a single point, an unknown main tileset: read, named unknown_P, no cells");
+    w3e_prep_free(one);
+    w3e_free(bad);
+
+    w3e_prep_free(p);
+    w3e_free(g);
+    free(o.b);
 }
 /* }}} */
 
@@ -2132,6 +2414,10 @@ int main(int argc, char **argv)
         if (nr) memcpy(nr, "NRMX", 4);
         check(nr && mdx_read(cut.b, cut.n, &x, &mw) == W_ERR_CORRUPT && strstr(mw.text, "NRMS"), "a geoset whose normals are misnamed: corrupt, saying what was expected");
     }
+    /* }}} */
+
+    /* {{{ WC3's ground (302a): files written here, so it runs with no game data */
+    check_wc3_ground();
     /* }}} */
 
     /* {{{ the archives */
