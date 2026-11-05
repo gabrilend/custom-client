@@ -29,6 +29,7 @@ picture options; this page doesn't copy numbers that go stale.
 | The server's navigation tiles (`assets/server-data/mmaps`) | `019-navmesh-slope.c` | the steepest walkable slope |
 | The player's settings file (`assets/settings/Config.wtf`) | `014-settings.c` | the player's choices (`SET name "value"`) |
 | The creature list (`assets/world/creatures-<map>.tsv`), generated from the server's world database by wow-chat-2026's `scripts/generate-custom-client-creatures` | `035-creatures.c` | where each creature stands, its look and size (the network's stand-in, 173t) |
+| The cache files (`Cache/WDB/<locale>/*.wdb`, or `WDB/` with no game data), written by this client at shutdown | `104-wdb.c` | the server's answers about creatures, items, quests and names, kept between runs (509; nothing asks the server yet) |
 
 ## 2. From the archives to things in memory (no window needed)
 

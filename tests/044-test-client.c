@@ -39,6 +39,7 @@
 #include "../src/032-sight.h"
 #include "../src/021-wmo.h"
 #include "../src/049-jpeg.h"
+#include "../src/104-wdb.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
 #include "raymath.h"
@@ -226,6 +227,212 @@ static void run(Mover *m, MoverInput in, double seconds, MoverGround g)
 }
 /* }}} */
 
+/* {{{ the cache files (509) */
+/* What the caches ask and tell, kept for the checks. */
+typedef struct {
+    uint32_t asked[400];
+    int      nasked;
+    uint32_t told_key[16];
+    uint64_t told_waiter[16];
+    int      told_ok[16], ntold;
+} WdbSeen;
+static void wdb_seen_ask(void *ctx, const WdbKind *k, uint32_t key)
+{
+    (void)k;
+    WdbSeen *s = ctx;
+    if (s->nasked < 400) s->asked[s->nasked] = key;
+    ++s->nasked;
+}
+static void wdb_seen_tell(void *ctx, uint32_t key, uint64_t waiter, int ok, const unsigned char *rec, uint32_t len)
+{
+    (void)rec; (void)len;
+    WdbSeen *s = ctx;
+    if (s->ntold < 16) { s->told_key[s->ntold] = key; s->told_waiter[s->ntold] = waiter; s->told_ok[s->ntold] = ok; }
+    ++s->ntold;
+}
+/* A file's bytes, read whole into `buf`; answers the length, or -1. */
+static long wdb_file(const char *path, unsigned char *buf, long cap)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    long n = (long)fread(buf, 1, (size_t)cap, f);
+    fclose(f);
+    return n;
+}
+static int wdb_put_file(const char *path, const unsigned char *buf, long n)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    int ok = fwrite(buf, 1, (size_t)n, f) == (size_t)n;
+    return fclose(f) == 0 && ok;
+}
+static void test_wdb(const char *dir)
+{
+    printf("the cache files (509, files the test writes)\n");
+    static const WdbKind items = { "items", "itemcache.wdb", { 'B', 'D', 'I', 'W' }, 128, WDB_FORMAT_ITEM, WDB_ITEM_LIMIT };
+    static const WdbKind quests = { "quests", "questcache.wdb", { 'T', 'S', 'Q', 'W' }, 64, WDB_FORMAT_QUEST, 0 };
+    static const WdbKind names = { "names", NULL, { 0 }, 0, WDB_FORMAT_NAME, WDB_NAME_LIMIT };
+    char root[700], folder[800], path[900], line[300];
+    WWhy why;
+    WdbSeen seen;
+    snprintf(root, sizeof root, "%s/tmp/shared-memory/test-wdb", dir);
+    check(wdb_folder(root, 1, "enUS", folder, sizeof folder, &why) == W_OK && strstr(folder, "/test-wdb/Cache/WDB/enUS"),
+          "with the game's data present the caches live in Cache/WDB/<locale>, its folders made");
+    char plain[800];
+    check(wdb_folder(root, 0, NULL, plain, sizeof plain, &why) == W_OK && strstr(plain, "/test-wdb/WDB") &&
+          !strstr(plain, "Cache"), "without it, in WDB");
+    check(wdb_folder(root, 1, "..", plain, sizeof plain, &why) == W_ERR_REFUSED, "a locale that is no folder name is refused");
+    snprintf(path, sizeof path, "%s/itemcache.wdb", folder);
+    remove(path);
+
+    /* written and read back */
+    memset(&seen, 0, sizeof seen);
+    WdbCache *c = wdb_new(&items, 0x656e5553u, wdb_seen_ask, wdb_seen_tell, &seen, &why);
+    int loaded = -1;
+    check(c && wdb_load(c, folder, &loaded, &why) == W_OK && loaded == 0 && why.code == W_OK,
+          "no file yet: an empty cache, and no failure");
+    wdb_server_version(c, 7);
+    unsigned char rec[3][40];
+    for (int i = 0; i < 3; ++i) { memset(rec[i], 'a' + i, sizeof rec[i]); rec[i][39] = 0; }
+    wdb_answer(c, 25, rec[0], 40, &why);
+    wdb_answer(c, 6948, rec[1], 12, &why);
+    wdb_answer(c, 3, rec[2], 0, &why);
+    check(wdb_count(c) == 3, "three answers, three records");
+    check(wdb_close(c, folder, &why) == W_OK, "written at shutdown");
+    unsigned char buf[4096];
+    long n = wdb_file(path, buf, sizeof buf);
+    snprintf(line, sizeof line, "the file is a header of six numbers, three entries in key order and an end (%ld bytes)", n);
+    check(n == 24 + (8 + 0) + (8 + 40) + (8 + 12) + 8 && !memcmp(buf, "BDIW", 4) && buf[4] == 0x34 && buf[5] == 0x30 &&
+          buf[8] == 0x53 && buf[12] == 128 && buf[16] == 5 && buf[20] == 7 && buf[24] == 3 && buf[32] == 25 &&
+          buf[36] == 40, line);
+    memset(&seen, 0, sizeof seen);
+    c = wdb_new(&items, 0x656e5553u, wdb_seen_ask, wdb_seen_tell, &seen, &why);
+    const unsigned char *r = NULL;
+    uint32_t len = 0;
+    check(wdb_load(c, folder, &loaded, &why) == W_OK && loaded == 3 && wdb_count(c) == 3 && wdb_version(c) == 7,
+          "read back: the same three, and the cache version");
+    check(wdb_find(c, 6948, &r, &len) && len == 12 && !memcmp(r, rec[1], 12) && wdb_find(c, 3, &r, &len) && len == 0 &&
+          wdb_find(c, 25, &r, &len) && len == 40 && !memcmp(r, rec[0], 40), "each record as it was answered");
+    check(wdb_want(c, 25, 1, 0, &r, &len, &why) == 1 && seen.nasked == 0, "a kept record is not asked for again");
+    wdb_free(c);
+
+    /* a header that is not this cache's, a file cut short */
+    unsigned char good[4096];
+    long gn = wdb_file(path, good, sizeof good);
+    static const char *const field[5] = { "signature", "build (12341)", "locale", "record size", "format version" };
+    for (int i = 0; i < 5; ++i) {
+        memcpy(buf, good, (size_t)gn);
+        buf[4 * i] ^= (i == 1) ? 0x35 ^ 0x34 : 1;     /* build 12340 becomes 12341 */
+        wdb_put_file(path, buf, gn);
+        c = wdb_new(&items, 0x656e5553u, NULL, NULL, NULL, &why);
+        WErr e = wdb_load(c, folder, &loaded, &why);
+        snprintf(line, sizeof line, "a file with another %s is ignored whole (%.200s)", field[i], strrchr(why.text, ':') ? strrchr(why.text, ':') + 2 : why.text);
+        check(e == W_OK && loaded == 0 && wdb_count(c) == 0 && strstr(why.text, "ignored"), line);
+        wdb_free(c);
+    }
+    memcpy(buf, good, (size_t)gn);
+    buf[20] = 9;
+    wdb_put_file(path, buf, gn);
+    c = wdb_new(&items, 0x656e5553u, NULL, NULL, NULL, &why);
+    check(wdb_load(c, folder, &loaded, &why) == W_OK && loaded == 3 && wdb_version(c) == 9,
+          "another cache version is not a reason to ignore it: the server decides");
+    check(wdb_server_version(c, 9) == 0 && wdb_count(c) == 3, "the same version from the server changes nothing");
+    check(wdb_server_version(c, 10) == 1 && wdb_count(c) == 0 && wdb_version(c) == 10 && !wdb_find(c, 25, NULL, NULL),
+          "a new cache version from the server empties the cache");
+    wdb_free(c);
+    for (long cut = gn - 1; cut >= 24; cut -= 7) {
+        wdb_put_file(path, good, cut);
+        c = wdb_new(&items, 0x656e5553u, NULL, NULL, NULL, &why);
+        WErr e = wdb_load(c, folder, &loaded, &why);
+        int nothing = e == W_OK && loaded == 0 && wdb_count(c) == 0;
+        wdb_free(c);
+        if (!nothing) { snprintf(line, sizeof line, "a file cut to %ld bytes loads nothing", cut); check(0, line); break; }
+        if (cut - 7 < 24) check(1, "a file cut anywhere after its header, its end included, loads nothing");
+    }
+    wdb_put_file(path, good, 20);
+    c = wdb_new(&items, 0x656e5553u, NULL, NULL, NULL, &why);
+    check(wdb_load(c, folder, &loaded, &why) == W_OK && loaded == 0, "and so does one cut inside its header");
+    wdb_free(c);
+    memcpy(buf, good, (size_t)gn);
+    buf[24 + 4] = 0xff; buf[24 + 5] = 0xff; buf[24 + 6] = 0xff; buf[24 + 7] = 0x7f;    /* the first entry's length */
+    wdb_put_file(path, buf, gn);
+    c = wdb_new(&items, 0x656e5553u, NULL, NULL, NULL, &why);
+    check(wdb_load(c, folder, &loaded, &why) == W_OK && loaded == 0, "and one whose entry claims more bytes than it has");
+    wdb_free(c);
+
+    /* the limits */
+    memset(&seen, 0, sizeof seen);
+    c = wdb_new(&items, 0x656e5553u, wdb_seen_ask, wdb_seen_tell, &seen, &why);
+    for (uint32_t k = 1; k <= 300; ++k) wdb_want(c, k, k, 100.0, &r, &len, &why);
+    snprintf(line, sizeof line, "300 item queries at once send 256 (%d) and queue 44 (%d)", seen.nasked, wdb_queued(c));
+    check(seen.nasked == 256 && wdb_queued(c) == 44 && seen.asked[0] == 1 && seen.asked[255] == 256, line);
+    check(wdb_tick(c, 129.9) == 0 && seen.nasked == 256, "nothing more inside the thirty seconds");
+    wdb_want(c, 301, 301, 129.9, &r, &len, &why);
+    check(seen.nasked == 256 && wdb_queued(c) == 45, "and a later query waits behind them");
+    int sent = wdb_tick(c, 130.0);
+    int in_order = 1;
+    for (int i = 0; i < 45; ++i) in_order &= seen.asked[256 + i] == (uint32_t)(257 + i);
+    snprintf(line, sizeof line, "thirty seconds later the other 45 go, in the order wanted (%d)", sent);
+    check(sent == 45 && seen.nasked == 301 && wdb_queued(c) == 0 && in_order, line);
+    for (uint32_t k = 400; k < 400 + 211; ++k) wdb_want(c, k, k, 131.0, &r, &len, &why);
+    snprintf(line, sizeof line, "the window that began then holds 211 more (%d asked, %d queued)", seen.nasked, wdb_queued(c));
+    check(seen.nasked == 512 && wdb_queued(c) == 0, line);
+    wdb_want(c, 700, 700, 159.0, &r, &len, &why);
+    check(seen.nasked == 512 && wdb_queued(c) == 1, "and no more");
+    wdb_free(c);
+    memset(&seen, 0, sizeof seen);
+    WdbCache *nc = wdb_new(&names, 1, wdb_seen_ask, NULL, &seen, &why);
+    for (uint32_t k = 1; k <= 200; ++k) wdb_want(nc, k, k, 0, &r, &len, &why);
+    check(seen.nasked == 128 && wdb_queued(nc) == 72, "name queries: 128 a window");
+    WdbCache *qc = wdb_new(&quests, 1, wdb_seen_ask, NULL, &seen, &why);
+    for (uint32_t k = 1; k <= 1000; ++k) wdb_want(qc, k, k, 0, &r, &len, &why);
+    check(seen.nasked == 128 + 1000 && wdb_queued(qc) == 0, "quest queries have no limit");
+    wdb_free(qc);
+    memset(&seen, 0, sizeof seen);
+    c = wdb_new(&items, 1, wdb_seen_ask, NULL, &seen, &why);
+    for (uint32_t k = 1; k <= 260; ++k) wdb_want(c, k, k, 0, &r, &len, &why);
+    wdb_want(c, 999, 999, 30.0, &r, &len, &why);
+    check(seen.nasked == 261 && seen.asked[256] == 257 && seen.asked[259] == 260 && seen.asked[260] == 999 && wdb_queued(c) == 0,
+          "a query wanted once the window is over goes behind those that waited, with no tick between");
+    wdb_free(c);
+
+    /* waiters, and no such record */
+    memset(&seen, 0, sizeof seen);
+    c = wdb_new(&items, 0x656e5553u, wdb_seen_ask, wdb_seen_tell, &seen, &why);
+    wdb_want(c, 44, 1, 0, &r, &len, &why);
+    wdb_want(c, 44, 2, 0, &r, &len, &why);
+    wdb_want(c, 45, 3, 0, &r, &len, &why);
+    check(seen.nasked == 2, "two want one record: it is asked for once");
+    wdb_answer(c, 44 | WDB_NO_SUCH_RECORD, NULL, 0, &why);
+    check(seen.ntold == 2 && seen.told_key[0] == 44 && seen.told_waiter[0] == 1 && seen.told_waiter[1] == 2 &&
+          !seen.told_ok[0] && !seen.told_ok[1] && wdb_count(c) == 0 && !wdb_find(c, 44, NULL, NULL),
+          "no such record: both told it failed, in order, and nothing kept");
+    wdb_answer(c, 45, rec[0], 5, &why);
+    check(seen.ntold == 3 && seen.told_ok[2] && seen.told_waiter[2] == 3 && wdb_count(c) == 1, "an answer tells its waiter");
+    wdb_answer(c, 45, rec[0], 5, &why);
+    check(seen.ntold == 3 && wdb_count(c) == 1, "and only once");
+    check(wdb_want(c, 44, 4, 0, &r, &len, &why) == 0 && seen.nasked == 3, "a record that failed is asked for again when wanted");
+    check(wdb_answer(c, 46, rec[0], WDB_RECORD_MAX + 1, &why) == W_ERR_REFUSED && wdb_count(c) == 1, "an answer too long is refused");
+    wdb_free(c);
+
+    /* kept in memory only */
+    snprintf(path, sizeof path, "%s/namecache.wdb", folder);
+    remove(path);
+    wdb_answer(nc, 5, rec[0], 8, &why);
+    check(wdb_close(nc, folder, &why) == W_OK && wdb_file(path, buf, sizeof buf) < 0, "a kind kept in memory only writes no file");
+    static const WdbKind unsigned_kind = { "page text", "pagetextcache.wdb", { 0 }, 32, 1, 0 };
+    snprintf(path, sizeof path, "%s/pagetextcache.wdb", folder);
+    remove(path);
+    c = wdb_new(&unsigned_kind, 1, NULL, NULL, NULL, &why);
+    wdb_answer(c, 5, rec[0], 8, &why);
+    check(wdb_close(c, folder, &why) == W_OK && wdb_file(path, buf, sizeof buf) < 0,
+          "nor does a kind whose signature isn't known yet, though it names its file");
+    static const WdbKind unsized = { "creatures", "creaturecache.wdb", { 'B', 'O', 'M', 'W' }, 0, 1, 0 };
+    check(wdb_new(&unsized, 1, NULL, NULL, NULL, &why) == NULL && why.code == W_ERR_REFUSED,
+          "a kind kept on disk with no record size for its header is refused");
+}
+/* }}} */
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : "/mnt/kaun/wow-chat-2026";
@@ -233,6 +440,8 @@ int main(int argc, char **argv)
     Settings *st = settings_new();                        /* the tests' settings store (014-settings.h), renewed where a test needs defaults */
     char path[700], line[300];
     WWhy why;
+
+    test_wdb(dir);                                        /* needs no game data */
 
     /* {{{ the ground */
     printf("the ground (server map files)\n");
