@@ -155,6 +155,14 @@ client turns ids into models and pictures from its own assets).
    at their usual size.
 4. Creature displays' own pieces; creatures' weapons.
 5. Creatures from the server (with Phase 6's world entry).
+6. A WC3 model's team colour and glow (its replaceable pictures 1 and
+   2, which 061 keeps as `M2_TEXTURE_WC3` + the id): a creature's owner
+   from the server picks the colour; a doodad has none and is drawn
+   with WC3's neutral colour. Until then those pieces are left off, on
+   creatures (1109 step 1b) and on a converted map's doodads (step 1c;
+   3 pieces on War in the Plaguelands' own models). The colours are
+   WC3's own pictures (`ReplaceableTextures\TeamColor\TeamColor00.blp`
+   ...), so a WC3 install is the place they come from (105a).
 
 ## Open questions
 

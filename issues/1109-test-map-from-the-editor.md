@@ -190,14 +190,91 @@ memory to the exit, as it did before). A
 window has not been opened on the converted map: `scripts/build
 --test` and a Test Map run on the owner's machine are the full check.
 
+**Step 1c is built** (2026-11-05, background work the owner asked for,
+the same terms: "answer open questions yourself, record each
+decision"): a test-map run draws the map's placed doodads and buildings
+with their own models and pictures, and its ground pictures, through
+the resolver, in its order (the player's packs, the server's assets,
+overlays such as the map's build folder, the player's archives, then a
+placeholder). Decisions 20 to 31.
+
+- **`src/076-placed-models.c`** finds a placed name's files (a ground
+  file's MMDX and MWMO names) and reads them into the one model the
+  drawer takes. A name ending in `.mdx` is first asked for as written,
+  with no placeholder: bytes that start `MDLX` are a WC3 model the map
+  brought (W02b copies them into the build folder at their own paths,
+  `war3mapImported\Deadtree1.mdx`, with the pictures they name), read
+  by 061 and its points turned into yards by `map.lua`'s
+  `wc3_to_wow.scale`. Any other name (the game's own models, which
+  ground files name with `.mdx` too) is the `.m2` beside it and its
+  first view, `<name>00.skin`, each from the first place that has it.
+  A model no place has is the placeholder box, whole (decision 23). A
+  building is its root and one file per part, never a placeholder.
+- **The resolver** (060) has two new calls: `asset_get` (through the
+  resolver with a placeholder when there is one, else the archives
+  alone, as every reader did before) and `asset_stand_in` (the
+  placeholder for a name, said and counted as standing in for all of a
+  model's files).
+- **`src/042-doodads.c`** reads every model, picture and `.anim`
+  through them, and takes the resolver from 043 (NULL outside a test
+  map). A WC3 doodad is drawn in its rest pose: no skeleton, no
+  particles, no solid shape; pieces with team colour and pieces hidden
+  at rest are left out. A box is drawn as a magenta wire-frame; a
+  building no place has is the box stretched to the size its MODF
+  entry gives. 043 hands it the map's scale and prints how many WC3
+  models and boxes it drew.
+- **The ground's pictures** (033's `ground_prep_pixels`, and 038 for a
+  tile's own) go through `asset_get`: the map's own when its folder
+  has them, the checker otherwise.
+- **`src/035-creatures.c`**: an empty creature list (a map with no
+  units) no longer sorts a list that isn't there.
+
+Checked (`tests/044-test-client.c`, "placed models and buildings, and
+the ground's pictures, through the resolver", before the archives): a
+made map folder and a made archive: a WC3 model from the folder, its
+points in yards (and by WC3's own 30.72 units a yard with no rule), its
+picture from the folder, its team colour kept apart and its hidden
+piece at alpha 0; a game model's `.mdx` name read as its `.m2` and
+view; a missing model as the box, and a model whose `.m2` is there
+without its view as the box whole; a building's root and part from the
+folder, a missing part, a missing building not found and the box
+standing in for it; a ground picture from the folder and the checker
+for one no place has; strict mode refusing the box; and with no
+resolver, the archives alone with no box and no checker. With a
+converted build folder ("a converted build folder"), two real
+conversions by W02c's `wow-convert.lua`
+(branch `claude/wete-w02c-registration`):
+
+- **War in the Plaguelands**: its 4 ADT tiles place 11034 doodads,
+  exactly the 11034 its `placements.lua` lists (4396 by its own
+  models), each within 0.0021 yards of where that list says. Its 147
+  models: 118 its own, read from its folder (117 with something to draw
+  at rest; `EerieFog.mdx` is particles alone, 403), 28 the game's (the
+  box, with no archives), 1 refused by 061 (open item below). Its own
+  stand 0 to 33.33 yards tall. Their 269 pictures: 94 from its folder,
+  175 the checker (WC3's own pictures, which no build folder holds),
+  all decoded. Its ground tile's 17 pictures each the checker.
+- **Master Crafters Final Conquest**: 2940 doodads, all where its list
+  says, its 11 models all the game's.
+
+No memory errors under the address and undefined-behaviour checkers
+(the two leaks there are the test's own start, as before). Every
+drawing part, 043 and 058 compile with `-Werror` under gcc and clang
+against stand-in headers. A window has not been opened: what a
+converted map looks like is for `scripts/build --test` and a Test Map
+run on the owner's machine.
+
 Not built yet: the map's ground drawn with WC3's tilesets (302: the
-ADTs are drawn as any ADT, their pictures from the archives); a WC3
-model posed and animated (it stands in its rest pose; 402 step 4, PR
-#7) or team-coloured (404: its replaceable pictures are left off); a
-missing table row as a placeholder (106 wants one: still an error
-naming the table and row); the resolver for pictures, doodads and
-buildings (204, 302); logging in, and the `lost-connection` ending
-(Phase 5's 609).
+ADTs are drawn as any ADT, their pictures through the resolver, so the
+checker until a tileset is a place); WC3's own pictures (175 of War in
+the Plaguelands' 269), which need the player's WC3 archives as a place
+(105a); a WC3 model posed and animated (it stands in its rest pose; 402
+step 4, PR #7), with its particles (403) and solid shape, or
+team-coloured (404: its replaceable pictures are left off); 034's
+prefetch, 040's water and 041's game models through the resolver (they
+read the archives alone); a missing table row as a placeholder (106
+wants one: still an error naming the table and row); logging in, and
+the `lost-connection` ending (Phase 5's 609).
 
 ## Intended behavior
 
@@ -321,6 +398,11 @@ return {
    models from the build folder.~~ Done (2026-11-04): 073, 074, 075,
    the resolver's table and ground kinds, 041 reading a map's `.mdx`
    (open question 4 answered; decisions 12 to 19).
+1c. ~~The map's placements: its doodads and buildings, with its own
+   models and pictures, and its ground pictures, through the
+   resolver.~~ Done (2026-11-05): 076, the resolver's `asset_get` and
+   `asset_stand_in`, 042 and 033 asking through them (decisions 20 to
+   31).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -450,6 +532,52 @@ return {
     lands, this branch's diff shows #2's files too; once it does, a
     merge of the base makes them drop out.
 
+## Decisions (2026-11-05, step 1c, answered here; the owner may overturn any)
+
+20. **The placements are 1109's step 1c**, not a new issue: they are
+    105a's "drawing parts ask the resolver" and 204's pictures, done for
+    the one run that opens a resolver. 105a, 204, 302, 401 and 404 say
+    what they took and what is left.
+21. **Still only in a test-map run** (decision 4 kept). With no
+    resolver, every name is read from the archives alone as before: a
+    model they lack is left out, quietly, and no box or checker stands
+    in, so an ordinary run draws what it drew.
+22. **A placed `.mdx` is told the way a creature's is** (decision 18):
+    as written, folder first, never a placeholder; WC3 only when its
+    bytes start `MDLX`; else the `.m2` beside it. Its size is its points
+    times `wc3_to_wow.scale`; the placement's own scale is the
+    converter's, used as written (W02b keeps WC3's scale there).
+23. **A model is one place's, whole.** When a model's `.m2` is found but
+    its view isn't (or the other way round), both are the box's, said
+    once as standing in "with the rest of its files", so no model is
+    drawn with another's view.
+24. **The box is drawn as a magenta wire-frame**, so a missing model is
+    seen as missing (105a's wire-frames), and counted at the start. A
+    building no place has is the box stretched to the MODF entry's size
+    (its widest side across, its height up), so the gap has its shape.
+25. **A WC3 doodad stands still and is walked through**: no skeleton,
+    particles or solid shape until 402 step 4, 403 and a reading of its
+    CLID shapes. Its team-coloured pieces are left off (404) and its
+    pieces hidden at rest aren't drawn, as for creatures.
+26. **MCRF isn't read.** It says which of a tile's chunks list each
+    placement, for a drawer that culls by chunk; 042 places every MDDF
+    and MODF entry of a tile once and culls each by its own ball, which
+    gives the same picture.
+27. **WC3's tilesets wait** (302): they need PR #3's `.w3e` reading and
+    a ground shader for WC3's blend; this slice only makes the ground's
+    pictures ask the resolver, so a tileset becomes a place there later.
+28. **Team colour waits** (404): no player is chosen for a doodad, and a
+    unit's colour needs its owner from the server.
+29. **034's prefetch still warms the archives alone**, and 040's water
+    and 041's game models still read them: none of them stands in a
+    placeholder, and a converted map's water and creatures still draw.
+    Moving them is the next slice of 105a.
+30. **A model 061 refuses is left out, said**, as any unreadable file
+    is; 061 isn't changed here (open item below).
+31. **The tests read the converter's real output when given it**, as
+    step 1b's did; with no build folder those checks are skipped, and
+    the made folder's checks still run.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -512,6 +640,17 @@ return {
    a crash. Catching the stop signal and ending with a receipt (reason
    `closed`, or a new `stopped`) needs a flag the signal sets, state
    outside any handle (docs/001, "Handles"). Worth the exception?
+6. **A WC3 model 061 refuses.** War in the Plaguelands'
+   `war3mapImported\glow.mdx` ends inside its last solid shape (a
+   cylinder, CLID shape 3, holding two numbers where 061 reads more),
+   so 061 refuses the whole model and it is left out (decision 30).
+   world-edit-to-execute's Lua reader reads it the same way. Should
+   both readers take a short last shape (the model drawn, its shape
+   dropped), or is the file broken and refusing it right?
+7. **Buildings from a real conversion.** No stock row W02b converts is
+   a building (WMO) yet, so neither real conversion has a MODF entry:
+   buildings are checked only with files made in the test. The first
+   map that places one is the check.
 
 ## Related
 
@@ -524,6 +663,8 @@ return {
   For step 1b: `src/073-converted-map.info.md` (`map.lua`),
   `src/074-tables.info.md` (tables per row),
   `src/075-adt-heights.info.md` (heights from the ADTs).
+  For step 1c: `src/076-placed-models.info.md` (a placed model's
+  files), `src/042-doodads.info.md`, `src/060-resolver.info.md`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

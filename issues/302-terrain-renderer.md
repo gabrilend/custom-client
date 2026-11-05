@@ -42,6 +42,16 @@ Measured against the clean-room checklist's note 4.5
   towards negative numbers never wraps and loses precision over a very
   long session. The correction wraps both ways.
 
+Since 1109's step 1c (2026-11-05) the pictures a ground tile names
+ask the resolver (105a: `ground_prep_pixels` through `asset_get`): in
+a test-map run the map's own when its build folder has them, the
+checker when no place has them; with no resolver the archives, as
+before. A converted map's tiles name the game's `Tileset\...`
+pictures (W02b), so its ground draws as any ADT. **WC3's tilesets on
+this mesh are the next step** (1109 decision 27): they need PR #3's
+`.w3e` reading and a ground shader for WC3's blend, and a WC3
+install's tileset pictures as a place.
+
 ## Intended behavior
 
 Two pieces, intentionally separated per CLAUDE.md ("write data

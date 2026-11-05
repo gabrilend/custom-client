@@ -79,7 +79,14 @@ and its bytes start `MDLX` (world-edit-to-execute's W02c writes
 It stands in its rest pose (WC3 posing is 402 step 4), its replaceable
 pictures (team colour, 404) left off and its layers hidden at rest not
 drawn. Read and checked on the converter's real output; not yet drawn
-in a window. The doodads (042) still load by `.m2` name.
+in a window. Since step 1c (2026-11-05) the doodads (042, through
+`src/076-placed-models.c`) do the same for a placed `.mdx` the map
+brought (W02b copies them into the build folder): 118 of War in the
+Plaguelands' own models read from its folder, sized by the map's rule,
+standing still (no skeleton, particles or solid shape), team colour
+left off and pieces hidden at rest not drawn. One, its `glow.mdx`, is
+refused by 061 (it ends inside its last CLID shape; 1109's open
+question 6). Any other name still loads the `.m2` beside it.
 
 Not yet: choosing among the detail files by the bone limit (step 1;
 this client always takes `00.skin`), ribbons (403), the model's own

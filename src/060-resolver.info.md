@@ -109,6 +109,20 @@ types (its W03a) and reads the same manifests (059).
   one name and then another: the first place's copy, as asset_resolve
   finds it when `r` is given (else the archives alone, `chain`), but
   never a placeholder: W_ERR_NOT_FOUND, quietly, when no place has it.
+- `WErr asset_get(Resolver *r, MpqChain *chain, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why);`
+  For readers that draw (pictures, models, buildings; issue 1109's step
+  1c): asset_resolve's answer, a placeholder included, when `r` is given;
+  with no resolver (every run but a test map's, 1109's decision 4) the
+  archives alone, `chain`, as those readers read before: W_ERR_NOT_FOUND,
+  quietly, when they lack it.
+- `WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why);`
+  The built-in placeholder for `logical` of `kind`, as asset_resolve's
+  last place gives it: said in a warning, counted, refused in strict mode
+  (W_ERR_NOT_FOUND), and W_ERR_NOT_FOUND quietly for a kind with none.
+  For an asset of several files one of which no place has (a model's .m2
+  found but not its .skin, a building's root that isn't anywhere): the
+  placeholder stands in whole, rather than one file of it beside another
+  model's.
 - `type AssetCounts`
   The session's counts: different assets asked for, per kind and place
   (an asset asked for again isn't counted again); per kind, how many of

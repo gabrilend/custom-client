@@ -41,11 +41,16 @@ by writing a goodbye receipt the editor reads back (`067-test-map.c`,
 (`073-converted-map.c`) says which map to open and where she starts;
 the client's tables are read row by row from every place that has them,
 the map's rows first (`074-tables.c`, issue 106); the ground files
-(WDT, ADT, WDL) and a creature look's own WC3 model come through the
-resolver; and while the server has no map files for the map, her
-ground's heights are made from its ADTs (`075-adt-heights.c`). Every
-other reader still asks the archives directly; each part switches with
-its own issue (204 for pictures first).
+(WDT, ADT, WDL), the ground's pictures, the placed doodads' and
+buildings' models, pictures and `.anim` files (`076-placed-models.c`
+finds a placed name's files: a map's own WC3 `.mdx` from its folder,
+else the `.m2` and its view) and a creature look's own WC3 model come
+through the resolver, with the magenta checker for a missing picture
+and a magenta wire-frame box for a missing model; and while the server
+has no map files for the map, her ground's heights are made from its
+ADTs (`075-adt-heights.c`). The prefetch (034), the water (040) and the
+game's own creatures (041) still ask the archives directly; each part
+switches with its own issue.
 
 ## 2. From the archives to things in memory (no window needed)
 

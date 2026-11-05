@@ -390,6 +390,35 @@ static WErr read_file(const char *path, unsigned char **data, size_t *len, WWhy 
 }
 /* }}} */
 
+/* {{{ static stand_in_for: the placeholder for `logical` (folded to `key`), said every time and counted;
+ * W_ERR_NOT_FOUND quietly for a kind with none, and, said, in strict mode. `whole`: asked for by
+ * asset_stand_in, for an asset another of whose files is missing (said so: this file may be there) */
+static WErr stand_in_for(Resolver *r, const char *logical, const char *key, AssetKind kind, int whole, AssetAnswer *out, WWhy *why)
+{
+    const char *kname = asset_kind_name(kind);
+    const char *what;
+    size_t len;
+    const unsigned char *bytes = placeholder(r, kind, key, &len, &what);
+    if (!what) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
+    count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
+    char where[200];
+    snprintf(where, sizeof where, "%d pack%s, %d server folder%s, %d overlay%s%s", r->npacks, r->npacks == 1 ? "" : "s",
+             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s", r->chain ? " or the archives" : ", no archives open");
+    if (r->strict) {
+        fprintf(r->log, "assets: ERROR: the %s %s is in none of %s; strict mode (assetsStrict) refuses a placeholder\n", kname, logical, where);
+        return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of %s, and strict mode refuses a placeholder", kname, logical, where);
+    }
+    if (whole) fprintf(r->log, "assets: WARNING: the %s %s: %s stands in for it, with the rest of its files (one of them is in none of %s)\n", kname, logical, what, where);
+    else fprintf(r->log, "assets: WARNING: the %s %s is in none of %s; %s stands in\n", kname, logical, where, what);
+    out->data = malloc(len ? len : 1);
+    if (len) memcpy(out->data, bytes, len);
+    out->len = len;
+    out->source = ASSET_FROM_PLACEHOLDER;
+    out->from = "built in";
+    return W_OK;
+}
+/* }}} */
+
 /* {{{ asset_resolve */
 void asset_answer_free(AssetAnswer *a)
 {
@@ -466,27 +495,29 @@ static WErr resolve(Resolver *r, const char *logical, AssetKind kind, int stand_
         }
     }
     /* 5. the placeholder, said every time; a kind with none is not found, quietly (open sea; a table its reader names) */
-    const char *what;
-    size_t len;
-    const unsigned char *bytes = placeholder(r, kind, key, &len, &what);
-    if (!what || !stand_in) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
-    count(r, kind, key, ASSET_FROM_PLACEHOLDER, NULL);
-    char where[200];
-    snprintf(where, sizeof where, "%d pack%s, %d server folder%s, %d overlay%s%s", r->npacks, r->npacks == 1 ? "" : "s",
-             r->nserver, r->nserver == 1 ? "" : "s", r->noverlays, r->noverlays == 1 ? "" : "s", r->chain ? " or the archives" : ", no archives open");
-    if (r->strict) {
-        fprintf(r->log, "assets: ERROR: the %s %s is in none of %s; strict mode (assetsStrict) refuses a placeholder\n", kname, logical, where);
-        return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of %s, and strict mode refuses a placeholder", kname, logical, where);
-    }
-    fprintf(r->log, "assets: WARNING: the %s %s is in none of %s; %s stands in\n", kname, logical, where, what);
-    out->data = malloc(len ? len : 1);
-    if (len) memcpy(out->data, bytes, len);
-    out->len = len;
-    out->source = ASSET_FROM_PLACEHOLDER;
-    out->from = "built in";
-    return W_OK;
+    if (!stand_in) return w_fail(why, W_ERR_NOT_FOUND, "the %s %s is in none of the places asked", kname, logical);
+    return stand_in_for(r, logical, key, kind, 0, out, why);
 }
 WErr asset_resolve(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why) { return resolve(r, logical, kind, 1, out, why); }
+/* }}} */
+
+/* {{{ asset_stand_in: the placeholder alone, said and counted as resolve's last step */
+WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why)
+{
+    memset(out, 0, sizeof *out);
+    char key[1024];
+    if (kind < 0 || kind >= ASSET_KIND_COUNT) return w_fail(why, W_ERR_REFUSED, "asked for %s as kind %d, which is not a kind", logical ? logical : "(nothing)", (int)kind);
+    if (!logical || fs_normalise(logical, key, sizeof key)) return w_fail(why, W_ERR_REFUSED, "asked for a %s with an empty or too long name", asset_kind_name(kind));
+    return stand_in_for(r, logical, key, kind, 1, out, why);
+}
+/* }}} */
+
+/* {{{ asset_get: the resolver's answer, a placeholder included, when there is one; else the archives alone */
+WErr asset_get(Resolver *r, MpqChain *chain, const char *logical, AssetKind kind, AssetAnswer *out, WWhy *why)
+{
+    if (r) return resolve(r, logical, kind, 1, out, why);
+    return asset_read(NULL, chain, logical, kind, out, why);
+}
 /* }}} */
 
 /* {{{ asset_resolve_all: every place's copy, first place first, no placeholder */
