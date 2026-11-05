@@ -1521,6 +1521,71 @@ HelmetGeosetVisData, LiquidType, LightSkybox), whose widths come from
 the readers, the test program's made tables and the baseline set
 (decision 169).
 
+**Step 1x is built** (2026-11-05, the same background work): the six
+failures every run here carried, looked at one by one. Decisions 172 to
+176; no new file.
+
+The six, as a run on this machine printed them, and what became of each:
+
+1. **"Astranaar's flight point stands at -100000.00 yards (Lua:
+   106.71)"**: the ground's height at a known place, from the server's
+   extracted map files (`PROJECT_DIR/assets/server-data/maps`). That
+   folder isn't on this machine, and -100000 is 018's "no ground here".
+   Not a bug: now a NEEDS naming the missing folder.
+2. **"the server's tiles for Kalimdor say -1.0 degrees is the steepest
+   walkable"**: the steepest walkable slope, from the server's
+   navigation tiles (`assets/server-data/mmaps`). Not on this machine:
+   019 says it can't open the folder and gives -1. Now a NEEDS; with the
+   folder there, a wrong value still fails, now with 019's sentence.
+3. **"up a 45-degree ramp: walks on"** and
+4. **"on a 45-degree slope, standing still stays put"**: the mover on
+   made-up slopes, held to the limit from 2. A fault in the test: they
+   took 019's -1 as the limit, which makes any slope over a degree too
+   steep. So these two failed, and the two 70-degree checks beside them
+   passed without the limit being tested. Without the tiles they now
+   take 60, the value 2 holds the server to, and all four pass on
+   merit; with the tiles, the server's value as before (decision 174).
+5. **"a second's run from the start point on Ashenvale's real ground
+   stays on it"**: the mover on the server's real ground, needing the
+   map files of 1. Now a NEEDS.
+6. **"no MPQ archives found in x"**: the original client's install
+   (`CLIENT_DATA_DIR`), not on this machine. This was also a fault in
+   the test: the program printed a FAIL without counting it and
+   returned. Every check after the archives (sight, creatures, errors,
+   settings, collision, swimming, the camera, as well as those that read
+   the install) never ran here, and no closing line was printed. Now
+   each part that reads the install is one NEEDS, and the rest run
+   (decision 173).
+
+Also, by the same rule: the seam check beside 1 passed with nothing
+compared when the map files were absent. It is now a NEEDS then, and with
+them it must compare some points (decision 175). WC3's war3.mpq,
+reached for the first time here once the run went on, is a NEEDS when
+absent (decision 176).
+
+Checked (`tests/044-test-client.c`), on every build here:
+- 0 failures and 12 NEEDS: the four server-file checks, war3.mpq, and
+  the install's seven parts.
+- 83 more passing than before: the 82 after the archives that need no
+  data, now made here (WC3's made picture, sight, creatures, errors,
+  settings, collision, swimming, the camera), and the two 45-degree
+  slopes, less the seam check, now a NEEDS.
+- Exit status 2 throughout.
+- The sanitized runs are clean. The leak report is now empty: its 35184
+  bytes (2 allocations) were the ground world (33344) and the settings
+  store (1840) that the early return left. With the run reaching the end,
+  only the last settings store was left, and it is now freed.
+
+No expectation was found wrong and no fault was found in the client.
+None of the six measured anything here.
+
+Not checked: the values these checks hold the files to (106.71 yards,
+60 degrees, the install's and war3.mpq's facts) need the owner's
+machine. A run there should show 0 NEEDS. If it shows any, that file
+has moved. Where the install is here but the server's files aren't,
+the reading-ahead and ground-file parts still treat the missing server
+folder as a failure; no machine here has the install, so that is left.
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1745,6 +1810,12 @@ return {
    row of each of its eleven tables and reads it back by 097; all agree
    once 097 marks Light's sets 3 to 5 read; 097 is in the reader
    library (decisions 166 to 171).
+1x. ~~The six failures every run carried.~~ Done (2026-11-05): all six
+   needed files only the owner's machine has. They are now NEEDS,
+   counted and printed apart, with exit status 2. Two of the six were
+   faults in the test: slopes held to a missing limit, and a missing
+   install that ended the run. Those are fixed, and 82 checks that never
+   ran here now run and pass (decisions 172 to 176).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -3016,6 +3087,38 @@ return {
     it. Printed by the check, not failed, and left to world-edit-to-execute.
 171. **The file counter is at 100** (`tests/100-layouts-match-converter.lua`).
 
+172. **A check that can't be made here is NEEDS, not ok and not FAIL.**
+    When a check reads what only the owner's machine has (the client's
+    install, the server's extracted files, war3.mpq) and it isn't there,
+    the test program prints `NEEDS:` with the check and what is missing.
+    It counts these apart from the checks made and names the count in
+    the closing line. It exits 2 when nothing failed but something was
+    NEEDS, 1 when anything failed, 0 only when every check was made and
+    passed. So a run missing data is never mistaken for a clean one. Only
+    absence counts: a folder or file that is there and wrong is still a
+    FAIL. The parenthesised "skipped" notes for a missing converted
+    build are left as they were: a build is made per run, not owned.
+173. **No install no longer ends the run.** The archives' part was the
+    only one that returned: its FAIL went uncounted, every later check
+    went unrun and the closing line went unprinted. Now the archives' part and
+    the six later parts that open the install are each one NEEDS when
+    the folder holds no archives (`client_open`); archives that are
+    there but won't open are a FAIL. WC3's pictures, which need only
+    war3.mpq, moved before the archives.
+174. **The made-up slopes take 60 degrees without the server's tiles.**
+    They check the mover against a limit; that the server's limit is 60
+    is the check before them. Without the tiles they took 019's -1, so
+    two failed and two passed for the wrong reason. With the tiles they
+    take the server's value, as before, so on the owner's machine
+    nothing changes.
+175. **The tile seam check needs points compared.** With no map files
+    it compared none and passed. It is NEEDS then, and with them it
+    must compare at least one point.
+176. **war3.mpq absent is NEEDS.** The footman picture's checks need
+    world-edit-to-execute's copy of WC3's install. It isn't here, so its
+    four checks are one NEEDS; a war3.mpq that is there must open and
+    decode as before.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -3220,7 +3323,9 @@ return {
   step 1w: `tests/100-layouts-match-converter.lua` (the layouts
   held to the converter's), `src/097-table-layouts.info.md`, 016, 026
   and 044; [106](./106-dbc-parser.md) (layouts); world-edit-to-execute's
-  draft PR #260 (commit 306b40f40, its light tables).
+  draft PR #260 (commit 306b40f40, its light tables). For step 1x:
+  `tests/044-test-client.c` (NEEDS, its closing line and exit status)
+  and [008](../docs/008-build-system.md) (the tests).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch
