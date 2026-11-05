@@ -204,3 +204,17 @@ made in the test. Decisions 111 to 117 in 1109.
 
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.
+
+2026-11-05: 1109's step 1p. A converted map's WC3 pathing is walls: a
+new window-free part (094) reads the map's `war3map.wpm` (which the
+converter copies into the build folder since world-edit-to-execute's
+draft PR #252) and places its cells on the converted ground by map.lua's
+rule; the mover's wall rule (091) asks it after the models', in the
+window and the headless run alike, and land closed to WC3's walkers
+holds her (deep water is still swum). The receipt counts the steps it
+held apart from the models' (593 and 375 on the two new routes into the
+walls, `tests/095`, `tests/096`; none ends in a closed cell). Moves can
+say `turn_to`, a facing, and the two routes were found again with it:
+War in the Plaguelands' still leaves its edge, and Master Crafters',
+whose pathing is closed all round, ends held at its south border. No
+`war3map.wpm` means no pathing walls. Decisions 118 to 127 in 1109.

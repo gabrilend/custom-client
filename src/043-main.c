@@ -95,6 +95,7 @@
 #include "087-world-start.h"
 #include "089-headless-run.h"
 #include "091-model-solids.h"
+#include "094-wc3-pathing.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -215,6 +216,7 @@ typedef struct {
     int    last_drawn;                                /* creatures drawn last frame, for the report */
     int   *built_of;                                  /* per spawn: its index in standing[]; -1 not built, -2 its look can't be */
     CollideWorld *solids;
+    Wc3Pathing   *pathing;            /* a test map's WC3 pathing as walls (094, 1109 step 1p); NULL for none */
     LiquidWorld *waters;          /* every loaded tile's water (173r) */
     double tile_load_most_s, tile_load_total_s;   /* the slowest tile load and their sum, for the picture report (173u) */
     double walk_load_most_s, walk_load_total_s;   /* the same for loads after the start (while she moves) */
@@ -333,7 +335,7 @@ static int wall_at(void *ctx, double x0, double y0, double x1, double y1, double
 {
     App *app = ctx;
     (void)ctx;
-    return model_solids_wall(app->solids, x0, y0, x1, y1, z, (float)app->elf.max_grad, nx, ny);
+    return model_solids_wall(app->solids, app->pathing, x0, y0, x1, y1, z, (float)app->elf.max_grad, nx, ny) != 0;
 }
 /* }}} */
 
@@ -683,6 +685,16 @@ int main(int argc, char **argv)
     app->doodads = doodads_new(&app->ws.chain, app->ws.assets, &app->textures, app->solids, app->waters, app->water, &why);
     if (!app->doodads) return start_failed(app, 1, "%s", why.text);
     if (app->test_map) doodads_wc3_scale(app->doodads, app->conv.wc3_scale);   /* a map's own WC3 models, in yards by its rule (1109 step 1c) */
+    if (app->test_map) {   /* its WC3 pathing as walls (094, 1109 step 1p); none is no walls, said */
+        WErr pe = wc3_pathing_open(app->ws.assets, &app->ws.chain, app->conv.wc3_scale, app->conv.wc3_x0, app->conv.wc3_y0, &app->pathing, &why);
+        if (pe == W_ERR_NOT_FOUND) printf("test map: %s\n", why.text);
+        else if (pe) return start_failed(app, 1, "%s", why.text);
+        else {
+            int pw, ph, pb;
+            wc3_pathing_size(app->pathing, &pw, &ph, &pb);
+            printf("test map: its WC3 pathing, %d x %d cells, %d closed to walkers: walls\n", pw, ph, pb);
+        }
+    }
     app->horizon = horizon_new(&app->ws.chain, app->ws.assets, app->ws.map_name, app->ox, app->oy, &why);
     if (why.code != W_OK) printf("horizon: %s\n", why.text);   /* none to draw: said, not a failure */
     LightTables lights;
@@ -1058,6 +1070,7 @@ int main(int argc, char **argv)
     CloseWindow();
     light_close(&lights);
     collide_free(app->solids);
+    wc3_pathing_free(app->pathing);
     liquid_free(app->waters);
     free(app->standing);
     free(app->built_of);

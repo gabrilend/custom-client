@@ -87,7 +87,7 @@ WErr goodbye_end(Goodbye *g, GoodbyeReason reason, const char *why_text, WWhy *w
  * value that isn't finite, or a receipt already written; W_ERR_FULL past
  * GOODBYE_COUNTS_MAX names. W_OK and nothing kept with a NULL handle. */
 #define GOODBYE_NAME_MAX   31
-#define GOODBYE_COUNTS_MAX 48
+#define GOODBYE_COUNTS_MAX 96
 WErr goodbye_count(Goodbye *g, const char *name, double value, WWhy *why);
 
 /* `t` as the receipt writes it, "2026-11-04T20:31:07Z" (20 characters and the end). */

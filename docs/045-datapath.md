@@ -92,8 +92,9 @@ stand-in figure stands in her place.
 | `025-character.c` | a character's look (race, sex, choices, items) | its model with the right pieces shown, its painted skin sheet, fur, hair, cloak, and the items to hang |
 | `026-light.c` | the light tables | the light here and now: sun, shade, sky, fog, water colours, skybox |
 | `087-world-start.c` | the archives (none in a test map), the resolver, the tables, the map's `Map` row, the server's or the map's own heights, the navigation tiles | the start before the window: the map's folder, her height at the start and the steepest walkable slope |
-| `089-headless-run.c` | a test map's start (087), her figure and the creatures' looks (025, 088), a moves file (Lua data, `tests/090-test-map-moves.lua`; a map's own route, `tests/092`, `093`) | with `--headless`, no window: her path over the map's ground, its placed models' floors and walls (091) and its water step by step, and the counts in the goodbye receipt (068) |
+| `089-headless-run.c` | a test map's start (087), her figure and the creatures' looks (025, 088), a moves file (Lua data, `tests/090-test-map-moves.lua`; a map's own routes, `tests/092`, `093`, `095`, `096`) | with `--headless`, no window: her path over the map's ground, its placed models' floors and walls and its WC3 pathing's walls (091, 094) and its water step by step, and the counts in the goodbye receipt (068) |
 | `091-model-solids.c` | a tile's placed doodads and buildings (020), their files through 076 | with no window: each model's and building part's solid shape (also for `042-doodads.c`), placed into `028-collide.c`, buildings' pools into `027-liquid.c`; the mover's floor and wall rule (for 043 and 089) |
+| `094-wc3-pathing.c` | a converted map's `war3map.wpm` and `war3map.w3e` (for its grid's corner) through the resolver (060) | with no window: the cell under a place in the converted world (map.lua's rule turned round), and whether a step enters land closed to walkers, as a wall (for 091's rule, so for 043 and 089) |
 | `088-figure-model.c` | a creature's display row (`CreatureDisplayInfo`, `CreatureModelData`, through the tables) and the resolver | which files a figure is made from: the map's own WC3 model, the game's `.m2` and view, a character look, or the baseline set's stand-in figure |
 | `084-map-fog.c` | a converted map's `war3map.w3i` (read by `083-w3i.c`, through the resolver) | in a test-map run, the map's own fog (its distances in yards, its colour) put in place of the zone's in that light each frame, out of the water |
 | `027-liquid.c` | ground files' water, buildings' pools | the water's surface anywhere (for the mover) |
@@ -168,7 +169,9 @@ The mover (`029-mover.c`) only asks. `043-main.c` answers from the readers:
   or below her feet plus a step (`018-maps.c` + `028-collide.c`, the rule
   in `091-model-solids.c`, shared with the headless run).
 - **Walls:** a step that hits something too steep to stand on
-  (`028-collide.c`, through `091-model-solids.c`).
+  (`028-collide.c`, through `091-model-solids.c`), or, on a converted
+  map, enters a cell of its WC3 pathing closed to walkers
+  (`094-wc3-pathing.c`, asked by the same rule).
 - **Water:** the surface above her (`027-liquid.c`). Deep enough, she swims.
 
 ## 4a. A second program: pictures of items (issue 410)

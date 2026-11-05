@@ -33,7 +33,7 @@
 enum { HOLD_FORWARD, HOLD_BACK, HOLD_LEFT, HOLD_RIGHT, HOLD_STRAFE_LEFT, HOLD_STRAFE_RIGHT, HOLD_JUMP, HOLD_SWIM_DOWN, HOLD_COUNT };
 static const char *const HOLDS[HOLD_COUNT] = { "forward", "back", "left", "right", "strafe_left", "strafe_right", "jump", "swim_down" };
 
-typedef struct { unsigned keys; int walking, steps; } Move;
+typedef struct { unsigned keys; int walking, steps, turns; double turn_to; } Move;   /* turns: 1 when she faces turn_to first */
 struct HeadlessMoves {
     char   name[120];
     char   map[64];                     /* the map's folder the moves are for; "" any */
@@ -119,7 +119,7 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
             const char *key;
             const LuaValue *v = lua_value_at(mv, k, &key);
             int vl = lua_value_line(v);
-            if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d holds a value with no name (hold, seconds, walking)", where, vl, i);
+            if (!key) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d holds a value with no name (hold, seconds, walking, turn_to)", where, vl, i);
             if (!strcmp(key, "hold")) {
                 if (lua_value_type(v) != LUA_DATA_TEXT) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's hold must be text (\"\" for none)", where, vl, i);
                 WErr rc = read_hold(lua_value_text(v), &o->keys, where, vl, why);
@@ -132,11 +132,18 @@ static WErr parse(const LuaValue *top, const char *where, HeadlessMoves *m, WWhy
             } else if (!strcmp(key, "walking")) {
                 if (lua_value_type(v) != LUA_DATA_BOOL) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's walking must be true or false", where, vl, i);
                 o->walking = lua_value_true(v);
-            } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of a move (hold, seconds, walking)", where, vl, key);
+            } else if (!strcmp(key, "turn_to")) {
+                double a = lua_value_number(v);
+                if (lua_value_type(v) != LUA_DATA_NUMBER || !(a >= -HEADLESS_TURN_MOST && a <= HEADLESS_TURN_MOST))
+                    return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d's turn_to must be a facing in radians, from -6.2832 to 6.2832 (0 north, rising west)", where, vl, i);
+                o->turns = 1;
+                o->turn_to = a;
+            } else return w_fail(why, W_ERR_REFUSED, "%s line %d: %.40s isn't a field of a move (hold, seconds, walking, turn_to)", where, vl, key);
         }
-        if (!have_hold || seconds < 0) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d needs hold and seconds", where, line, i);
+        if (o->turns && seconds < 0 && !have_hold) seconds = 0;   /* a turn alone: no steps */
+        if ((!have_hold && seconds != 0) || seconds < 0) return w_fail(why, W_ERR_REFUSED, "%s line %d: move %d needs hold and seconds (or turn_to alone)", where, line, i);
         o->steps = (int)floor(seconds / m->step + 0.5);
-        if (o->steps < 1) o->steps = 1;
+        if (o->steps < 1 && seconds > 0) o->steps = 1;
         if (o->steps > HEADLESS_STEPS_MAX - m->steps)
             return w_fail(why, W_ERR_REFUSED, "%s line %d: the moves pass %d steps in all (%.0f seconds at %g a step)", where, line, HEADLESS_STEPS_MAX, HEADLESS_STEPS_MAX * m->step, m->step);
         m->steps += o->steps;
@@ -187,7 +194,8 @@ typedef struct {
     FILE        *log;
     double       ox, oy;                /* the solids' origin: where she starts, as 043's */
     double       max_grad;              /* hers, for the walls */
-    int          walled;                /* this step met a wall */
+    Wc3Pathing  *pathing;               /* a converted map's WC3 pathing (094), NULL for none */
+    int          walled;                /* the walls this step met: 1 a model's, 2 the pathing's (bits) */
     unsigned char loaded[64 * 64];      /* 1: its ground file read for its water; 2: none there */
     int          big_alpha, tiles_entered, ground_files;
     unsigned char entered[64 * 64];
@@ -201,9 +209,9 @@ static float ground_at(void *ctx, float x, float y, float z_top, float *gx, floa
 static int wall_at(void *ctx, double x0, double y0, double x1, double y1, double z, float *nx, float *ny)
 {
     Here *h = ctx;
-    int hit = model_solids_wall(h->solids, x0, y0, x1, y1, z, (float)h->max_grad, nx, ny);
+    int hit = model_solids_wall(h->solids, h->pathing, x0, y0, x1, y1, z, (float)h->max_grad, nx, ny);
     h->walled |= hit;
-    return hit;
+    return hit != 0;
 }
 static float water_at(void *ctx, double x, double y)
 {
@@ -341,6 +349,8 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "model_stand_ins", r->model_stand_ins }, { "models_left_out", r->models_left_out }, { "model_copies", r->model_copies },
         { "solid_copies", r->solid_copies }, { "solid_triangles", r->solid_triangles }, { "building_pools", r->building_pools },
         { "steps_on_models", r->steps_on_models }, { "steps_walled", r->steps_walled },
+        { "pathing", r->pathing }, { "pathing_cells", r->pathing_cells }, { "pathing_closed", r->pathing_closed },
+        { "steps_walled_pathing", r->steps_walled_pathing }, { "steps_on_closed", r->steps_on_closed },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -399,6 +409,22 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     h->models = models;
     h->log = log;
     h->ox = ox; h->oy = oy;
+    int rows = 0;
+    if (in->start.conv) {   /* a converted map's WC3 pathing as walls (094, 1109 step 1p); none is no walls, said */
+        WWhy w;
+        WErr pe = wc3_pathing_open(ws.assets, &ws.chain, in->start.conv->wc3_scale, in->start.conv->wc3_x0, in->start.conv->wc3_y0, &h->pathing, &w);
+        if (pe == W_ERR_NOT_FOUND) fprintf(log, "headless: %s\n", w.text);
+        else if (pe) {
+            free(h); liquid_free(waters); collide_free(solids); model_solids_free(models); anim_free(&anim); world_start_close(&ws);
+            w_fail(why, pe, "%s", w.text);
+            return ended(bye, pe, why);
+        } else {
+            r.pathing = 1;
+            wc3_pathing_size(h->pathing, &r.pathing_cells, &rows, &r.pathing_closed);
+            r.pathing_cells *= rows;
+            fprintf(log, "headless: its WC3 pathing, %d cells, %d closed to walkers: walls\n", r.pathing_cells, r.pathing_closed);
+        }
+    }
     {
         char wdt[300];
         snprintf(wdt, sizeof wdt, "World\\Maps\\%s\\%s.wdt", ws.map_name, ws.map_name);
@@ -424,6 +450,7 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             mv->nmoves, mv->steps, mv->step, m.x, m.y, m.z);
     for (int i = 0; i < mv->nmoves; ++i) {
         const Move *o = &mv->moves[i];
+        if (o->turns) m.o = o->turn_to;   /* she faces it at once, as a turn of the mouse does */
         MoverInput mi = {
             .forward = !!(o->keys & 1u << HOLD_FORWARD), .back = !!(o->keys & 1u << HOLD_BACK),
             .left = !!(o->keys & 1u << HOLD_LEFT), .right = !!(o->keys & 1u << HOLD_RIGHT),
@@ -435,7 +462,9 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
             double bx = m.x, by = m.y;
             h->walled = 0;
             mover_step(&m, &mi, mv->step, &mw);
-            if (h->walled) ++r.steps_walled;
+            if (h->walled & MODEL_SOLIDS_WALL_MODEL) ++r.steps_walled;
+            if (h->walled & MODEL_SOLIDS_WALL_PATHING) ++r.steps_walled_pathing;
+            if (wc3_pathing_blocks(h->pathing, m.x, m.y)) ++r.steps_on_closed;   /* a wall let her through: none, but for a start in a closed cell */
             r.distance += hypot(m.x - bx, m.y - by);
             if (m.z < r.lowest_z) r.lowest_z = m.z;
             if (m.z > r.highest_z) r.highest_z = m.z;
@@ -475,8 +504,9 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
     r.solid_triangles = mc.triangles; r.building_pools = mc.pools;
     fprintf(log, "headless: %d models and %d buildings placed %d times (%d WC3 models and %d stand-ins walked through, %d left out); %d copies solid, %d solid triangles, %d buildings' pools\n",
             r.models, r.buildings, r.model_copies, r.models_wc3, r.model_stand_ins, r.models_left_out, r.solid_copies, r.solid_triangles, r.building_pools);
-    fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground, %d on models' floors, %d against their walls\n",
-            r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground, r.steps_on_models, r.steps_walled);
+    fprintf(log, "headless: ended at (%.3f, %.3f, %.3f) after %.1f yards; %d tiles entered, %d steps in the air, %d swimming, %d with no ground, %d on models' floors, %d against their walls, %d against the pathing's\n",
+            r.end_x, r.end_y, r.end_z, r.distance, r.tiles, r.steps_airborne, r.steps_swimming, r.steps_no_ground, r.steps_on_models, r.steps_walled, r.steps_walled_pathing);
+    wc3_pathing_free(h->pathing);
     model_solids_free(models);
     collide_free(solids);
     liquid_free(waters);

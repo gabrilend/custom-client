@@ -71,6 +71,7 @@
 #include "../src/088-figure-model.h"
 #include "../src/089-headless-run.h"
 #include "../src/091-model-solids.h"
+#include "../src/094-wc3-pathing.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -2603,9 +2604,9 @@ static void model_solids_tests(const char *dir)
         snprintf(line, sizeof line, "the mover's floor (091, 043's rule): on the platform %.2f, on the hut's set-1 furnishing (a platform too) %.2f, beside them none (%.0f)", fz, fz2, fz3);
         check(near(fz, 11.5, 1e-3) && near(fz2, 11.5, 1e-3) && fz3 < -10000, line);
         float nx, ny;
-        int hit = model_solids_wall(cw, 95, 201, 99, 201, 10, 1.73f, &nx, &ny);
-        int miss = model_solids_wall(cw, 90, 201, 92, 201, 10, 1.73f, &nx, &ny);
-        check(hit && nx < -0.9f && !miss && !model_solids_wall(NULL, 95, 201, 99, 201, 10, 1.73f, &nx, &ny),
+        int hit = model_solids_wall(cw, NULL, 95, 201, 99, 201, 10, 1.73f, &nx, &ny);
+        int miss = model_solids_wall(cw, NULL, 90, 201, 92, 201, 10, 1.73f, &nx, &ny);
+        check(hit && nx < -0.9f && !miss && !model_solids_wall(NULL, NULL, 95, 201, 99, 201, 10, 1.73f, &nx, &ny),
               "the mover's walls: into the platform's side (1.5 yards: over her step) stops her, facing her; short of it, and with no solids, nothing");
         /* the platform listed by both tiles: placed once, by the first */
         e = model_solids_add_tile(ms, &t[1], 31 * 64 + 32, 100, 200, &why);
@@ -2637,6 +2638,192 @@ static void model_solids_tests(const char *dir)
     fclose(none.log);
     free(quiet);
     t_remove_tree(root);
+}
+/* }}} */
+
+/* {{{ a converted map's WC3 pathing as walls (094, 1109 step 1p): bytes
+ * made here, on fixture a's ground (4 x 3 tiles: 16 x 12 cells, its
+ * south-west corner at WC3's (-256, -192)), half a yard a WC3 unit and
+ * the corner of the converted world at (100, 200) */
+static void t_wpm(W3eOut *o, const char *tag, int version, int w, int h, int ncells)
+{
+    o->n = 0;
+    wo_raw(o, tag, 4); wo32(o, (uint32_t)version); wo32(o, (uint32_t)w); wo32(o, (uint32_t)h);
+    for (int k = 0; k < ncells; ++k) {
+        int i = k % (w > 0 ? w : 1), j = k / (w > 0 ? w : 1), f = 0x48;   /* land, no building: open to walkers */
+        if (i == 5 && j == 5) f = 0xCE;                                     /* the closed border's byte (new_map.lua's) */
+        if (i == 5 && j == 8) f = 0x42;                                     /* closed land, nothing else */
+        if (i == 8 && j == 5) f = 0x0A;                                     /* deep water: closed to WC3's walkers, swum here */
+        wo8(o, (unsigned)f);
+    }
+}
+/* the converted world's place of a point in cell (i, j): fi, fj its
+ * share across the cell (0.5 its middle) */
+static void t_wpm_at(double i, double j, double *x, double *y)
+{
+    double wc3_x = -256 + 32 * i, wc3_y = -192 + 32 * j;
+    *x = 100 + 0.5 * wc3_y;
+    *y = 200 - 0.5 * wc3_x;
+}
+static void wc3_pathing_tests(const char *dir)
+{
+    char root[400], folder[520], line[1000];
+    WWhy why;
+    WErr e;
+    W3eOut o = { 0 };
+    /* {{{ its bytes, and what it refuses */
+    t_wpm(&o, "MP3W", 0, 16, 12, 16 * 12);
+    Wc3Pathing *p = NULL;
+    e = wc3_pathing_read(o.b, o.n, -256, -192, 0.5, 100, 200, &p, &why);
+    int w = 0, h = 0, blocking = 0;
+    if (!e) wc3_pathing_size(p, &w, &h, &blocking);
+    check(!e && w == 16 && h == 12 && blocking == 2, e ? why.text : "a pathing map read (094): 16 x 12 cells, two of them closed land (deep water isn't counted)");
+    static const struct { const char *tag; int version, w, h, ncells; double scale; WErr want; const char *names; } BAD[] = {
+        { "MP3X", 0, 16, 12, 192, 0.5, W_ERR_CORRUPT, "MP3W" },
+        { "MP3W", 1, 16, 12, 192, 0.5, W_ERR_UNSUPPORTED, "version 1" },
+        { "MP3W", 0, 16, 12, 191, 0.5, W_ERR_CORRUPT, "cut short" },
+        { "MP3W", 0, 0, 12, 0, 0.5, W_ERR_CORRUPT, "0 cells by 12" },
+        { "MP3W", 0, 16, 12, 192, 0, W_ERR_REFUSED, "yards a WC3 unit" },
+    };
+    int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
+    for (int k = 0; k < nbad; ++k) {
+        W3eOut b = { 0 };
+        t_wpm(&b, BAD[k].tag, BAD[k].version, BAD[k].w, BAD[k].h, BAD[k].ncells);
+        Wc3Pathing *q = NULL;
+        WErr be = wc3_pathing_read(b.b, b.n, -256, -192, BAD[k].scale, 100, 200, &q, &why);
+        if (be == BAD[k].want && strstr(why.text, BAD[k].names) && !q) ++refused;
+        else printf("    (pathing %d: %s)\n", k, be ? why.text : "taken");
+        wc3_pathing_free(q);
+        free(b.b);
+    }
+    Wc3Pathing *q = NULL;
+    e = wc3_pathing_read((const unsigned char *)"MP3W", 4, -256, -192, 0.5, 100, 200, &q, &why);
+    snprintf(line, sizeof line, "pathing maps refused (%d of %d, and a header cut short): another tag, another version, cells cut short, no width, no scale", refused, nbad);
+    check(refused == nbad && e == W_ERR_CORRUPT && !q, line);
+    /* }}} */
+    if (p) {
+        /* {{{ where its cells lie, and which block */
+        double x, y;
+        int ci = -9, cj = -9;
+        t_wpm_at(5.5, 5.5, &x, &y);
+        int f55 = wc3_pathing_flags(p, x, y, &ci, &cj);
+        t_wpm_at(0.02, 0.02, &x, &y);
+        int f00 = wc3_pathing_flags(p, x, y, NULL, NULL);
+        t_wpm_at(15.98, 11.98, &x, &y);
+        int fne = wc3_pathing_flags(p, x, y, NULL, NULL);
+        t_wpm_at(16.02, 5, &x, &y);
+        int fout = wc3_pathing_flags(p, x, y, NULL, NULL);
+        t_wpm_at(5, -0.02, &x, &y);
+        int fout2 = wc3_pathing_flags(p, x, y, NULL, NULL);
+        snprintf(line, sizeof line, "a place's cell, by map.lua's rule turned round (094): the closed cell %d, %d holds 0x%X; the corners' 0x%X and 0x%X; past the grid %d and %d",
+                 ci, cj, (unsigned)f55, (unsigned)f00, (unsigned)fne, fout, fout2);
+        check(ci == 5 && cj == 5 && f55 == 0xCE && f00 == 0x48 && fne == 0x48 && fout == -1 && fout2 == -1, line);
+        double x2, y2, x3, y3, x4, y4;
+        t_wpm_at(5.5, 5.5, &x, &y);
+        t_wpm_at(5.5, 8.5, &x2, &y2);
+        t_wpm_at(8.5, 5.5, &x3, &y3);
+        t_wpm_at(16.5, 5.5, &x4, &y4);
+        check(wc3_pathing_blocks(p, x, y) && wc3_pathing_blocks(p, x2, y2) && !wc3_pathing_blocks(p, x3, y3) && !wc3_pathing_blocks(p, x4, y4) && !wc3_pathing_blocks(NULL, x, y),
+              "a wall is closed land (0x02 and 0x40): the border's byte and closed land block; deep water (closed to WC3's walkers, swum here), past the grid and no pathing don't");
+        /* }}} */
+        /* {{{ a step's wall, and its facing */
+        float nx = 9, ny = 9;
+        double ax, ay, bx, by;
+        t_wpm_at(4.5, 5.5, &ax, &ay);
+        t_wpm_at(5.5, 5.5, &bx, &by);
+        int across_i = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        float inx = nx, iny = ny;
+        int back_out = wc3_pathing_wall(p, bx, by, ax, ay, 0.4, &nx, &ny);
+        t_wpm_at(5.5, 4.5, &ax, &ay);
+        nx = ny = 9;
+        int across_j = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        float jnx = nx, jny = ny;
+        snprintf(line, sizeof line, "a step into the closed cell (094): across a column the wall faces (%.0f, %.0f), across a row (%.0f, %.0f), back toward her; out of it, %s",
+                 inx, iny, jnx, jny, back_out ? "held" : "free");
+        check(across_i && inx == 0 && iny == 1 && across_j && jnx == -1 && jny == 0 && !back_out, line);
+        /* her front: a step that stops short of the cell, a body's reach from it */
+        t_wpm_at(4.5, 5.5, &ax, &ay);
+        t_wpm_at(4.97, 5.5, &bx, &by);   /* 0.48 yards short of the cell's side */
+        int reach = wc3_pathing_wall(p, ax, ay, bx, by, 0.6, &nx, &ny);
+        int short_of = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        check(reach && !short_of, "her front is asked too: a step 0.48 yards short of a closed cell is held with a body 0.6 round, not with one 0.4 round");
+        /* the corner: a step from (4, 4) into (5, 5), both its neighbours open */
+        t_wpm_at(4.5, 4.5, &ax, &ay);
+        t_wpm_at(5.3, 5.3, &bx, &by);
+        int corner = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        double d = hypot(bx - ax, by - ay);
+        check(corner && fabs(nx + (bx - ax) / d) < 1e-5 && fabs(ny + (by - ay) / d) < 1e-5,
+              "a step across a closed cell's corner, both its neighbours open: held, the wall facing back along the step");
+        /* deep water, past the grid, no pathing: no wall */
+        t_wpm_at(7.5, 5.5, &ax, &ay);
+        t_wpm_at(8.5, 5.5, &bx, &by);
+        int water = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        t_wpm_at(15.5, 5.5, &ax, &ay);
+        t_wpm_at(16.5, 5.5, &bx, &by);
+        int past = wc3_pathing_wall(p, ax, ay, bx, by, 0.4, &nx, &ny);
+        t_wpm_at(4.5, 5.5, &ax, &ay);
+        t_wpm_at(5.5, 5.5, &bx, &by);
+        int none = wc3_pathing_wall(NULL, ax, ay, bx, by, 0.4, &nx, &ny);
+        check(!water && !past && !none, "no wall into deep water (the mover's water decides), past the grid's side (the ground's extent decides), or with no pathing");
+        /* the mover's question (091): pathing's walls answered beside the models' */
+        int by_pathing = model_solids_wall(NULL, p, ax, ay, bx, by, 0, 1.73f, &nx, &ny);
+        int by_none = model_solids_wall(NULL, NULL, ax, ay, bx, by, 0, 1.73f, &nx, &ny);
+        check(by_pathing == MODEL_SOLIDS_WALL_PATHING && by_none == 0 && nx == 0 && ny == 1,
+              "the mover's wall question (091) asks the pathing after the models: the closed cell answers as pathing's wall, facing her");
+        /* }}} */
+    }
+    wc3_pathing_free(p);
+    /* {{{ the converted map's own, through the resolver */
+    e = wc3_pathing_open(NULL, NULL, 0.5, 100, 200, &p, &why);
+    check(e == W_ERR_NOT_FOUND && !p, "no resolver (a test-map run's): no pathing, not found");
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-wc3-pathing", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the pathing's fixtures"); free(o.b); return; }
+    t_remove_tree(root);
+    t_mkdirs(root);
+    W3eOut g = { 0 };
+    w3e_fixture_a(&g, 11);
+    W3eOut small = { 0 };
+    t_wpm(&small, "MP3W", 0, 8, 8, 64);
+    static const struct { const char *name; int w3e; const W3eOut *wpm; WErr want; const char *names; } BUILDS[] = {
+        { "both", 1, NULL, W_OK, "" },
+        { "no-wpm", 1, NULL, W_ERR_NOT_FOUND, "no war3map.wpm" },
+        { "no-w3e", 0, NULL, W_ERR_NOT_FOUND, "war3map.w3e" },
+        { "other-size", 1, NULL, W_ERR_CORRUPT, "want 16 x 12" },
+    };
+    int asked = 0, answered = 0;
+    for (int k = 0; k < 4; ++k) {
+        snprintf(folder, sizeof folder, "%s/%s", root, BUILDS[k].name);
+        t_mkdirs(folder);
+        if (BUILDS[k].w3e) t_write(folder, "war3map.w3e", g.b, g.n);
+        if (k == 0 || k == 2) t_write(folder, "war3map.wpm", o.b, o.n);
+        if (k == 3) t_write(folder, "war3map.wpm", small.b, small.n);
+        ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        e = resolver_open(&place, &r, &why);
+        if (!e) {
+            ++asked;
+            e = wc3_pathing_open(r, NULL, 0.5, 100, 200, &p, &why);
+            int ok = e == BUILDS[k].want && (e ? !p && strstr(why.text, BUILDS[k].names) != NULL : p != NULL);
+            if (ok && !e) { wc3_pathing_size(p, &w, &h, &blocking); ok = w == 16 && h == 12 && blocking == 2; }
+            if (ok) ++answered;
+            else printf("    (pathing build %s: %s)\n", BUILDS[k].name, e ? why.text : "opened");
+            wc3_pathing_free(p);
+            p = NULL;
+            resolver_free(r);
+        }
+        fclose(place.log);
+        free(log);
+    }
+    snprintf(line, sizeof line, "a converted map's pathing through the resolver (%d of 4): war3map.wpm placed by war3map.w3e's corner; none there (a build from before the converter copied it) or no w3e, not found; a grid the ground doesn't want, corrupt", answered);
+    check(asked == 4 && answered == 4, line);
+    free(g.b);
+    free(small.b);
+    t_remove_tree(root);
+    /* }}} */
+    free(o.b);
 }
 /* }}} */
 
@@ -5193,6 +5380,10 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             { "return { format = 1, moves = { { hold = \"jump\", seconds = 1, walking = 1 } } }", "walking" },
             { "return { format = 1, map = \"World\\\\Maps\\\\Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
             { "return { format = 1, map = 3, moves = { { hold = \"\", seconds = 1 } } }", "map must be" },
+            { "return { format = 1, moves = { { turn_to = 7, hold = \"\", seconds = 1 } } }", "turn_to must be" },
+            { "return { format = 1, moves = { { turn_to = \"north\" } } }", "turn_to must be" },
+            { "return { format = 1, moves = { { turn_to = 0, hold = \"forward\" } } }", "or turn_to alone" },
+            { "return { format = 1, moves = { { turn_to = 0, seconds = 1 } } }", "or turn_to alone" },
         };
         int refused = 0, nbad = (int)(sizeof BAD / sizeof BAD[0]);
         for (int i = 0; i < nbad; ++i) {
@@ -5201,24 +5392,32 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             else printf("    (moves %d: %s)\n", i, e ? why.text : "taken");
             if (!e) headless_moves_free(hm);
         }
-        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name", refused, nbad);
+        snprintf(line, sizeof line, "moves refused by name and line (%d of %d): a key or field misspelt, no seconds, another format, too long a step, no moves, past the hour, walking not true or false, a map that isn't a folder's name, a turn_to past a whole turn or not a number, a turn_to with hold and no seconds or seconds and no hold", refused, nbad);
         check(refused == nbad, line);
         const char *named = "return { format = 1, map = \"Kalimdor\", moves = { { hold = \"\", seconds = 1 } } }";
         e = headless_moves_parse(named, strlen(named), "made", &hm, &why);
         check(!e && !strcmp(headless_moves_map(hm), "Kalimdor"), e ? why.text : "moves may name the map they are for (1109 step 1o); \"\" when they don't");
         if (!e) headless_moves_free(hm);
-        /* the project's routes on two converted maps (1109 step 1o): each names its map */
+        /* the project's routes on two converted maps (1109 steps 1o and
+         * 1p): each names its map */
         static const struct { const char *file, *map; } ROUTES[] = {
             { "092-test-map-moves-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a" },
             { "093-test-map-moves-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest" },
+            { "095-test-map-walls-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a" },
+            { "096-test-map-walls-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest" },
         };
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < 4; ++i) {
             snprintf(moves_path + at, sizeof moves_path - at, "%s", ROUTES[i].file);
             e = headless_moves_read(moves_path, &hm, &why);
             snprintf(line, sizeof line, "the route tests/%s reads, for the map %s", ROUTES[i].file, ROUTES[i].map);
             check(!e && !strcmp(headless_moves_map(hm), ROUTES[i].map) && headless_moves_steps(hm) > 480, e ? why.text : line);
             if (!e) headless_moves_free(hm);
         }
+        /* turn_to (1109 step 1p): she faces it, then the move's steps; alone, no steps */
+        const char *turns = "return { format = 1, moves = { { turn_to = 1.5708 }, { turn_to = -6.2832, hold = \"forward\", seconds = 1 }, { hold = \"\", seconds = 0.5 } } }";
+        e = headless_moves_parse(turns, strlen(turns), "made", &hm, &why);
+        check(!e && headless_moves_count(hm) == 3 && headless_moves_steps(hm) == 30, e ? why.text : "turn_to (1109 step 1p): a facing alone takes no steps; with hold and seconds she faces it, then holds them (3 moves, 30 steps)");
+        if (!e) headless_moves_free(hm);
         snprintf(moves_path + at, sizeof moves_path - at, "090-test-map-moves.lua");
         const char *tiny = "return { format = 1, moves = { { hold = \"\", seconds = 0.001 }, { hold = \"left right\", seconds = 0.08 } } }";
         e = headless_moves_parse(tiny, strlen(tiny), "made", &hm, &why);
@@ -5468,16 +5667,29 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
                  h->models, h->buildings, h->model_copies, h->models_wc3, h->model_stand_ins, h->models_left_out, h->solid_copies, h->solid_triangles, h->steps_on_models, h->steps_walled);
         check(ran == 2 && h->models > 0 && h->model_copies >= h->models && h->solid_copies <= h->model_copies && (h->solid_triangles > 0) == (h->solid_copies > 0)
               && res[1].model_copies == h->model_copies && res[1].solid_triangles == h->solid_triangles, line);
-        /* the build's own route (1109 step 1o): to its water and off its
-         * ground's edge, twice, the same receipt; the other map's route refused */
+        if (h->pathing) {
+            snprintf(line, sizeof line, "the map's WC3 pathing as walls (094, 1109 step 1p): %d cells, %d closed land; %d steps held by it, %d on a closed cell, twice the same",
+                     h->pathing_cells, h->pathing_closed, h->steps_walled_pathing, h->steps_on_closed);
+            check(ran == 2 && h->pathing_cells > 0 && h->pathing_closed > 0 && h->pathing_closed < h->pathing_cells && h->steps_on_closed == 0
+                  && res[1].steps_walled_pathing == h->steps_walled_pathing, line);
+        } else {
+            printf("  (no war3map.wpm in %s: no pathing walls; the converter copies it since world-edit-to-execute's draft PR #252)\n", build);
+            check(ran == 2 && h->pathing_cells == 0 && h->steps_walled_pathing == 0 && h->steps_on_closed == 0, "no war3map.wpm: no pathing walls, not an error (1109 step 1p)");
+        }
+        /* the build's own routes (1109 steps 1o and 1p): to its water and
+         * off its ground's edge (WitP) or against its closed border (MC),
+         * twice, the same receipt; into the pathing's walls; the other
+         * map's route refused. Found with the pathing as walls, so run
+         * only when the build has it. */
         {
-            static const struct { const char *file, *map; } ROUTES[] = {
-                { "092-test-map-moves-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a" },
-                { "093-test-map-moves-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest" },
+            static const struct { const char *file, *walls, *map; int edge; } ROUTES[] = {
+                { "092-test-map-moves-plaguelands.lua", "095-test-map-walls-plaguelands.lua", "WC3_War_in_the_Plaguelands_24_B6a", 1 },
+                { "093-test-map-moves-master-crafters.lua", "096-test-map-walls-master-crafters.lua", "WC3_Master_Crafters_Final_Conquest", 0 },
             };
             int mine = -1;
             for (int i = 0; i < 2; ++i) if (!strcasecmp(m.directory, ROUTES[i].map)) mine = i;
             if (mine < 0) printf("  (no route of the project's is for %s: the water and edge runs are skipped)\n", m.directory);
+            else if (!h->pathing) printf("  (%s's routes were found with its pathing as walls, and this build has none: skipped)\n", m.directory);
             else {
                 char rr[2][700], route[600];
                 snprintf(route, sizeof route, "%.*s%s", (int)at, moves_path, ROUTES[mine].file);
@@ -5498,12 +5710,31 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
                 }
                 headless_moves_free(rm);
                 const HeadlessResult *q = &rres[0];
-                snprintf(line, sizeof line, "its route (tests/%s): %d steps, %.1f yards to (%.2f, %.2f, %.2f), %d swimming, %d with no ground under her, %d in the air, lowest %.2f",
-                         ROUTES[mine].file, q->steps, q->distance, q->end_x, q->end_y, q->end_z, q->steps_swimming, q->steps_no_ground, q->steps_airborne, q->lowest_z);
-                check(rran == 2 && q->steps_swimming > 0 && q->steps_no_ground > 0 && q->end_z < q->start_z && q->model_copies == h->model_copies, re2 ? why.text : line);
+                snprintf(line, sizeof line, "its route (tests/%s): %d steps, %.1f yards to (%.2f, %.2f, %.2f), %d swimming, %d with no ground under her, %d in the air, lowest %.2f; %d held by the pathing, %d on a closed cell",
+                         ROUTES[mine].file, q->steps, q->distance, q->end_x, q->end_y, q->end_z, q->steps_swimming, q->steps_no_ground, q->steps_airborne, q->lowest_z,
+                         q->steps_walled_pathing, q->steps_on_closed);
+                int reached = ROUTES[mine].edge ? q->steps_no_ground > 0 && q->end_z < q->start_z   /* off the edge, falling */
+                                                : q->steps_no_ground == 0 && q->steps_walled_pathing > 0;   /* the border closed all round: held at it */
+                check(rran == 2 && q->steps_swimming > 0 && reached && q->steps_on_closed == 0 && q->model_copies == h->model_copies, re2 ? why.text : line);
                 int rsame = rran == 2 && t_receipts_same(rr[0], rr[1], diff, sizeof diff);
                 snprintf(line, sizeof line, "its route run twice: the two receipts' counts are %s", diff);
                 check(rsame && rres[0].end_x == rres[1].end_x && rres[0].end_z == rres[1].end_z && rres[0].steps_swimming == rres[1].steps_swimming, line);
+                /* into the pathing's walls: held, never in a closed cell */
+                snprintf(route, sizeof route, "%.*s%s", (int)at, moves_path, ROUTES[mine].walls);
+                re2 = headless_moves_read(route, &rm, &why);
+                snprintf(rr[0], sizeof rr[0], "%s/headless-walls", root);
+                HeadlessResult wres;
+                memset(&wres, 0, sizeof wres);
+                Goodbye *wg = NULL;
+                if (!re2) re2 = goodbye_begin(rr[0], build, &wg, &why);
+                HeadlessIn win = { .start = in, .moves = rm, .world_dir = world };
+                win.start.log = lf;
+                if (!re2) re2 = headless_run(&win, wg, &wres, &why);
+                goodbye_free(wg);
+                headless_moves_free(rm);
+                snprintf(line, sizeof line, "into the pathing's walls (tests/%s): %d steps, %.1f yards, %d held by the pathing, %d by models, %d on a closed cell",
+                         ROUTES[mine].walls, wres.steps, wres.distance, wres.steps_walled_pathing, wres.steps_walled, wres.steps_on_closed);
+                check(!re2 && wres.steps_walled_pathing > 100 && wres.steps_on_closed == 0, re2 ? why.text : line);
                 /* the other map's route: refused, by map, in the receipt */
                 snprintf(route, sizeof route, "%.*s%s", (int)at, moves_path, ROUTES[1 - mine].file);
                 re2 = headless_moves_read(route, &rm, &why);
@@ -5727,6 +5958,12 @@ int main(int argc, char **argv)
     /* {{{ the placed models' floors and walls with no window (1109 step 1o) */
     printf("the placed models' floors and walls, with no window\n");
     model_solids_tests(dir);
+    /* }}} */
+
+    /* {{{ a converted map's WC3 pathing as walls (1109 step 1p): bytes and
+     * folders made here, no game data */
+    printf("a converted map's WC3 pathing, as walls\n");
+    wc3_pathing_tests(dir);
     /* }}} */
 
     /* {{{ Warcraft III's own install as a place, and a converted map's
