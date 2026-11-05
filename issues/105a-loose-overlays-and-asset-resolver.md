@@ -116,12 +116,13 @@ Not built yet:
   (the placeholder for all of a model's files at once, when one of
   them is found and another isn't). A box stands in as a magenta
   wire-frame (step 4's wire-frames, for doodads; a missing building is
-  the box at the size its placement gives). Still reading the archives
-  directly (`mpq_chain_read`): 034's prefetch and 025's character
-  tables; each is the next slice (040's water pictures ask it since
-  1109's step 1k, through `asset_read`; 041's models, views, `.anim`
-  files and pictures, 026's light tables and 040's `LiquidType`, per
-  row through 074, since step 1l).
+  the box at the size its placement gives). Nothing in a test-map run
+  reads the archives directly any more (040's water pictures ask the
+  resolver since 1109's step 1k, through `asset_read`; 041's models,
+  views, `.anim` files and pictures, 026's light tables and 040's
+  `LiquidType`, per row through 074, since step 1l; 025's character
+  and 034's prefetch since step 1m). Only the dressing room (058, its
+  own program) still calls `mpq_chain_read`, for item icons.
   Since 1109's step 1k (2026-11-05) the **baseline set** is the fifth
   place, after the Blizzard installs and before the placeholder: a
   folder laid out as a pack, named by the setting `assetBaseline`

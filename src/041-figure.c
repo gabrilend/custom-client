@@ -285,7 +285,7 @@ static WErr from_character(Figure *f, Figures *fs, const CharacterLook *look, co
     memset(f, 0, sizeof *f);
     f->scale = 1;
     Character ch;
-    if (character_build(fs->chain, look, &ch, why)) return why->code;
+    if (character_build(fs->assets, fs->chain, look, &ch, why)) return why->code;
     snprintf(f->name, sizeof f->name, "%.63s", strrchr(ch.base, '\\') ? strrchr(ch.base, '\\') + 1 : ch.base);
     Texture2D pics[64] = { 0 };
     Texture2D skin = { 0 }, hair = { 0 }, fur = { 0 }, cape = { 0 };

@@ -164,5 +164,16 @@ and drawing are unchecked; buildings, creatures' own looks, her
 character, WC3 stock art, sounds, interface and sky still need an
 install. Decisions 89 to 97 in 1109.
 
+2026-11-05: 1109's step 1m. Her character (025: its tables, race model
+and every picture on her) and the read-ahead (034: each tile's
+pictures, doodads and buildings) ask the resolver when one is open, so
+nothing in a test-map run reads the game's archives past it; an
+ordinary run reads them as before. A character can now come from a
+pack or the map's own folder (checked with one made in a folder, no
+archives), and the read-ahead on War in the Plaguelands' and Master
+Crafters' start tiles reads 224 and 29 files with no install, where it
+read one before. A character that fails part way now lets go of what
+it made. Decisions 98 to 101 in 1109.
+
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

@@ -3,7 +3,8 @@
  *
  * For a general audience: a queue of tiles, a thread that takes them one
  * at a time, and for each the list of files the tile will want, read
- * through the archive reader (which keeps them). Reading a file it
+ * through the resolver when one is open, else the archive reader (which
+ * keeps them). Reading a file it
  * already holds costs a copy, so asking twice is cheap; each tile is
  * still asked only once (until she moves away and it is forgotten).
  * When told to (prefetch_prepare_ground), it also prepares each tile's
@@ -15,11 +16,14 @@
 #include "033-ground-prep.h"
 #include "022-m2.h"
 #include "021-wmo.h"
+#include "061-mdx.h"
+#include "076-placed-models.h"
 
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* {{{ a reader-ahead (the handle: 034-prefetch.h): the queue (tile
  * numbers tx * 64 + ty), which tiles were ever asked, the thread, and the
@@ -50,13 +54,23 @@ struct Prefetch {
 };
 /* }}} */
 
-/* {{{ static touch: a file read through the chain (and so kept), then let go */
-static unsigned char *touch(Prefetch *pf, const char *name, size_t *len)
+/* {{{ static touch: a file read through the resolver when one is open,
+ * else the chain (either keeps what it unpacked), never a placeholder
+ * (1109 step 1m: a test-map run reads nothing past the resolver); 1 when
+ * it was found, its bytes in `a` (the caller's, freed with
+ * asset_answer_free); 0 when no place has it */
+static int touch(Prefetch *pf, const char *name, AssetKind kind, AssetAnswer *a)
 {
-    const char *from;
-    unsigned char *s = mpq_chain_read(pf->chain, name, len, &from);
-    if (s) __atomic_add_fetch(&pf->files_read, 1, __ATOMIC_RELAXED);
-    return s;
+    WWhy why;
+    if (asset_read(pf->assets, pf->chain, name, kind, a, &why)) return 0;
+    __atomic_add_fetch(&pf->files_read, 1, __ATOMIC_RELAXED);
+    return 1;
+}
+/* a file read ahead and let go */
+static void touch_free(Prefetch *pf, const char *name, AssetKind kind)
+{
+    AssetAnswer a;
+    if (touch(pf, name, kind, &a)) asset_answer_free(&a);
 }
 /* }}} */
 
@@ -67,7 +81,6 @@ static void read_tile(Prefetch *pf, int i, GroundPrep **ground, int *state)
 {
     int tx = i / 64, ty = i % 64;
     char path[300];
-    size_t len;
     WWhy why;
     AdtTile *t = NULL;
     *ground = NULL;
@@ -93,40 +106,58 @@ static void read_tile(Prefetch *pf, int i, GroundPrep **ground, int *state)
         if (bad) { free(t); return; }                    /* the load itself will say what is wrong */
     }
     /* each ground picture */
-    for (int k = 0; k < t->ntextures; ++k) free(touch(pf, t->textures[k], &len));
-    /* each doodad: its model, skin, and the pictures it names */
+    for (int k = 0; k < t->ntextures; ++k) touch_free(pf, t->textures[k], ASSET_TEXTURE);
+    /* each doodad: its model, skin, and the pictures it names; a WC3
+     * model a converted map brought (named .mdx, MDLX inside) as named,
+     * as 076 reads it, else the .m2 and its view beside the name */
     for (int k = 0; k < t->nmodels; ++k) {
-        char base[260];
-        snprintf(base, sizeof base, "%s", t->models[k]);
+        char name[260], base[260];
+        snprintf(name, sizeof name, "%s", t->models[k]);
+        char *mark = strchr(name, PLACED_REPLACE_MARK[0]);   /* a placed name's marks (076) aren't part of the file's */
+        if (mark) *mark = '\0';
+        snprintf(base, sizeof base, "%s", name);
         char *dot = strrchr(base, '.');
         if (dot) *dot = '\0';
-        size_t ml, sl;
+        size_t nl = strlen(name);
+        AssetAnswer m2 = { 0 }, skin = { 0 };
+        if (nl > 4 && !strcasecmp(name + nl - 4, ".mdx") && touch(pf, name, ASSET_MODEL, &m2)) {
+            int wc3 = m2.len >= 4 && !memcmp(m2.data, "MDLX", 4);
+            MdxModel x;
+            if (wc3 && !mdx_read(m2.data, m2.len, &x, &why)) {
+                for (uint32_t p = 0; p < x.model.ntextures; ++p)
+                    if (x.model.textures[p].kind == 0 && x.model.textures[p].file[0]) touch_free(pf, x.model.textures[p].file, ASSET_TEXTURE);
+                mdx_free(&x);
+            }
+            asset_answer_free(&m2);
+            if (wc3) continue;
+        }
         snprintf(path, sizeof path, "%s.m2", base);
-        unsigned char *m2 = touch(pf, path, &ml);
+        int got = touch(pf, path, ASSET_MODEL, &m2);
         snprintf(path, sizeof path, "%s00.skin", base);
-        unsigned char *skin = touch(pf, path, &sl);
+        got = got && touch(pf, path, ASSET_MODEL, &skin);
         M2Model mod;
-        if (m2 && skin && !m2_read(m2, ml, skin, sl, &mod, &why)) {
-            for (uint32_t x = 0; x < mod.ntextures; ++x) if (mod.textures[x].kind == 0 && mod.textures[x].file[0]) free(touch(pf, mod.textures[x].file, &len));
+        if (got && !m2_read(m2.data, m2.len, skin.data, skin.len, &mod, &why)) {
+            for (uint32_t x = 0; x < mod.ntextures; ++x) if (mod.textures[x].kind == 0 && mod.textures[x].file[0]) touch_free(pf, mod.textures[x].file, ASSET_TEXTURE);
             m2_free(&mod);
         }
-        free(m2); free(skin);
+        asset_answer_free(&m2); asset_answer_free(&skin);
     }
-    /* each building: its root, its parts, and its materials' pictures */
+    /* each building: its root, its parts, and its materials' pictures (as
+     * 076 asks for them: kind model) */
     for (int k = 0; k < t->nbuildings; ++k) {
-        size_t rl;
-        unsigned char *r = touch(pf, t->buildings[k], &rl);
+        AssetAnswer r;
+        if (!touch(pf, t->buildings[k], ASSET_MODEL, &r)) continue;
         WmoRoot root;
-        if (r && !wmo_read_root(r, rl, &root, &why)) {
+        if (!wmo_read_root(r.data, r.len, &root, &why)) {
             char base[260];
             snprintf(base, sizeof base, "%s", t->buildings[k]);
             char *dot = strrchr(base, '.');
             if (dot) *dot = '\0';
-            for (int g = 0; g < root.ngroups; ++g) { snprintf(path, sizeof path, "%s_%03d.wmo", base, g); free(touch(pf, path, &len)); }
-            for (int m = 0; m < root.nmaterials; ++m) if (root.materials[m].picture[0]) free(touch(pf, root.materials[m].picture, &len));
+            for (int g = 0; g < root.ngroups; ++g) { snprintf(path, sizeof path, "%s_%03d.wmo", base, g); touch_free(pf, path, ASSET_MODEL); }
+            for (int m = 0; m < root.nmaterials; ++m) if (root.materials[m].picture[0]) touch_free(pf, root.materials[m].picture, ASSET_TEXTURE);
             wmo_free_root(&root);
         }
-        free(r);
+        asset_answer_free(&r);
     }
     if (!*ground) { adt_free(t); free(t); }              /* the preparation's file stays with it */
 }

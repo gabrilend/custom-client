@@ -18,15 +18,18 @@ pictures not yet on the card) and keeps it until the main thread takes
 it, leaving that thread only the sending to the card. The helper draws
 nothing; what it shares with the main thread is the archive reader's
 memory and the server's heights (each locked) and its own keeping
-(locked here).
+(locked here). In a test-map run every file is asked of the resolver,
+as the tile's load asks it (the map's own folder and the baseline set
+before and after the archives); a file from a folder is read from the
+disk, which keeps it warm, rather than held here.
 
 ## What it offers
 
 - `typedef struct Prefetch Prefetch;`
   A reader-ahead for map `map_name` (its tiles are
-  World\Maps\<map>\<map>_<ty>_<tx>.adt, read through `assets`, or the
-  chain alone when it is NULL; the pictures and models they name from
-  the chain), its helper thread started
+  World\Maps\<map>\<map>_<ty>_<tx>.adt; it and the pictures, models
+  and buildings it names read through `assets`, or the chain alone when
+  it is NULL, never a placeholder: 1109 step 1m), its helper thread started
   when `read_ahead` is 1; with 0 (or a thread that couldn't start, said on
   the terminal) it reads nothing ahead and every take finds nothing
   prepared. The chain and resolver must outlive it; freed with prefetch_free.

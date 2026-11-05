@@ -18,6 +18,14 @@
 #include "017-blp.h"
 #include "022-m2.h"
 #include "015-mpq.h"
+#include "060-resolver.h"
+
+/* Where every file below comes from: through `assets` when a resolver is
+ * open (a test-map run: packs, the server's folders, the map's own
+ * folder, the original archives, then the baseline set; never a
+ * placeholder), else the archives alone (`archives`), as before (1109
+ * step 1m). A table is read whole, the first place's copy. Either may be
+ * NULL, not both, and whichever is given must outlive the call. */
 
 /* the slots a character wears things in (173p), in the order they are
  * painted onto the skin sheet when two cover the same region: what lies
@@ -66,7 +74,7 @@ typedef struct {
  * as they were. Ranged weapons (bows, guns, thrown), ammunition, bags and
  * food have no slot here and are left out. W_OK, or a code with `why` (no such
  * row). */
-WErr  character_start_outfit(MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], WWhy *why);
+WErr  character_start_outfit(Resolver *assets, MpqChain *archives, int race, int class_id, int sex, int items[SLOT_COUNT], WWhy *why);
 
 /* Items to wear, written as text (410; the client's --wear): "slot:look"
  * pairs joined by commas, e.g. "chest:41143,hands:41138", each look (an
@@ -80,9 +88,11 @@ int   character_wear_text(int items[SLOT_COUNT], const char *text, char *bad, in
  * (Interface\Icons\<name>.blp, from ItemDisplayInfo), written into
  * `path`. W_OK, or W_ERR_NOT_FOUND with `why` (no such look; a look with
  * no icon). */
-WErr  character_item_icon(MpqChain *archives, int look, char *path, size_t path_len, WWhy *why);
+WErr  character_item_icon(Resolver *assets, MpqChain *archives, int look, char *path, size_t path_len, WWhy *why);
 
-WErr  character_build(MpqChain *archives, const CharacterLook *look, Character *out, WWhy *why);
+/* The character `look` describes, into `out` (freed with character_free).
+ * W_OK, or a code with `why`; on a failure nothing is left to free. */
+WErr  character_build(Resolver *assets, MpqChain *archives, const CharacterLook *look, Character *out, WWhy *why);
 void character_free(Character *c);
 
 #endif

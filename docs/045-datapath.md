@@ -68,10 +68,11 @@ archives, the resolver, the tables, the map's row, its heights, her
 height and the steepest slope) is `087-world-start.c`, which lets a
 test map start with no archives at all (1109 step 1l); which files a
 creature's display row means is `088-figure-model.c`, and 041 reads
-them, its pictures and `.anim` files through the resolver. The
-prefetch (034) and her character (025: `CharStartOutfit`,
-`CharSections`, the race models) still ask the archives directly; in a
-test map with none, the set's stand-in figure stands in her place.
+them, its pictures and `.anim` files through the resolver. Her
+character (025) and the read-ahead (034) ask it too (1109 step 1m), so
+nothing in a test-map run reads the archives past the resolver; in a
+test map with no install and no place holding her character, the set's
+stand-in figure stands in her place.
 
 ## 2. From the archives to things in memory (no window needed)
 
@@ -119,7 +120,8 @@ Each frame, in this order (`043-main.c`):
    dressed character with a baked skin).
    Tiles left behind are dropped from all of them (173s). A second
    thread (`034-prefetch.c`) reads the next ring of tiles' files ahead, into
-   the archive reader's memory, and prepares their ground; the load
+   the archive reader's memory (through the resolver in a test-map run),
+   and prepares their ground; the load
    takes a tile's preparation when there is one, or prepares it then
    (the start's tiles, after a jump). Preparations beyond the ring are
    let go (173u).
