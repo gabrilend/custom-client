@@ -778,6 +778,16 @@ int lua_value_true(const LuaValue *v) { return v && v->t == LV_BOOL && v->b; }
 const char *lua_value_text(const LuaValue *v) { return v && v->t == LV_STR ? v->s : NULL; }
 const LuaValue *lua_value_field(const LuaValue *t, const char *key) { return t && t->t == LV_TABLE ? field(t, key) : NULL; }
 int lua_value_listed(const LuaValue *t) { return t && t->t == LV_TABLE ? t->listed : 0; }
+int lua_value_count(const LuaValue *t) { return t && t->t == LV_TABLE ? t->count : 0; }
+const LuaValue *lua_value_at(const LuaValue *t, int i, const char **key)
+{
+    if (key) *key = NULL;
+    if (!t || t->t != LV_TABLE || i < 1) return NULL;
+    int n = 0;
+    for (const LvItem *it = t->first; it; it = it->next)
+        if (++n == i) { if (key) *key = it->key; return it->val; }
+    return NULL;
+}
 const LuaValue *lua_value_item(const LuaValue *t, int i)
 {
     if (!t || t->t != LV_TABLE || i < 1) return NULL;

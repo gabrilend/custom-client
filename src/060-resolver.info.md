@@ -7,7 +7,7 @@
 For a general audience: every model, picture, animation, particle
 effect, sound, font and interface picture the client uses is asked for
 by its name in the original game ("Creature\Wolf\Wolf.m2"), and this
-decides which copy answers. It asks five places in order and the first
+decides which copy answers. It asks six places in order and the first
 that has the file wins:
 
   1. the player's replacement packs, highest priority first: folders
@@ -21,7 +21,15 @@ that has the file wins:
      (015-mpq.h), then, when they plugged it in, their Warcraft III
      archives (war3.mpq, War3x.mpq, War3Patch.mpq: the `assetWc3`
      setting), for the WC3 pictures and models a converted map names;
-  5. a placeholder built into the client, chosen by kind: a magenta
+  5. the baseline set: the project's own stand-ins under the original
+     names, so a player without Blizzard's files sees ours (the owner,
+     2026-11-04: "we're going to have sensible defaults, and if users
+     want, they can plug in their Blizzard assets"). A folder laid out
+     as a pack, manifest and all (the asset forge will make the real
+     one; 085-baseline-set.h makes the smallest), named by the
+     `assetBaseline` setting; a folder that isn't there is said once
+     and left out (issue 1109, decisions 81 to 88);
+  6. a placeholder built into the client, chosen by kind: a magenta
      and black checker picture, a box model, a short beep. Each time
      one stands in, a warning names it. With strict mode on it is an
      error instead, and the program's exit status says so. A table or
@@ -56,7 +64,7 @@ types (its W03a) and reads the same manifests (059).
 
 - `type AssetSource`
 - `const char *asset_source_name(AssetSource source);`
-  The place's name for reports ("pack", "server", "overlay", "blizzard", "placeholder").
+  The place's name for reports ("pack", "server", "overlay", "blizzard", "baseline", "placeholder").
 - `type ResolverPlace`
   Where the resolver looks, and how it reports:
     packs, server, overlays  folders, highest priority first in each list
@@ -66,7 +74,12 @@ types (its W03a) and reads the same manifests (059).
                 link to their install), asked after `chain`; "" for none.
                 The resolver opens them itself (mpq_chain_open_wc3); a
                 folder with none of them is said and left out
-    strict      1: a placeholder is an error (the `assetsStrict` setting)
+    baseline    the baseline set's folder, asked after the archives and
+                before the placeholder; "" for none. Opened as a pack is
+                (its manifest.lua lists every file); a folder that isn't
+                there is said and left out
+    strict      1: a placeholder is an error (the `assetsStrict` setting;
+                an answer from the baseline set is not a placeholder)
     distinctness  a pack asset counts as replaced from this score up
                 (0 to 1; the `assetsDistinctness` setting)
     log         where warnings and trace lines go; NULL for stderr
@@ -76,7 +89,8 @@ types (its W03a) and reads the same manifests (059).
   name folders under `assets_dir`/packs and `assets_dir`/overlays
   (commas between names, highest priority first), `assetsStrict` and
   `assetsDistinctness` as above, `wc3` the folder `assetWc3` names under
-  `assets_dir` (none when either is empty); `chain` as given; no server
+  `assets_dir` and `baseline` the one `assetBaseline` names (none when
+  either is empty); `chain` as given; no server
   folders yet, log stderr, trace off. W_OK (folders are checked when
   opened).
 - `typedef struct Resolver Resolver;`
@@ -88,7 +102,9 @@ types (its W03a) and reads the same manifests (059).
   entry whose file isn't in its pack; the manifest's own codes (059); a
   folder's own (two names differing by capitals: W_ERR_REFUSED); a
   Warcraft III archive's own code when one is there but can't be read
-  (no folder, or none of its archives, is only said in the log). The
+  (no folder, or none of its archives, is only said in the log); the
+  baseline set's as a pack's, naming `assetBaseline` (no folder there is
+  only said in the log). The
   chain must outlive it. Safe to ask from more than one thread.
 - `WErr resolver_open(const ResolverPlace *place, Resolver **out, WWhy *why);`
 - `void resolver_free(Resolver *r);`
@@ -110,7 +126,8 @@ types (its W03a) and reads the same manifests (059).
 - `WErr asset_resolve_all(Resolver *r, const char *logical, AssetKind kind, AssetAnswer *out, int most, int *n, WWhy *why);`
   Every copy of `logical` of `kind`, the first place first: each pack,
   server folder and overlay that holds it, then the archives' (the chain
-  gives one copy, its highest patch's). Never a placeholder. W_OK with
+  gives one copy, its highest patch's), then the baseline set's. Never a
+  placeholder. W_OK with
   `*n` answers in `out` (0 when no place has it), each freed with
   asset_answer_free; W_ERR_FULL when more than `most` places hold it;
   asset_resolve's refusals and W_ERR_IO. Counted as asset_resolve counts.
@@ -146,6 +163,9 @@ types (its W03a) and reads the same manifests (059).
 - `const char *resolver_wc3(const Resolver *r);`
   The folder Warcraft III's archives were opened from, or NULL when the
   resolver has none (no folder given, or none of its archives there).
+- `const char *resolver_baseline(const Resolver *r);`
+  The baseline set's folder, or NULL when the resolver has none (no
+  folder given, or none there).
 - `int resolver_exit_status(Resolver *r);`
   What the program should exit with for its assets: 1 when strict mode
   is on and any placeholder was asked for, else 0.

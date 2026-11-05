@@ -707,7 +707,7 @@ int main(int argc, char **argv)
     prefetch_prepare_ground(app->pf, &app->ground_place, ground_on_card, app->ground);
     app->solids = collide_new(app->ox, app->oy);
     app->waters = liquid_new();
-    app->water = water_new(&app->chain, &app->textures, &why);
+    app->water = water_new(&app->chain, app->assets, &app->textures, &why);   /* its pictures through the resolver in a test-map run */
     if (!app->water) return start_failed(app, 1, "%s", why.text);
     /* a test map's water as WC3 draws it, when its sheet and frames are
      * found (a player with WC3: 081, tinted by its war3map.w3i);

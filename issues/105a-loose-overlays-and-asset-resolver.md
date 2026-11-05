@@ -117,9 +117,17 @@ Not built yet:
   them is found and another isn't). A box stands in as a magenta
   wire-frame (step 4's wire-frames, for doodads; a missing building is
   the box at the size its placement gives). Still reading the archives
-  directly (`mpq_chain_read`): 034's prefetch, 040's water, and 041's
-  pictures and models for the game's own creatures; each is the next
-  slice. The main
+  directly (`mpq_chain_read`): 034's prefetch and 041's pictures and
+  models for the game's own creatures; each is the next slice (040's
+  water pictures ask it since 1109's step 1k, through `asset_read`).
+  Since 1109's step 1k (2026-11-05) the **baseline set** is the fifth
+  place, after the Blizzard installs and before the placeholder: a
+  folder laid out as a pack, named by the setting `assetBaseline`
+  (default `assets/baseline`), its answers their own place
+  (`ASSET_FROM_BASELINE`, a "baseline" column in the counts table, no
+  warning, taken in strict mode). `make-baseline` (085, 086) makes the
+  smallest set from world-edit-to-execute's converter tables (1109,
+  decisions 81 to 88). The main
   program (043) opens a resolver only in a test-map run (1109's
   decision 4), so an ordinary run's exit status doesn't reflect strict
   mode yet; when it does, it exits with `resolver_exit_status`
@@ -153,8 +161,11 @@ delivered assets added as the second place, from docs/012):
 2. **The server's delivered assets** (docs/012, open questions 3 to 6).
 3. **Overlays** (`assetOverlays`): loose folders such as a converted WC3
    map's terrain and placements from world-edit-to-execute.
-4. **The MPQ chain** ([105](./105-mpq-reader.md)).
-5. **Placeholder**, chosen by kind: magenta checker texture, box model
+4. **The MPQ chain** ([105](./105-mpq-reader.md)), then the player's
+   Warcraft III install (`assetWc3`, 1109's decision 32).
+5. **The baseline set** (`assetBaseline`, 1109's decisions 81 to 88):
+   the project's own stand-ins, laid out as a pack (added 2026-11-05).
+6. **Placeholder**, chosen by kind: magenta checker texture, box model
    (drawn as a wireframe by whoever draws it), short beep. A warning
    each time (named, counted); an error when `assetsStrict` is on.
 

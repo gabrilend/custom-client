@@ -15,6 +15,10 @@
 #                         scripts/generate-custom-client-creatures) until the
 #                         world comes from the server
 #   assets/settings/      the player's Config.wtf
+#   assets/baseline/      the baseline set: the project's own stand-ins,
+#                         asked after the Blizzard installs (issue 1109).
+#                         Made here by make-baseline when it isn't there and
+#                         world-edit-to-execute's tables are (WETE below)
 #   CLIENT                the original 3.3.5a client's Data folder (default below)
 #
 # Usage: scripts/run [PROJECT_DIR] [--shot [--zoom N] [--front] [--turn DEG] [--pitch DEG] [--pose ID MS] [--clock MS] [--hour H] [--face DEG] [--walk S] [--walking] [--dive S] [--wait S] [--wear SLOT:LOOK,...] [--goto X Y] [--map ID X Y]]
@@ -77,5 +81,12 @@ ARGS+=("$@")                                     # the picture options, --no-rea
 BIN="${DIR}/tmp/tmp/build/w-client"
 if [[ ! -x "${BIN}" ]] || [[ -n "$(find "${DIR}/src" -newer "${BIN}" -name '*.[ch]' -print -quit)" ]]; then
     "${DIR}/scripts/build" "${DIR}" || exit 1
+fi
+# the smallest baseline set, from the converter's tables (085, 086), once
+WETE="${WETE:-/mnt/mtwo/programming/ai-stuff/world-edit-to-execute}"
+TABLES="${WETE}/src/wowbuild"
+if [[ ! -d "${DIR}/assets/baseline" && -f "${TABLES}/ground_textures.lua" && -f "${TABLES}/models.lua" ]]; then
+    "${DIR}/tmp/tmp/build/make-baseline" "${DIR}/assets/baseline" "${TABLES}/ground_textures.lua" "${TABLES}/models.lua" \
+        || echo "WARNING: no baseline set made, so what no install has stands in as a placeholder"
 fi
 exec "${BIN}" "${ARGS[@]}"

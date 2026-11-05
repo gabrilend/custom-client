@@ -38,6 +38,7 @@ struct Water {
     Kind      kinds[64];  int nkinds;
     Layer    *layers;     int nlayers, layers_cap;
     MpqChain *chain;
+    Resolver *assets;                /* a test-map run's resolver for the pictures, or NULL */
     const Textures *textures;        /* how pictures go to the card (036-texture.h) */
     Dbc       table;      unsigned char *table_bytes;
     Shader    shader;
@@ -60,11 +61,12 @@ void water_free(Water *w)
     if (IsShaderReady(w->shader)) UnloadShader(w->shader);
     free(w);
 }
-Water *water_new(MpqChain *c, const Textures *textures, WWhy *why)
+Water *water_new(MpqChain *c, Resolver *assets, const Textures *textures, WWhy *why)
 {
     Water *w = calloc(1, sizeof *w);
     w->textures = textures;
     w->chain = c;
+    w->assets = assets;
     size_t len;
     const char *from;
     w->table_bytes = mpq_chain_read(w->chain, "DBFilesClient\\LiquidType.dbc", &len, &from);
@@ -127,14 +129,12 @@ static int kind_of(Water *w, int id)
     for (int f = 1; pattern && pattern[0] && f <= MAX_FRAMES; ++f) {
         char name[300];
         snprintf(name, sizeof name, pattern, f);
-        size_t len;
-        const char *from;
-        unsigned char *s = mpq_chain_read(w->chain, name, &len, &from);
-        if (!s) break;
-        BlpImage img;
+        AssetAnswer a;
         WWhy why;
-        int bad = blp_decode(s, len, &img, &why);
-        free(s);
+        if (asset_read(w->assets, w->chain, name, ASSET_TEXTURE, &a, &why)) break;   /* the run's end (no placeholder) */
+        BlpImage img;
+        int bad = blp_decode(a.data, a.len, &img, &why);
+        asset_answer_free(&a);
         if (bad) { fprintf(stderr, "water: %s: %s\n", name, why.text); break; }
         k->frames[k->nframes++] = to_card(w, img.rgba, img.width, img.height);
         blp_free(&img);

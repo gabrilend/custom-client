@@ -32,8 +32,9 @@ picture options; this page doesn't copy numbers that go stale.
 
 Not in this path yet, in an ordinary run: the asset resolver
 (`060-resolver.c`, issue 105a), which puts replacement packs, the
-server's assets and loose overlay folders in front of the archives, with
-a placeholder after them. Only a test-map run (`--test-map`, issue 1109:
+server's assets and loose overlay folders in front of the archives, and
+the baseline set (the project's own stand-ins, `assets/baseline`) and a
+placeholder after them. Only a test-map run (`--test-map`, issue 1109:
 a map handed in by world-edit-to-execute's editor, converted by its
 W02c) opens one, with the map's folder first of the overlays, and ends
 by writing a goodbye receipt the editor reads back (`067-test-map.c`,
@@ -54,12 +55,15 @@ ground, and its cliffs and ramps standing as WC3's own models among
 its doodads, `079-wc3-cliffs.c`, each bent to the ground under it by
 `076-placed-models.c`; its water drawn with WC3's water sheet and
 ripple frames, `081-wc3-water.c`, tinted by the map's `war3map.w3i`,
-`083-w3i.c`, each point laid by `082-water-prep.c`), with the magenta checker for a missing picture
+`083-w3i.c`, each point laid by `082-water-prep.c`; the water's
+ripple frames, `040-water.c`), then the baseline set when it is there
+(a picture of each ground the converter names, one grey post for each
+doodad, the water's frames; `085-baseline-set.c`), with the magenta checker for a missing picture
 and a magenta wire-frame box for a missing model; and while the server
 has no map files for the map, her ground's heights are made from its
-ADTs (`075-adt-heights.c`). The prefetch (034), the water (040) and the
-game's own creatures (041) still ask the archives directly; each part
-switches with its own issue.
+ADTs (`075-adt-heights.c`). The prefetch (034) and the game's own
+creatures (041) still ask the archives directly; each part switches
+with its own issue.
 
 ## 2. From the archives to things in memory (no window needed)
 
@@ -171,6 +175,24 @@ uses the same path without the world:
   and a goodbye receipt in `output/goodbye` with the counts made and
   refused. Who uses them (wow-chat-2026's oath tabard page) is outside
   this project.
+
+## 4b. A third program: the baseline set (issue 1109)
+
+`make-baseline` (`086-make-baseline.c`, built by `scripts/build`; run
+once by `scripts/run` when `assets/baseline` isn't there and
+world-edit-to-execute's tables are) makes the smallest baseline set
+with no window and none of the game's files:
+- in: the converter's `ground_textures.lua` and `models.lua` (Lua data,
+  read by `059-loose-folders.c`);
+- **the ground**: each row's `wow` path as a 64 x 64 BLP2 of its `rgb`,
+  mottled by its path (`085-baseline-set.c`);
+- **the models**: each doodad's `.m2` path and its `00.skin` listed on
+  one stand-in post (an M2 of version 264 and its view) with its own
+  picture; buildings and creatures counted and left out;
+- **the water**: LiquidType 1's run of 30 frames under its names;
+- out: the files at their folded names under the folder and a pack's
+  `manifest.lua` listing each (its SHA-256, route `hand`, lineage
+  `independent`), which the resolver (060) asks after the archives.
 
 ## 5. Checking
 
