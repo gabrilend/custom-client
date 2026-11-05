@@ -1034,6 +1034,88 @@ platform and hut check the path), 043 and 042 running with 091 (they
 compile under gcc and clang -Werror; raylib isn't here), and a
 building's pool reached by swimming (neither build places a building).
 
+
+**Step 1p is built** (2026-11-05, the same background work): a
+converted map's WC3 pathing is walls, in the window and with no window,
+and moves can face a direction outright. Decisions 118 to 127 (118 is
+the owner's; 121 amends 117 for Master Crafters).
+
+- **The pathing map (094):** `src/094-wc3-pathing.c` reads
+  `war3map.wpm` from the build folder through the resolver (the
+  converter copies the map's own, unchanged, since world-edit-to-execute's
+  draft PR #252), with `war3map.w3e` for where its grid lies: "MP3W",
+  version 0, cells across and up, a byte a cell, rows from the south,
+  the grid's south-west corner the ground's, four cells a tile. The
+  header and the bits are world-edit-to-execute's (its
+  `src/demo/wc3map/footprint.lua`'s `parse_wpm`, and `new_map.lua` and
+  `save.lua`, which write it): 0x02 no walking, 0x04 no flying, 0x08 no
+  building, 0x20 blight, 0x40 land. A place in the converted world is
+  turned back into WC3's units by map.lua's rule (wow_x = x0 + scale
+  wc3_y, wow_y = y0 - scale wc3_x) to find its cell (decisions 119,
+  120, 122).
+- **Walls (091, 043, 089):** a cell closed to walkers that is land
+  blocks a step into it; `model_solids_wall` asks the models first and
+  the pathing after, and says which (1 a model, 2 the pathing), so 043's
+  window and 089's run share the rule. A step is held when the place
+  she steps to or her front there (her body's 0.4 yards ahead) is in
+  such a cell, and she is in an open one; the wall faces along the
+  cell's side she crosses, or back along the step at a corner
+  (decisions 119, 126). No `war3map.wpm` means no pathing walls, said
+  in the log, not an error (decision 122).
+- **The receipt (089, 068):** pathing (1 when the map's was read),
+  pathing_cells, pathing_closed, steps_walled_pathing (steps held by
+  it, apart from the models' steps_walled), steps_on_closed (steps
+  that end in a closed cell: 0 unless the rule leaks) (decision 123).
+  The receipt holds 96 counts now (decision 125).
+- **turn_to (089):** a move may say `turn_to`, a facing in radians (the
+  game's: 0 north, rising west, from -2 pi to 2 pi); she faces it at
+  once, then holds the move's keys; alone, it takes no steps. Format
+  stays 1 (decision 124).
+- **Routes (092, 093, 095, 096):** the two routes found again with the
+  pathing as walls, as turns to a facing and runs (decision 121); and
+  `tests/095-test-map-walls-plaguelands.lua` and
+  `tests/096-test-map-walls-master-crafters.lua`, the same on each map:
+  from her start, four seconds out and four back along each of eight
+  facings, then a run north and a strafe, into the pathing's walls.
+
+Checked (`tests/044-test-client.c`, "a converted map's WC3 pathing, as
+walls", with bytes and folders made there): a 16 by 12 pathing map on
+the made ground read, two cells blocking (the border's 0xCE and a bare
+0x42; deep water's 0x0A doesn't); another tag, version, cells cut
+short, no width, a header cut short and a scale of 0 refused; a place's
+cell, and past the grid none; walls across a column and a row facing
+her, at a corner facing back, held by her front 0.48 yards short with a
+body 0.6 round and not 0.4; none out of a closed cell, into deep water,
+past the grid or with no pathing; 091 answering the pathing's wall as
+2; through the resolver, opened beside a `war3map.w3e`, not found with
+no `war3map.wpm` or no `war3map.w3e`, corrupt when the grid isn't the
+ground's. turn_to read, alone taking no steps, and four bad ones
+refused. With the real builds (each map's `war3map.wpm` copied in by
+hand, as PR #252 will) and no install:
+
+- **War in the Plaguelands:** 1024 by 768 cells, 197472 closed land.
+  The project's moves (090): 122.8 yards, 56 steps held by the
+  pathing. Its route (092): 1173 steps, 439.8 yards, 14 swimming, 60
+  with no ground under her, 181 held, ending at (541.70, -122.76,
+  -89.23); twice, the same receipt. Into the walls (095): 1460 steps,
+  417.1 yards, 593 held.
+- **Master Crafters:** 1024 by 1024 cells, 153308 closed land. The
+  project's moves: 126.6 yards, 64 held. Its route (093): 2295 steps,
+  913.9 yards, 170 swimming, no step off the ground, 55 held, ending at
+  the south border (-230.42, -495.13, 1.25); twice, the same receipt.
+  Into the walls (096): 1460 steps, 473.6 yards, 375 held.
+- No step on either map ends in a closed cell. With its `war3map.wpm`
+  taken away, a build runs with no pathing walls and its routes are
+  skipped, said so.
+
+Not checked: 043's windowed run with the pathing (raylib isn't here;
+043 compiles under gcc and clang -Werror and calls the same 091), the
+converter's own copy (PR #252 isn't merged; the test builds have the
+maps' own `war3map.wpm` copied in), the bit 0x80 (set on most closed
+cells, named by no parser: not read), and a bridge or other walkable
+model over a closed cell (none in either map; the pathing would hold
+her there).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1212,6 +1294,10 @@ return {
    water and the edge.~~ Done (2026-11-05): 091 (shared with 042 and
    043), 089 placing them, `tests/092` and `093` (decisions 111 to
    117).
+1p. ~~WC3's pathing as walls, and turning to a facing.~~ Done
+   (2026-11-05): 094 reading `war3map.wpm`, 091's wall rule asking it
+   for 043 and 089, `turn_to` in the moves, `tests/092`, `093`, `095`
+   and `096` (decisions 118 to 127).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -1221,8 +1307,10 @@ return {
    for the same scripted input. The client's side is built (step 1n:
    a headless run twice on War in the Plaguelands and Master Crafters,
    in the test program; step 1o: with the models' floors and walls,
-   and each map's route to its water and off its edge, twice); the
-   check through the editor's F5 waits on step 2.
+   and each map's route to its water and off its edge, twice; step 1p:
+   with WC3's pathing as walls, War in the Plaguelands' route off its
+   edge and Master Crafters' to its closed border, twice); the check
+   through the editor's F5 waits on step 2.
 
 ## Acceptance
 
@@ -2067,7 +2155,61 @@ return {
     stop her, until the moves end. The client doesn't hold her at a
     map's edge: the server does (a player can't walk off a real map),
     and a test-map run with no server is where a converter's gap would
-    show.
+    show. (Step 1p: with WC3's pathing as walls, Master Crafters' closed
+    border holds her before its edge; decision 121.)
+
+## Decisions (2026-11-05, step 1p, answered here; the owner may overturn any)
+
+118. **Converted maps get WC3's pathing as walls** (the owner's
+    decision, through the coordinator): WC3 moves its units by its
+    pathing map, not by its models' shapes, so the pathing is WC3's own
+    equivalent of collision, and a converted map keeps it.
+119. **A wall is land closed to walkers.** A cell with both 0x02 (no
+    walking) and 0x40 (land) blocks. Deep water (0x02 without 0x40) is
+    closed to WC3's walkers too, but the converted world fills it with
+    water deep enough to swim in, and the mover's water decides there;
+    flying, building and blight bits are not read for walking.
+120. **Past the grid there is no pathing.** world-edit-to-execute's
+    parser answers "closed to all" past the grid; here, past it the
+    ground's own extent decides (decision 117), so a converter's gap
+    still shows as ground missing, not as a wall.
+121. **Master Crafters' route ends at its border, not off its edge
+    (amends 117 for it).** Its pathing is closed all round (walkable
+    cells 24 to 999 across and 16 to 991 up), and a search over every
+    reachable place found no way off its ground, so 093 now runs to its
+    water and then into the south border, where the pathing holds her;
+    the test asks swimming, no step off the ground, and steps held by
+    the pathing. War in the Plaguelands' north rows are open, so 092
+    still leaves its edge. The routes were found again as before
+    (decision 115), with turns to a facing over 72 facings.
+122. **No `war3map.wpm`, no pathing walls.** A build from before the
+    converter copied it, or a map with none, runs as before: the log
+    says so, the receipt's pathing is 0, and the test program skips the
+    routes (found with the pathing). Anything wrong with a
+    `war3map.wpm` that is there (its tag, version, size against
+    `war3map.w3e`'s grid) stops the start, naming the file.
+123. **The pathing's walls are counted apart.** steps_walled_pathing
+    beside the models' steps_walled, so step 5's comparison tells which
+    held her; steps_on_closed counts steps ending in a closed cell,
+    which the rule should never allow (0 in every run here), so a leak
+    in it shows in the receipt.
+124. **`turn_to` is a facing, not a turn.** Absolute radians in the
+    game's sense (0 north, rising west), from -2 pi to 2 pi; she faces
+    it at once, before the move's steps, as a mouse turn does. A route
+    written as facings and runs doesn't drift when the turn rate
+    changes, and is shorter to read. Format stays 1 (decision 114's
+    reason).
+125. **The receipt holds 96 counts.** 1p's five counts passed the 48
+    068 allowed.
+126. **Both the place she steps to and her front there are asked.**
+    Asking only her front let a step slip past a closed cell's corner
+    diagonally (seen on Master Crafters' walls route); asking both
+    closes it. The wall's facing follows the side crossed, which the
+    mover slides along.
+127. **0x80 is not read.** It is set on most cells walkers can't enter
+    (cliffs, the closed border: new_map.lua writes 0xCE there), but
+    neither world-edit-to-execute's parser nor its writers name it, so
+    it stays unchecked; 0x01 and 0x10 appear in neither test map.
 
 ## Open questions
 
@@ -2254,9 +2396,15 @@ return {
   `tests/090-test-map-moves.lua`. For step 1o:
   `src/091-model-solids.info.md` (the models' floors and walls with no
   window), 089, 042, 043, 087, and `tests/092-test-map-moves-plaguelands.lua`
-  and `tests/093-test-map-moves-master-crafters.lua`.
+  and `tests/093-test-map-moves-master-crafters.lua`. For step 1p:
+  `src/094-wc3-pathing.info.md` (the map's WC3 pathing as walls), 091,
+  089, 043, 068, and `tests/095-test-map-walls-plaguelands.lua` and
+  `tests/096-test-map-walls-master-crafters.lua`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
+- world-edit-to-execute's draft PR #252 (branch
+  claude/wete-w02-wpm-copy): copies the map's `war3map.wpm` into the
+  build folder, read by step 1p.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103
   selection, 1104 orders are what Test Map plays with).
 - world-edit-to-execute issues 901-912 (the editor), its

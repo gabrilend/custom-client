@@ -35,7 +35,9 @@
  * model_solids_wall) are the windowed client's rule (043-main.c), here so
  * both runs share it: the higher of the map's ground and a model's floor
  * at or below her feet plus a step; walls from the models' steep
- * triangles, her body WORLD_HER_RADIUS round and WORLD_HER_HEIGHT tall.
+ * triangles, her body WORLD_HER_RADIUS round and WORLD_HER_HEIGHT tall,
+ * and on a converted map the cells its WC3 pathing closes to walkers
+ * (094-wc3-pathing.h, 1109 step 1p).
  *
  * Window-free (CORE: the test program and the executable).
  */
@@ -51,6 +53,7 @@
 #include "028-collide.h"
 #include "060-resolver.h"
 #include "076-placed-models.h"
+#include "094-wc3-pathing.h"
 
 #include <stdio.h>
 
@@ -80,10 +83,16 @@ void model_solids_stand_in_size(const AdtPlace *p, float m[16]);
  * *gy; below -10000 when there is neither. */
 float model_solids_ground(MapWorld *world, CollideWorld *solids, float x, float y, float z_top, float *gx, float *gy);
 /* Whether walking from (x0, y0) to (x1, y1), feet at `z`, runs into a
- * model's wall steeper than `max_grad` (rise per yard), her body
- * WORLD_HER_RADIUS round and WORLD_HER_HEIGHT tall, stepping over
- * MOVER_STEP_UP; 1 with the wall's facing in *nx, *ny. 0 with no solids. */
-int model_solids_wall(CollideWorld *solids, double x0, double y0, double x1, double y1, double z, float max_grad, float *nx, float *ny);
+ * wall, her body WORLD_HER_RADIUS round and WORLD_HER_HEIGHT tall:
+ * MODEL_SOLIDS_WALL_MODEL for a model's wall steeper than `max_grad`
+ * (rise per yard) that she can't step over (MOVER_STEP_UP);
+ * MODEL_SOLIDS_WALL_PATHING for a converted map's WC3 pathing closing
+ * the cell she steps into (094-wc3-pathing.h; a model's wall is asked
+ * first); with the wall's facing in *nx, *ny. 0 for none (either of
+ * `solids` and `pathing` may be NULL). */
+#define MODEL_SOLIDS_WALL_MODEL   1
+#define MODEL_SOLIDS_WALL_PATHING 2
+int model_solids_wall(CollideWorld *solids, const Wc3Pathing *pathing, double x0, double y0, double x1, double y1, double z, float max_grad, float *nx, float *ny);
 /* }}} */
 
 /* {{{ every model and building the tiles place (the handle) */

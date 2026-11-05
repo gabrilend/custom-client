@@ -73,10 +73,12 @@ float model_solids_ground(MapWorld *world, CollideWorld *solids, float x, float 
     return t;
 }
 
-int model_solids_wall(CollideWorld *solids, double x0, double y0, double x1, double y1, double z, float max_grad, float *nx, float *ny)
+int model_solids_wall(CollideWorld *solids, const Wc3Pathing *pathing, double x0, double y0, double x1, double y1, double z, float max_grad, float *nx, float *ny)
 {
-    if (!solids) return 0;
-    return collide_wall(solids, x0, y0, x1, y1, z, WORLD_HER_RADIUS, (float)MOVER_STEP_UP, WORLD_HER_HEIGHT, max_grad, nx, ny);
+    if (solids && collide_wall(solids, x0, y0, x1, y1, z, WORLD_HER_RADIUS, (float)MOVER_STEP_UP, WORLD_HER_HEIGHT, max_grad, nx, ny))
+        return MODEL_SOLIDS_WALL_MODEL;
+    if (wc3_pathing_wall(pathing, x0, y0, x1, y1, WORLD_HER_RADIUS, nx, ny)) return MODEL_SOLIDS_WALL_PATHING;
+    return 0;
 }
 /* }}} */
 

@@ -27,12 +27,18 @@ converted map's map.lua is), format 1:
           { hold = "forward", seconds = 3 },
           { hold = "forward left", seconds = 1, walking = true },
           { hold = "", seconds = 0.5 },  -- nothing held: she stands (or falls)
+          { turn_to = 1.5708 },          -- she faces west (radians, the game's:
+                                         -- 0 north, rising west), at once
+          { turn_to = 0, hold = "forward", seconds = 2 },   -- faces north, then runs
       },
   }
 
 Each move holds its keys for its seconds: forward, back, left, right
 (turning), strafe_left, strafe_right, jump, swim_down, any of them
-with spaces between; `walking` is the walk toggle (173i). A step is
+with spaces between; `walking` is the walk toggle (173i); `turn_to`
+(step 1p) turns her to a facing at once before the move's keys, as a
+mouse turn does, so a route doesn't hang on how far a held key turns
+her (a move with turn_to alone takes no steps). A step is
 the same length every time, so a run is the same every time. A field
 or key the format doesn't have is refused by name and line, so a
 misspelt move doesn't pass silently. tests/090-test-map-moves.lua is
@@ -54,7 +60,11 @@ placed models (091-model-solids.h, step 1o: models and buildings
 read, models_solid of them with a solid shape, models_wc3 and
 model_stand_ins walked through, models_left_out, model_copies placed,
 solid_copies, solid_triangles, building_pools; steps_on_models
-standing on a model's floor, steps_walled meeting a model's wall).
+standing on a model's floor, steps_walled meeting a model's wall); a
+converted map's WC3 pathing (094-wc3-pathing.h, step 1p: pathing 1
+when its war3map.wpm was read, pathing_cells, pathing_closed of them
+closed to walkers, steps_walled_pathing meeting one, steps_on_closed
+ending in a closed cell: none, unless she started in one).
 
 Window-free (CORE: the test program and the executable).
 
