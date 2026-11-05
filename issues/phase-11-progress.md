@@ -314,3 +314,15 @@ uncounted, so 82 later checks that need no data never ran here. Both
 are fixed. Those checks now run, and all pass. With the run reaching its end, the
 leak the sanitized runs always reported turned out to be the early
 return's, and is gone. Decisions 172 to 176 in 1109.
+
+2026-11-05: 1109's step 1y, a map's loading screen picture. The
+converter writes each map's loading screen (a row in LoadingScreens.dbc
+and a picture), and the client had ignored them. `101-loading-screen.c`
+follows the map's row to its loading screen and decodes the picture.
+The window shows it as it opens, before the world loads, and the run
+with no window reports it in its receipt. A missing picture leaves the
+screen dark, never the magenta checker. A check has the converter's own
+picture writer make files, and this client reads every copy back exactly
+as the converter meant it; on the real builds each smaller copy is the
+one before halved. The bar, tips and the rest of issue 606 are not
+built. Decisions 177 to 182 in 1109.

@@ -31,6 +31,9 @@ static const TableGroup MAP[] = {                       /* 66 */
     { "CorpseX", F, 1, NULL, 0, 0 }, { "CorpseY", F, 1, NULL, 0, 0 }, { "TimeOfDayOverride", I, 1, NULL, 0, 0 },
     { "ExpansionID", U, 1, NULL, 0, 0 }, { "RaidOffset", U, 1, NULL, 0, 0 }, { "MaxPlayers", U, 1, NULL, 0, 0 }, END,
 };
+/* LoadingScreenID (field 58) is read by 101 only when a copy is that
+ * wide, so it stays unmarked: marked, 074 would refuse a narrower Map
+ * copy whole, and the map with it, for want of a picture (1109 step 1y) */
 static const TableGroup AREA_TABLE[] = {                /* 36 */
     { "ID", U, 1, "074", 0, 0 }, { "ContinentID", U, 1, NULL, 0, 0 }, { "ParentAreaID", U, 1, NULL, 0, 0 },
     { "AreaBit", U, 1, NULL, 0, 0 }, { "Flags", U, 1, NULL, 0, 0 }, { "SoundProviderPref", U, 1, NULL, 0, 0 },
@@ -40,7 +43,7 @@ static const TableGroup AREA_TABLE[] = {                /* 36 */
     { "AmbientMultiplier", F, 1, NULL, 0, 0 }, { "LightID", U, 1, NULL, 0, 0 }, END,
 };
 static const TableGroup LOADING_SCREENS[] = {           /* 4 */
-    { "ID", U, 1, "074", 0, 0 }, { "Name", S, 1, NULL, 0, 1 }, { "FileName", S, 1, NULL, 0, 0 }, { "HasWideScreen", U, 1, NULL, 0, 0 }, END,
+    { "ID", U, 1, "074, 101", 0, 0 }, { "Name", S, 1, "101", 0, 1 }, { "FileName", S, 1, "101", 0, 0 }, { "HasWideScreen", U, 1, "101", 0, 0 }, END,
 };
 static const TableGroup CREATURE_DISPLAY_INFO[] = {     /* 16 */
     { "ID", U, 1, "074, 088", 0, 0 }, { "ModelID", U, 1, "088", 0, 0 }, { "SoundID", U, 1, NULL, 0, 0 },
@@ -241,6 +244,16 @@ uint32_t table_layout_checked(const TableLayout *l)
     uint32_t n = 0;
     for (const TableGroup *g = l ? l->groups : NULL; g && g->name; ++g) if (g->read_by) n += width_of(g);
     return n;
+}
+/* }}} */
+
+/* {{{ table_layout_find */
+uint32_t table_layout_find(const TableLayout *l, const char *column)
+{
+    TableColumn c;
+    for (uint32_t k = 1; l && column && k <= l->fields; ++k)
+        if (table_layout_column(l, k, &c) && !strcasecmp(c.name, column)) return k;
+    return 0;
 }
 /* }}} */
 

@@ -9,7 +9,7 @@ and are not joined; there is no login flow.
 | ID | Title | Status | Blocked by |
 |----|-------|--------|------------|
 | 602 | [The login screen's results](./602-login-results.md) | not started | Phase 5's login handshake |
-| 606 | [The loading screen](./606-the-loading-screen.md) | not started | 303, 110d |
+| 606 | [The loading screen](./606-the-loading-screen.md) | started: its picture (1109 step 1y) | 303, 110d |
 | 609 | [Losing the connection](./609-losing-the-connection.md) | not started | 602, 707, the world connection |
 | 608 | [Phase 6 demo](./608-phase-demo.md) | pending | Phase 4, Phase 5, 602, 606, 609 |
 

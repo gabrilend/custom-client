@@ -84,7 +84,11 @@ does; weather_state and weather_grade, the last weather taken (043's
 sets' strength where she ends (099, eased; 0-1; step 1v); fog_mode, the original's fog mode the light's fog follows (026,
 step 1u: 1 below map 530, 2 from it, 0 for the grey day or the map's
 own fog); fog_start and fog_end in yards, fog_red/green/blue the window's
-clear colour, sky_red/green/blue the sky overhead, each 0-1).
+clear colour, sky_red/green/blue the sky overhead, each 0-1);
+loading_screen, the map's loading screen's row (101, step 1y; 0 when
+it has none or its picture isn't anywhere), with its picture's
+loading_screen_width and _height and how many copies its file holds,
+loading_screen_levels).
 
 Window-free (CORE: the test program and the executable).
 

@@ -81,7 +81,11 @@
  * sets' strength where she ends (099, eased; 0-1; step 1v); fog_mode, the original's fog mode the light's fog follows (026,
  * step 1u: 1 below map 530, 2 from it, 0 for the grey day or the map's
  * own fog); fog_start and fog_end in yards, fog_red/green/blue the window's
- * clear colour, sky_red/green/blue the sky overhead, each 0-1).
+ * clear colour, sky_red/green/blue the sky overhead, each 0-1);
+ * loading_screen, the map's loading screen's row (101, step 1y; 0 when
+ * it has none or its picture isn't anywhere), with its picture's
+ * loading_screen_width and _height and how many copies its file holds,
+ * loading_screen_levels).
  *
  * Window-free (CORE: the test program and the executable).
  */
@@ -159,6 +163,7 @@ typedef struct {
     int    light, light_tables, fog_from_map, fog_mode, weather_state, weather_changes;
     double weather_grade, storm;
     double light_hours, fog_start, fog_end, fog_red, fog_green, fog_blue, sky_red, sky_green, sky_blue;
+    int    loading_screen, loading_screen_width, loading_screen_height, loading_screen_levels;
 } HeadlessResult;
 
 /* Runs it: the start (world_start_open), her figure (her character from

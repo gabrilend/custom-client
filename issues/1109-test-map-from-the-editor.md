@@ -1586,6 +1586,63 @@ has moved. Where the install is here but the server's files aren't,
 the reading-ahead and ground-file parts still treat the missing server
 folder as a failure; no machine here has the install, so that is left.
 
+**Step 1y is built** (2026-11-05, the same background work): a map's
+loading screen picture, which the converter writes and the client had
+ignored. Decisions 177 to 182; the new file `src/101-loading-screen.c`
+and the check `tests/102-loading-screen-matches-converter.lua`.
+
+- **Finding it (101):** the map's Map row names a LoadingScreens row
+  (LoadingScreenID), that row names the picture (FileName), and the
+  picture is read from the first place that has it (a test map's
+  folder first) and decoded by 017. Columns are found by name in 097
+  (`table_layout_find`), not counted (decision 178). Each step that
+  finds nothing says which and which number. No picture is no loading
+  screen, never the checker (decision 179). HasWideScreen is read and
+  kept, not used (decision 181).
+- **A narrow Map copy:** LoadingScreenID is field 58. 097 leaves it
+  unmarked, so 074 still takes a narrower Map copy for everything else;
+  101 says the copy is too narrow and gives no loading screen (decision
+  180).
+- **The window (043):** right after the window opens, before the world
+  loads, the picture is drawn once, stretched across the window (the
+  converter's account of the original, unchecked). Then the load
+  proceeds as before. Compiled under gcc and clang; not run (no raylib
+  here).
+- **The run with no window (089):** finds it as the window does, says
+  it, and its receipt counts `loading_screen` (the row),
+  `loading_screen_width`, `_height` and `_levels`.
+
+Checked (`tests/044-test-client.c`):
+- On tables and pictures made here: columns by name (58, 2, 3, 4).
+- Map 901's screen from a made 4 x 4 picture with three copies, as made.
+- Six refusals, each named, and no placeholder stood in for any of
+  them: none named, no row, no file named, no picture anywhere, a file
+  that isn't a picture, no Map row.
+- A 3-field Map copy: no loading screen, while its row is still taken.
+- On every converter build here (#260's among them): the Map row
+  names the LoadingScreens row map.lua names (900), the folder's
+  row, its picture `World\Maps\<dir>\<dir>_loading.blp` from the
+  folder, 512 x 512 with 10 copies, HasWideScreen 0. The first copy is
+  the picture, and each smaller copy is exactly the one before halved,
+  as the converter's loadscreen.lua halves it.
+- The run with no window reports the same in its receipt.
+
+`tests/102-loading-screen-matches-converter.lua` holds the reader to the
+converter's writer (decision 182). The converter's own `loadscreen.blp2`
+writes four made pictures: its 512 size; a 300 x 200 with see-through
+parts at 64; a 3 x 5 grown to 16; a 1 x 1. 017 reads each copy back
+pixel for pixel equal to the converter's own resample, with no copy past
+the last. Without a converter tree it is skipped, said, exit 0. A
+planted fault (017 not swapping red and blue) failed all copies and
+was taken back.
+
+Not checked: whether the original shows a BLP2 of encoding 3 (the
+converter marks it unchecked) or stretches the picture; what
+HasWideScreen does there (recalled: a wide copy); the converter's first
+copy against its source (the map's preview picture or its ground,
+not in the build). The rest of 606 (the bar, its rounds, the tips, input
+swallowed, ending when the reads finish) is not built.
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape (decision 116), or team-coloured (404:
@@ -1816,6 +1873,11 @@ return {
    faults in the test: slopes held to a missing limit, and a missing
    install that ended the run. Those are fixed, and 82 checks that never
    ran here now run and pass (decisions 172 to 176).
+1y. ~~A map's loading screen picture.~~ Done (2026-11-05): 101 finds it
+   through the map's row and LoadingScreens, and decodes it. The window
+   shows it while the world loads, and the run with no window counts it
+   in the receipt. Held to the converter's writer by tests/102
+   (decisions 177 to 182; 606's picture only).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
@@ -3119,6 +3181,39 @@ return {
     four checks are one NEEDS; a war3.mpq that is there must open and
     decode as before.
 
+177. **The loading screen picture is the slice after 1x.** Of the
+    work that needs no window, install or server, it reads what the
+    converter writes and the client ignored (LoadingScreens and the
+    picture). Every part of it can be checked against code or data on
+    both sides: the converter's own writer, the 1w-checked layouts and
+    the real builds. 303's one-building map needs data the converter
+    doesn't write, and this machine has none.
+178. **Columns by name.** `table_layout_find` (097, in the reader
+    library) gives a column's place from its name. 101 asks for
+    "LoadingScreenID" rather than 58, so it follows the layouts the
+    converter is held to.
+179. **No picture is no loading screen.** 101 reads the picture with
+    asset_read, as an interface picture, which never gives a
+    placeholder. A missing or broken picture leaves the window dark, said
+    in a line, rather than drawing the magenta checker across it.
+180. **LoadingScreenID doesn't make Map refusable.** 097's read marks
+    are what 074 refuses a narrower copy by. A Map copy too narrow for
+    field 58 would then be refused whole, map and all, for want of an
+    optional picture (074's own fixtures are 3 fields wide). So the column
+    stays unmarked and 101 checks the copy's width itself. LoadingScreens'
+    four columns are marked read by 101: the whole table, its width
+    already the converter's.
+181. **HasWideScreen is read and kept, nothing more.** What the original
+    does with it (a wide copy of the picture) is recalled; the
+    converter writes 0.
+182. **The picture's file is held to the converter's writer.** A Lua
+    check in the matches-converter pattern of 100. The converter's
+    `loadscreen.blp2` writes the file, this client's 017 reads every
+    copy back, and each is compared with the converter's own resample
+    of that size. That is the converter's code, not memory of BLP2's
+    layout. The builds' real files add that each smaller copy is the one
+    before halved. The counter is at 102.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -3325,7 +3420,11 @@ return {
   and 044; [106](./106-dbc-parser.md) (layouts); world-edit-to-execute's
   draft PR #260 (commit 306b40f40, its light tables). For step 1x:
   `tests/044-test-client.c` (NEEDS, its closing line and exit status)
-  and [008](../docs/008-build-system.md) (the tests).
+  and [008](../docs/008-build-system.md) (the tests). For step 1y:
+  `src/101-loading-screen.info.md` (the loading screen), 097, 017, 043,
+  089, `tests/102-loading-screen-matches-converter.lua`, and
+  [606](./606-the-loading-screen.md) (the loading screen's picture;
+  its bar and the rest not built).
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - world-edit-to-execute's draft PR #252 (branch
