@@ -18,7 +18,13 @@ screen, terrain pre-stream)".*
 ## Current behavior
 
 The client loads the world around the player while drawing it; there's
-no loading screen and no bar.
+no bar. Since 2026-11-05 (1109 step 1y, `src/101-loading-screen.c`) the
+map's loading screen picture is found (Map's LoadingScreenID, then
+LoadingScreens' FileName, through the resolver) and drawn once,
+stretched across the window, as the window opens and before the world
+loads; the run with no window counts it in its receipt. It isn't kept
+up, refreshed or ended by the reads, and there is no bar, tip or input
+swallowing: step 3's picture alone, the rest of this issue as written.
 
 ## Intended behavior
 
@@ -67,6 +73,9 @@ fills as the original's does (note 10.3):
 None.
 
 ## Related
+
+- [1109](./1109-test-map-from-the-editor.md) step 1y (the picture, for
+  converted maps and the archives' alike; decisions 177 to 182).
 
 - [docs/057](../docs/057-what-the-original-program-decides.md) note 10.3,
   [303](./303-wdt-and-streaming.md).

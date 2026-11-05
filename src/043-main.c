@@ -99,6 +99,7 @@
 #include "091-model-solids.h"
 #include "094-wc3-pathing.h"
 #include "099-weather.h"
+#include "101-loading-screen.h"
 
 #include "raylib.h"
 #include "raymath.h"
@@ -604,6 +605,27 @@ int main(int argc, char **argv)
     InitWindow(win_w, win_h, "Everland Ghostsong");
     textures_init(&app->textures, (int)settings_num(app->settings, "textureFilteringMode"));   /* before any picture is sent (173b6) */
     SetExitKey(KEY_NULL);                                /* Escape is read in the loop, so it can open the game menu later */
+    /* the map's loading screen (101; 1109 step 1y), stretched across the
+     * window while the rest loads (the converter's picture is square, and
+     * stretching is its account of the original's: unchecked); none is
+     * said and the window stays dark */
+    {
+        LoadingScreen ls;
+        if (loading_screen_find(app->ws.tables, app->ws.assets, &app->ws.chain, app->map_id, &ls, &why) == W_OK) {
+            printf("loading screen %u (%s): %s, %d x %d, from %s\n", ls.id, ls.name, ls.file, ls.picture.width, ls.picture.height,
+                   asset_source_name(ls.picture_from));
+            Image im = { .data = ls.picture.rgba, .width = ls.picture.width, .height = ls.picture.height, .mipmaps = 1,
+                         .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+            Texture2D t = LoadTextureFromImage(im);
+            BeginDrawing();
+            ClearBackground(BLACK);
+            DrawTexturePro(t, (Rectangle){ 0, 0, (float)t.width, (float)t.height },
+                           (Rectangle){ 0, 0, (float)GetScreenWidth(), (float)GetScreenHeight() }, (Vector2){ 0, 0 }, 0, WHITE);
+            EndDrawing();
+            UnloadTexture(t);
+            loading_screen_free(&ls);
+        } else printf("no loading screen: %s\n", why.text);
+    }
     Shader model_sh  = figure_shader();                  /* the figures' bending and lighting (041-figure.h) */
     /* her clothes: a fresh character's of her race and class, then any --wear on top */
     app->figures = figures_new(&app->ws.chain, app->ws.assets, app->ws.tables, &app->textures);   /* makes her, the bystanders and the creatures (041-figure.h) */

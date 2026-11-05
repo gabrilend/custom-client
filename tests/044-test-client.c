@@ -83,6 +83,7 @@
 #include "../src/097-table-layouts.h"
 #include "../src/098-wdt.h"
 #include "../src/099-weather.h"
+#include "../src/101-loading-screen.h"
 #include "../src/063-w3e.h"
 
 #define RAYMATH_STATIC_INLINE              /* no raylib library in the tests: the maths compiled in here */
@@ -1470,6 +1471,62 @@ static size_t t_dbc(unsigned char *out, uint32_t rows, uint32_t fields, const ui
     memcpy(out + 20 + rows * fields * 4, text, text_len);
     return 20 + rows * fields * 4 + text_len;
 }
+/* a BLP2 picture as world-edit-to-execute's loadscreen.blp2 writes one
+ * (1109 step 1y; held to 017 by tests/102-loading-screen-matches-
+ * converter.lua): encoding 3 (BGRA, no compression), 8 alpha bits, every
+ * smaller copy, each the rounded 2 x 2 average of the one before (the
+ * one-level t_blp2 below is the WC3 fixtures'). `rgba`
+ * is `n` x `n` (a power of two), top row first. malloc'd, `*len`. */
+static unsigned char *t_blp2_halving(const uint8_t *rgba, uint32_t n, size_t *len)
+{
+    uint32_t levels = 0, total = 0;
+    for (uint32_t k = n; ; k /= 2) { ++levels; total += k * k * 4; if (k == 1 || levels == 16) break; }
+    unsigned char *out = calloc(1, 148 + 1024 + total);
+    memcpy(out, "BLP2", 4); t_le32(out + 4, 1);
+    out[8] = 3; out[9] = 8; out[10] = 0; out[11] = 1;
+    t_le32(out + 12, n); t_le32(out + 16, n);
+    uint8_t *cur = malloc((size_t)n * n * 4), *next = malloc((size_t)n * n * 4);
+    memcpy(cur, rgba, (size_t)n * n * 4);
+    uint32_t at = 148 + 1024, k = n;
+    for (uint32_t l = 0; l < levels; ++l) {
+        t_le32(out + 20 + l * 4, at); t_le32(out + 84 + l * 4, k * k * 4);
+        for (uint32_t i = 0; i < k * k; ++i) {                       /* RGBA to BGRA */
+            out[at + i * 4] = cur[i * 4 + 2]; out[at + i * 4 + 1] = cur[i * 4 + 1];
+            out[at + i * 4 + 2] = cur[i * 4]; out[at + i * 4 + 3] = cur[i * 4 + 3];
+        }
+        at += k * k * 4;
+        if (k == 1) break;
+        uint32_t h = k / 2;
+        for (uint32_t y = 0; y < h; ++y)
+            for (uint32_t x = 0; x < h; ++x)
+                for (int c = 0; c < 4; ++c) {
+                    uint32_t sum = cur[((2 * y) * k + 2 * x) * 4 + c] + cur[((2 * y) * k + 2 * x + 1) * 4 + c]
+                                 + cur[((2 * y + 1) * k + 2 * x) * 4 + c] + cur[((2 * y + 1) * k + 2 * x + 1) * 4 + c];
+                    next[(y * h + x) * 4 + c] = (uint8_t)floor(sum / 4.0 + 0.5);
+                }
+        uint8_t *t = cur; cur = next; next = t;
+        k = h;
+    }
+    free(cur); free(next);
+    *len = 148 + 1024 + total;
+    return out;
+}
+/* 1 when `small` is `big` halved as the converter halves a loading
+ * screen (loadscreen.lua's resample from 2n to n: each pixel the rounded
+ * average of the 2 x 2 above it, each channel apart) */
+static int t_halved(const BlpImage *big, const BlpImage *small)
+{
+    if (small->width * 2 != big->width || small->height * 2 != big->height) return 0;
+    for (int y = 0; y < small->height; ++y)
+        for (int x = 0; x < small->width; ++x)
+            for (int c = 0; c < 4; ++c) {
+                int w = big->width;
+                unsigned sum = big->rgba[((2 * y) * w + 2 * x) * 4 + c] + big->rgba[((2 * y) * w + 2 * x + 1) * 4 + c]
+                             + big->rgba[((2 * y + 1) * w + 2 * x) * 4 + c] + big->rgba[((2 * y + 1) * w + 2 * x + 1) * 4 + c];
+                if (small->rgba[(y * small->width + x) * 4 + c] != (uint8_t)floor(sum / 4.0 + 0.5)) return 0;
+            }
+    return 1;
+}
 /* a made WDT (098): MVER 18, MPHD `flags` (32 bytes), MAIN with `on`'s
  * tiles (tile x * 64 + tile y, -1 ending; flags 1), MWMO `wmo`, and a
  * MODF when `modf` (64 bytes); `main_len` MAIN's size (32768 whole).
@@ -1498,6 +1555,159 @@ static WErr t_conv(const char *folder, const char *format, const char *map, cons
 }
 /* the ground at (x, y) of the made tile below: a tilted plane */
 static double t_plane(double x, double y) { return 3 + 0.01 * x - 0.02 * y; }
+/* }}} */
+
+/* {{{ static loading_screen_build: a converted build's loading screen
+ * (101; 1109 step 1y), read as a test-map run reads it: map.lua's
+ * loading_screen, the folder's Map row naming it, its LoadingScreens
+ * row, and its picture, as the converter writes it (loadscreen.lua: 512
+ * x 512, every smaller copy, each the one before halved) */
+static void loading_screen_build(Resolver *r, Tables *ts, const ConvertedMap *m, const char *conv_file)
+{
+    char line[600], want[300];
+    WWhy why;
+    LuaData *d = NULL;
+    double said = -1;
+    if (!lua_data_read(conv_file, CONVERTED_MAP_MOST, &d, &why)) {
+        const LuaValue *v = lua_value_field(lua_value_field(lua_data_top(d), "map"), "loading_screen");
+        if (v) said = lua_value_number(v);
+    }
+    lua_data_free(d);
+    snprintf(want, sizeof want, "World\\Maps\\%s\\%s_loading.blp", m->directory, m->directory);
+    LoadingScreen ls;
+    WErr e = loading_screen_find(ts, r, NULL, m->id, &ls, &why);
+    snprintf(line, sizeof line, "its loading screen: Map row %d names LoadingScreens %u (map.lua: %.0f), the folder's row, its picture %s from %s, %d x %d, %d copies",
+             m->id, ls.id, said, ls.file, asset_source_name(ls.picture_from), ls.picture.width, ls.picture.height, ls.levels);
+    check(!e && said == ls.id && ls.row_from == ASSET_FROM_OVERLAY && ls.picture_from == ASSET_FROM_OVERLAY && !strcasecmp(ls.file, want)
+          && ls.picture.width == 512 && ls.picture.height == 512 && ls.levels == 10 && ls.wide == 0, e ? why.text : line);
+    if (!e) {
+        AssetAnswer a;
+        int halved = 0, same = 0;
+        if (!asset_read(r, NULL, ls.file, ASSET_INTERFACE, &a, &why)) {
+            BlpImage prev, cur;
+            if (!blp_decode_level(a.data, a.len, 0, &prev, &why)) {
+                same = !memcmp(prev.rgba, ls.picture.rgba, (size_t)prev.width * prev.height * 4);
+                for (int l = 1; l < ls.levels && !blp_decode_level(a.data, a.len, l, &cur, &why); ++l) {
+                    halved += t_halved(&prev, &cur);
+                    blp_free(&prev);
+                    prev = cur;
+                }
+                blp_free(&prev);
+            }
+            asset_answer_free(&a);
+        }
+        snprintf(line, sizeof line, "and the picture is the file's first copy; each of its %d smaller copies is the one before halved, as the converter halves it (%d)", ls.levels - 1, halved);
+        check(same && halved == ls.levels - 1, line);
+    }
+    loading_screen_free(&ls);
+}
+/* }}} */
+
+/* {{{ static loading_screen_tests: the loading screen's lookups and
+ * refusals (101; 1109 step 1y), on tables and pictures made here: a Map
+ * as wide as the layouts (097, the converter's) and its LoadingScreens,
+ * a picture as the converter's writer makes one (t_blp2_halving), and a Map
+ * copy too narrow for the column. No game data. */
+static void loading_screen_tests(const char *dir)
+{
+    char root[512], folder[600], narrow[600], line[800];
+    WWhy why;
+    if (snprintf(root, sizeof root, "%s/tmp/shared-memory/test-loading-screen", dir) >= (int)sizeof root) { check(0, "the project folder's name is too long for the loading screen's fixtures"); return; }
+    t_remove_tree(root);
+    snprintf(folder, sizeof folder, "%s/map", root);
+    snprintf(narrow, sizeof narrow, "%s/narrow", root);
+    t_mkdirs(folder);
+    t_mkdirs(narrow);
+
+    const TableLayout *ml = table_layout("Map"), *ll = table_layout("LoadingScreens");
+    uint32_t c_ls = table_layout_find(ml, "LoadingScreenID"), c_dir = table_layout_find(ml, "Directory");
+    check(c_ls == 58 && c_dir == 2 && table_layout_find(ll, "filename") == 3 && table_layout_find(ll, "HasWideScreen") == 4 && !table_layout_find(ml, "NoSuchColumn"),
+          "the columns by name (097): Map's LoadingScreenID 58, Directory 2; LoadingScreens' FileName 3 (any capitals), HasWideScreen 4; none for a name it hasn't");
+
+    /* Map: 901 names 5, 902 none, 903 a row there isn't, 904 one with no
+     * picture named, 905 one whose picture is nowhere, 906 one whose
+     * picture isn't a picture */
+    static const char MTEXT[] = "\0Made";                                   /* 1 */
+    static uint32_t mcells[6 * 66];
+    static const uint32_t MAPS[6][2] = { { 901, 5 }, { 902, 0 }, { 903, 6 }, { 904, 7 }, { 905, 8 }, { 906, 9 } };
+    memset(mcells, 0, sizeof mcells);
+    for (int i = 0; i < 6; ++i) { mcells[i * 66] = MAPS[i][0]; mcells[i * 66 + c_dir - 1] = 1; mcells[i * 66 + c_ls - 1] = MAPS[i][1]; }
+    static unsigned char mb[20 + sizeof mcells + sizeof MTEXT];
+    size_t mn = t_dbc(mb, 6, 66, mcells, MTEXT, sizeof MTEXT);
+    t_write(folder, "DBFilesClient/Map.dbc", mb, mn);
+    static const char LTEXT[] = "\0Made\0World\\Made\\Made_loading.blp\0Empty\0Gone\0World\\Made\\Gone.blp\0Bad\0World\\Made\\Bad.blp";
+    /*                           0 1     6                            34     40    45                   65    69 */
+    const uint32_t lcells[] = { 5, 1, 6, 1,   7, 34, 0, 0,   8, 40, 45, 0,   9, 65, 69, 0 };
+    static unsigned char lb[200];
+    size_t ln = t_dbc(lb, 4, 4, lcells, LTEXT, sizeof LTEXT);
+    t_write(folder, "DBFilesClient/LoadingScreens.dbc", lb, ln);
+    /* a 4 x 4 picture: each pixel its own colour, alpha falling */
+    uint8_t px[4 * 4 * 4];
+    for (int i = 0; i < 16; ++i) { px[i * 4] = (uint8_t)(i * 16); px[i * 4 + 1] = (uint8_t)(255 - i * 9); px[i * 4 + 2] = (uint8_t)(i * 7 + 3); px[i * 4 + 3] = (uint8_t)(255 - i * 13); }
+    size_t bn = 0;
+    unsigned char *bb = t_blp2_halving(px, 4, &bn);
+    t_write(folder, "World/Made/Made_loading.blp", bb, bn);
+    free(bb);
+    t_write_text(folder, "World/Made/Bad.blp", "BLP9 not a picture");
+    /* the narrow folder: a Map 3 fields wide (as 074's own fixtures make
+     * them), which still gives its row to other readers */
+    const uint32_t ncells[] = { 901, 1, 0 };
+    static unsigned char nb[100];
+    size_t nn = t_dbc(nb, 1, 3, ncells, MTEXT, sizeof MTEXT);
+    t_write(narrow, "DBFilesClient/Map.dbc", nb, nn);
+
+    for (int pass = 0; pass < 2; ++pass) {
+        ResolverPlace place = { .noverlays = 1, .distinctness = 0.5 };
+        snprintf(place.overlays[0], sizeof place.overlays[0], "%s", pass ? narrow : folder);
+        char *log = NULL;
+        size_t log_len = 0;
+        place.log = open_memstream(&log, &log_len);
+        Resolver *r = NULL;
+        WErr e = resolver_open(&place, &r, &why);
+        if (e) { check(0, why.text); fclose(place.log); free(log); continue; }
+        Tables *ts = tables_new(r, NULL);
+        LoadingScreen ls;
+        if (!pass) {
+            e = loading_screen_find(ts, r, NULL, 901, &ls, &why);
+            int same = !e && ls.picture.width == 4 && ls.picture.height == 4 && !memcmp(ls.picture.rgba, px, sizeof px);
+            snprintf(line, sizeof line, "map 901's loading screen: row 5 \"%s\", %s from %s, %d x %d with %d copies, the picture as made, its HasWideScreen %u kept",
+                     ls.name, ls.file, asset_source_name(ls.picture_from), ls.picture.width, ls.picture.height, ls.levels, ls.wide);
+            check(same && ls.id == 5 && !strcmp(ls.name, "Made") && ls.levels == 3 && ls.wide == 1 && ls.picture_from == ASSET_FROM_OVERLAY && ls.row_from == ASSET_FROM_OVERLAY,
+                  e ? why.text : line);
+            loading_screen_free(&ls);
+            check(ls.picture.rgba == NULL && ls.id == 0, "let go: nothing held");
+            static const struct { int map; WErr code; const char *says; const char *what; } NONE[] = {
+                { 902, W_ERR_NOT_FOUND, "LoadingScreenID is 0", "a map that names none: not found, saying its LoadingScreenID is 0" },
+                { 903, W_ERR_NOT_FOUND, "loading screen 6", "a number LoadingScreens hasn't: not found, naming it" },
+                { 904, W_ERR_NOT_FOUND, "FileName is empty", "a row that names no picture: not found, saying so" },
+                { 905, W_ERR_NOT_FOUND, "Gone.blp", "a picture no place has: not found, naming it (never the checker)" },
+                { 906, W_ERR_CORRUPT, "Bad.blp", "a file that isn't a picture: 017's refusal, naming it" },
+                { 999, W_ERR_NOT_FOUND, "999", "a map with no row: not found, naming it" },
+            };
+            for (size_t i = 0; i < sizeof NONE / sizeof NONE[0]; ++i) {
+                e = loading_screen_find(ts, r, NULL, NONE[i].map, &ls, &why);
+                check(e == NONE[i].code && strstr(why.text, NONE[i].says) && !ls.picture.rgba, e == NONE[i].code ? NONE[i].what : why.text);
+                loading_screen_free(&ls);
+            }
+            AssetCounts ac;
+            asset_counts(r, &ac);
+            check(ac.placeholder_answers == 0 && tables_placeholders(ts) == 0, "and no placeholder stood in for any of them, picture or row");
+        } else {
+            e = loading_screen_find(ts, r, NULL, 901, &ls, &why);
+            TableRow row;
+            WWhy rw;
+            WErr re = tables_row(ts, "Map", 901, &row, &rw);
+            check(e == W_ERR_NOT_FOUND && strstr(why.text, "3 fields wide") && strstr(why.text, "field 58") && !re,
+                  "a Map copy 3 fields wide: no loading screen, saying its width and the column's; its row still there for the rest (074 doesn't refuse it)");
+            loading_screen_free(&ls);
+        }
+        tables_free(ts);
+        resolver_free(r);
+        fclose(place.log);
+        free(log);
+    }
+    t_remove_tree(root);
+}
 /* }}} */
 
 static void converted_tests(const char *dir, const char *build)
@@ -2266,6 +2476,7 @@ static void converted_tests(const char *dir, const char *build)
         snprintf(line, sizeof line, "%d of the %d light tables it writes are as wide as their layouts (097)", lit, nlit);
         check(lit == nlit, line);
     }
+    loading_screen_build(r, ts, &m, conv_file);
 
     LuaData *d = NULL;
     e = lua_data_read(conv_file, CONVERTED_MAP_MOST, &d, &why);
@@ -6562,6 +6773,21 @@ static void no_install_tests(const char *dir, const char *build, const char *tab
             check(!wre && wr.weather_state == WEATHER_HEAVY_RAIN && fabs(wr.weather_grade - 0.8) < 1e-6 && wr.weather_changes == 2 && fabs(wr.storm - 0.5) < 1e-4
                   && lua_value_number(lua_value_field(wt, "weather_state")) == WEATHER_HEAVY_RAIN && lua_value_number(lua_value_field(wt, "weather_changes")) == 2
                   && fabs(lua_value_number(lua_value_field(wt, "storm")) - wr.storm) < 1e-6, wre ? why.text : line);
+            /* the loading screen (101, 1109 step 1y): the one map.lua names,
+             * its picture as the converter writes it, in the receipt */
+            {
+                char mp[760];
+                snprintf(mp, sizeof mp, "%s/map.lua", build);
+                LuaData *md = NULL;
+                double said = lua_data_read(mp, CONVERTED_MAP_MOST, &md, &why) ? -1
+                            : lua_value_number(lua_value_field(lua_value_field(lua_data_top(md), "map"), "loading_screen"));
+                if (md) lua_data_free(md);
+                snprintf(line, sizeof line, "the run with no window finds the map's loading screen %d (map.lua: %.0f), %d x %d with %d copies, in the receipt",
+                         wr.loading_screen, said, wr.loading_screen_width, wr.loading_screen_height, wr.loading_screen_levels);
+                check(!wre && wr.loading_screen == said && wr.loading_screen_width == 512 && wr.loading_screen_height == 512 && wr.loading_screen_levels == 10
+                      && lua_value_number(lua_value_field(wt, "loading_screen")) == said && lua_value_number(lua_value_field(wt, "loading_screen_levels")) == 10,
+                      wre ? why.text : line);
+            }
             if (wd) lua_data_free(wd);
             check(h->weather_changes == 0 && h->storm == 0 && h->weather_state == WEATHER_FINE, "with no weather given: fine, no storm, none taken");
         }
@@ -6773,6 +6999,11 @@ int main(int argc, char **argv)
     /* {{{ the test map's launch and receipt (1109): folders made here, no game data */
     printf("the test map's launch and its goodbye receipt\n");
     test_map_tests(dir);
+    /* }}} */
+
+    /* {{{ a map's loading screen (101; 1109 step 1y): tables and pictures made here, no game data */
+    printf("a map's loading screen\n");
+    loading_screen_tests(dir);
     /* }}} */
 
     /* {{{ a converted map's folder (1109): map.lua, its tables per row, its

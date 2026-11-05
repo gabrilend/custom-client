@@ -26,6 +26,7 @@
 #include "026-light.h"
 #include "084-map-fog.h"
 #include "014-settings.h"
+#include "101-loading-screen.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -402,6 +403,8 @@ static WErr counted(Goodbye *bye, const HeadlessResult *r, WWhy *why)
         { "weather_state", r->weather_state }, { "weather_grade", r->weather_grade }, { "weather_changes", r->weather_changes }, { "storm", r->storm },
         { "fog_mode", r->fog_mode }, { "fog_start", r->fog_start }, { "fog_end", r->fog_end }, { "fog_red", r->fog_red }, { "fog_green", r->fog_green }, { "fog_blue", r->fog_blue },
         { "sky_red", r->sky_red }, { "sky_green", r->sky_green }, { "sky_blue", r->sky_blue },
+        { "loading_screen", r->loading_screen }, { "loading_screen_width", r->loading_screen_width },
+        { "loading_screen_height", r->loading_screen_height }, { "loading_screen_levels", r->loading_screen_levels },
     };
     for (size_t i = 0; i < sizeof c / sizeof c[0]; ++i) {
         WErr rc = goodbye_count(bye, c[i].name, c[i].value, why);
@@ -431,6 +434,21 @@ WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy 
         w_fail(why, W_ERR_REFUSED, "the moves%s%s are for the map %s; this run's is %s", in->moves->name[0] ? " " : "", in->moves->name, in->moves->map, ws.map_name);
         world_start_close(&ws);
         return ended(bye, W_ERR_REFUSED, why);
+    }
+    /* the map's loading screen, as the window shows it while the world
+     * loads (101; 1109 step 1y): none is said, not an error */
+    {
+        LoadingScreen ls;
+        WWhy lw;
+        if (loading_screen_find(ws.tables, ws.assets, &ws.chain, in->start.map_id, &ls, &lw) == W_OK) {
+            r.loading_screen = (int)ls.id;
+            r.loading_screen_width = ls.picture.width;
+            r.loading_screen_height = ls.picture.height;
+            r.loading_screen_levels = ls.levels;
+            fprintf(log, "headless: loading screen %u (%s): %s, %d x %d, %d copies, from %s\n", ls.id, ls.name, ls.file,
+                    ls.picture.width, ls.picture.height, ls.levels, asset_source_name(ls.picture_from));
+            loading_screen_free(&ls);
+        } else fprintf(log, "headless: no loading screen: %s\n", lw.text);
     }
     Anim anim;
     memset(&anim, 0, sizeof anim);

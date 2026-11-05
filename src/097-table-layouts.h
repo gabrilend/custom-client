@@ -17,7 +17,7 @@
  *
  * Where each column comes from, and how sure it is:
  *   read_by  the client's own readers read it at this place (025, 026,
- *            040, 041, 074, 087, 088): checked from code, its place and
+ *            040, 041, 074, 087, 088, 101): checked from code, its place and
  *            kind as those readers use it;
  *   NULL     unchecked: its name and kind are world-edit-to-execute's
  *            (src/wowbuild/dbc.lua's LAYOUTS, themselves marked
@@ -98,6 +98,10 @@ const TableLayout *table_layout_at(int i);
 
 /* Column `k` (from 1) of `l`: 1 with `*out`, 0 past its width. */
 int table_layout_column(const TableLayout *l, uint32_t k, TableColumn *out);
+/* The column of `l` named `column` (as table_layout_column names it,
+ * any capitals), from 1; 0 when it has none. So a reader asks for
+ * "LoadingScreenID" rather than counting to 58 (1109 step 1y). */
+uint32_t table_layout_find(const TableLayout *l, const char *column);
 /* The last column a reader of this client reads (0: none). */
 uint32_t table_layout_read_to(const TableLayout *l);
 /* How many of its columns a reader reads (checked from code). */
