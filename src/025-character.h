@@ -24,8 +24,12 @@
  * open (a test-map run: packs, the server's folders, the map's own
  * folder, the original archives, then the baseline set; never a
  * placeholder), else the archives alone (`archives`), as before (1109
- * step 1m). A table is read whole, the first place's copy. Either may be
- * NULL, not both, and whichever is given must outlive the call. */
+ * step 1m). A table is searched as 074 lists it for a search: the first
+ * place's rows, then each later place's rows of numbers no earlier place
+ * has (1109 step 1q), so a converted map's rows win and the archives'
+ * others are still found; the copies must agree on their width (074's
+ * refusal). Either may be NULL, not both, and whichever is given must
+ * outlive the call. */
 
 /* the slots a character wears things in (173p), in the order they are
  * painted onto the skin sheet when two cover the same region: what lies

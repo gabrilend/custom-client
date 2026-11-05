@@ -42,9 +42,16 @@ what it finds.
     model, skin    the model's bytes (MDLX for WC3) and, but for WC3 and
                    HUMANOID, its view (.skin), with where each came from
     stood_in_for   STAND_IN: what no place had, said
+    placeholder    1 when its display or model row was a placeholder row
+                   (074; 1109 step 1q): the stand-in stands in for it
 - `WErr figure_model_for_display(Resolver *assets, MpqChain *chain, Tables *tables, int display, FigureModel *out, WWhy *why);`
-  A creature display's model. W_OK with `*out`; the tables' refusal
-  (W_ERR_NOT_FOUND naming the table and row) when a row is missing;
+  A creature display's model. W_OK with `*out`. A display row or its
+  model's row that no place has: with a resolver, a placeholder row
+  stands in (074's tables_row_or_placeholder: said and counted, refused
+  in strict mode) and the stand-in figure with it (`placeholder` 1), so
+  a converted map whose creatures name rows it didn't bring still shows
+  them standing (1109 step 1q, decision 132); with no resolver, strict
+  mode, or no stand-in, W_ERR_NOT_FOUND naming the table and row.
   W_ERR_NOT_FOUND when CreatureModelData names no path, or no place has
   the model and there is no stand-in (no resolver, or no baseline set).
 - `WErr figure_model_stand_in(Resolver *assets, MpqChain *chain, const char *why_text, FigureModel *out, WWhy *why);`

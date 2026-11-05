@@ -61,7 +61,11 @@
  * converted map's WC3 pathing (094-wc3-pathing.h, step 1p: pathing 1
  * when its war3map.wpm was read, pathing_cells, pathing_closed of them
  * closed to walkers, steps_walled_pathing meeting one, steps_on_closed
- * ending in a closed cell: none, unless she started in one).
+ * ending in a closed cell: none, unless she started in one); rows no
+ * place has (074, step 1q: looks_placeholder, the creature looks whose
+ * display or model row was a placeholder row, the stand-in standing in
+ * and counted in looks_stand_in too; table_placeholders, the placeholder
+ * rows made).
  *
  * Window-free (CORE: the test program and the executable).
  */
@@ -121,6 +125,7 @@ typedef struct {
     int    models, models_solid, models_wc3, buildings, model_stand_ins, models_left_out;
     int    model_copies, solid_copies, solid_triangles, building_pools, steps_on_models, steps_walled;
     int    pathing, pathing_cells, pathing_closed, steps_walled_pathing, steps_on_closed;
+    int    looks_placeholder, table_placeholders;
 } HeadlessResult;
 
 /* Runs it: the start (world_start_open), her figure (her character from

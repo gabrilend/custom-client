@@ -4,8 +4,9 @@
  * For a general audience: the first time a table is asked for, every
  * copy is read and one list made of each row number and the copy that
  * answers it (the first copy holding it); then each lookup is a search
- * in that list. One lock covers the tables, since the reading-ahead
- * thread may ask too.
+ * in that list. A search by something else walks a second list, made
+ * when first asked; a placeholder row is made once and kept. One lock
+ * covers the tables, since the reading-ahead thread may ask too.
  */
 #include "074-tables.h"
 #include "013-errors.h"
@@ -17,6 +18,7 @@
 
 /* {{{ the tables' state */
 typedef struct { uint32_t id, row; int copy; } TableIndex;
+typedef struct { uint32_t id; unsigned char *bytes; Dbc dbc; } Placeholder;   /* a row made here (tables_row_or_placeholder) */
 
 typedef struct {
     char        name[64];
@@ -28,6 +30,10 @@ typedef struct {
     Dbc         dbc[TABLES_COPIES_MAX];
     TableIndex *index;  uint32_t nindex;      /* by id: the copy and row answering it */
     uint32_t    answered[TABLES_COPIES_MAX];  /* lookups each copy answered */
+    TableAt    *scan;   uint32_t nscan;       /* the rows for a search, made when first asked (tables_scan) */
+    int         scanned;
+    Placeholder **made;  int nmade, made_cap; /* placeholder rows, each made once */
+    uint32_t    refused;                      /* placeholder rows strict mode refused */
 } Table;
 
 struct Tables {
@@ -35,6 +41,7 @@ struct Tables {
     MpqChain       *chain;
     pthread_mutex_t lock;
     Table         **tables;  int ntables, cap;
+    int             placeholders;            /* placeholder rows made, all tables */
 };
 /* }}} */
 
@@ -55,6 +62,9 @@ void tables_free(Tables *ts)
         Table *t = ts->tables[i];
         for (int c = 0; c < t->ncopies; ++c) asset_answer_free(&t->copy[c]);
         free(t->index);
+        free(t->scan);
+        for (int k = 0; k < t->nmade; ++k) { free(t->made[k]->bytes); free(t->made[k]); }
+        free(t->made);
         free(t);
     }
     free(ts->tables);
@@ -146,7 +156,100 @@ static Table *table(Tables *ts, const char *name)
 /* }}} */
 
 /* {{{ tables_row, tables_copies, tables_report */
+/* the number's entry in the index (one at most), or NULL */
+static const TableIndex *find(const Table *t, uint32_t id)
+{
+    size_t lo = 0, hi = t->nindex;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (t->index[mid].id < id) lo = mid + 1; else hi = mid;
+    }
+    return lo < t->nindex && t->index[lo].id == id ? &t->index[lo] : NULL;
+}
+
+/* the row, or a placeholder when `stand_in` (the lock held) */
+static WErr row_of(Tables *ts, const char *name, uint32_t id, int stand_in, TableRow *out, WWhy *why)
+{
+    Table *t = table(ts, name);
+    if (t->state < 0) return w_fail(why, t->fail.code, "%s", t->fail.text);
+    const TableIndex *hit = find(t, id);
+    if (hit) {
+        ++t->answered[hit->copy];
+        out->dbc = &t->dbc[hit->copy];
+        out->row = hit->row;
+        out->source = t->copy[hit->copy].source;
+        out->from = t->from[hit->copy];
+        return W_OK;
+    }
+    WErr rc = w_fail(why, W_ERR_NOT_FOUND, "no row %u in %s (%d cop%s: %u row%s)", id, name, t->ncopies, t->ncopies == 1 ? "y" : "ies",
+                     t->nindex, t->nindex == 1 ? "" : "s");
+    if (!stand_in || !ts->assets) return rc;
+    Placeholder *p = NULL;
+    for (int k = 0; k < t->nmade && !p; ++k) if (t->made[k]->id == id) p = t->made[k];
+    if (!p) {
+        /* said and counted by the resolver, refused in strict mode (each time asked, as its other placeholders) */
+        char path[100];
+        snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", name);
+        WWhy inner;
+        if (asset_row_stand_in(ts->assets, path, id, &inner)) { ++t->refused; return w_fail(why, inner.code, "%s", inner.text); }
+        uint32_t fields = t->dbc[0].fields, row_len = fields * 4;
+        size_t len = 20 + (size_t)row_len + 1;           /* the header, the row, a text block of one empty string */
+        p = calloc(1, sizeof *p);
+        unsigned char *b = p ? calloc(1, len) : NULL;
+        if (t->nmade == t->made_cap) {
+            int cap = t->made_cap ? t->made_cap * 2 : 8;
+            Placeholder **m = b ? realloc(t->made, sizeof *m * (size_t)cap) : NULL;
+            if (m) { t->made = m; t->made_cap = cap; }
+        }
+        if (!p || !b || t->nmade == t->made_cap) { free(b); free(p); return w_fail(why, W_ERR_FULL, "no memory for a placeholder row %u of %s", id, name); }
+        memcpy(b, "WDBC", 4);
+        uint32_t head[4] = { 1, fields, row_len, 1 };
+        for (int k = 0; k < 4; ++k) for (int q = 0; q < 4; ++q) b[4 + 4 * k + q] = (unsigned char)(head[k] >> (8 * q));
+        for (int q = 0; q < 4; ++q) b[20 + q] = (unsigned char)(id >> (8 * q));
+        p->id = id;
+        p->bytes = b;
+        WWhy inner2;
+        if (dbc_open(&p->dbc, b, len, &inner2)) { free(b); free(p); return w_fail(why, inner2.code, "a placeholder row of %s: %s", name, inner2.text); }
+        t->made[t->nmade++] = p;
+        ++ts->placeholders;
+    }
+    out->dbc = &p->dbc;
+    out->row = 0;
+    out->source = ASSET_FROM_PLACEHOLDER;
+    out->from = "built in";
+    out->placeholder = 1;
+    return W_OK;
+}
+
 WErr tables_row(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *why)
+{
+    memset(out, 0, sizeof *out);
+    if (!name || !name[0] || strlen(name) >= 64) return w_fail(why, W_ERR_REFUSED, "a table's name is 1 to 63 characters (\"%.80s\")", name ? name : "");
+    pthread_mutex_lock(&ts->lock);
+    WErr rc = row_of(ts, name, id, 0, out, why);
+    pthread_mutex_unlock(&ts->lock);
+    return rc;
+}
+
+WErr tables_row_or_placeholder(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *why)
+{
+    memset(out, 0, sizeof *out);
+    if (!name || !name[0] || strlen(name) >= 64) return w_fail(why, W_ERR_REFUSED, "a table's name is 1 to 63 characters (\"%.80s\")", name ? name : "");
+    pthread_mutex_lock(&ts->lock);
+    WErr rc = row_of(ts, name, id, 1, out, why);
+    pthread_mutex_unlock(&ts->lock);
+    return rc;
+}
+
+int tables_placeholders(Tables *ts)
+{
+    pthread_mutex_lock(&ts->lock);
+    int n = ts->placeholders;
+    pthread_mutex_unlock(&ts->lock);
+    return n;
+}
+
+WErr tables_scan(Tables *ts, const char *name, TableScan *out, WWhy *why)
 {
     memset(out, 0, sizeof *out);
     if (!name || !name[0] || strlen(name) >= 64) return w_fail(why, W_ERR_REFUSED, "a table's name is 1 to 63 characters (\"%.80s\")", name ? name : "");
@@ -154,24 +257,28 @@ WErr tables_row(Tables *ts, const char *name, uint32_t id, TableRow *out, WWhy *
     Table *t = table(ts, name);
     WErr rc = W_OK;
     if (t->state < 0) rc = w_fail(why, t->fail.code, "%s", t->fail.text);
-    else {
-        TableIndex probe = { id, 0, 0 }, *hit = NULL;
-        size_t lo = 0, hi = t->nindex;                   /* the number's entry: there is one at most */
-        while (lo < hi) {
-            size_t mid = (lo + hi) / 2;
-            if (t->index[mid].id < probe.id) lo = mid + 1; else hi = mid;
-        }
-        if (lo < t->nindex && t->index[lo].id == id) hit = &t->index[lo];
-        if (!hit) rc = w_fail(why, W_ERR_NOT_FOUND, "no row %u in %s (%d cop%s: %u row%s)", id, name, t->ncopies, t->ncopies == 1 ? "y" : "ies",
-                              t->nindex, t->nindex == 1 ? "" : "s");
+    else if (!t->scanned) {
+        /* the first copy whole, in its order; then each later copy's rows
+         * whose number the index gives to it (no earlier copy has it) */
+        size_t total = 0;
+        for (int c = 0; c < t->ncopies; ++c) total += t->dbc[c].rows;
+        t->scan = malloc(sizeof *t->scan * (total ? total : 1));
+        if (!t->scan) rc = w_fail(why, W_ERR_FULL, "no memory for %s's %zu rows", name, total);
         else {
-            ++t->answered[hit->copy];
-            out->dbc = &t->dbc[hit->copy];
-            out->row = hit->row;
-            out->source = t->copy[hit->copy].source;
-            out->from = t->from[hit->copy];
+            uint32_t n = 0;
+            for (int c = 0; c < t->ncopies; ++c)
+                for (uint32_t r = 0; r < t->dbc[c].rows; ++r) {
+                    if (c) {
+                        const TableIndex *hit = find(t, dbc_u32(&t->dbc[c], r, 1));
+                        if (!hit || hit->copy != c) continue;
+                    }
+                    t->scan[n++] = (TableAt){ &t->dbc[c], r, c };
+                }
+            t->nscan = n;
+            t->scanned = 1;
         }
     }
+    if (!rc) { out->at = t->scan; out->n = t->nscan; out->ncopies = t->ncopies; }
     pthread_mutex_unlock(&ts->lock);
     return rc;
 }
@@ -200,6 +307,8 @@ void tables_report(Tables *ts, FILE *to)
         if (t->state < 0) fprintf(to, " not read: %s", t->fail.text);
         for (int c = 0; c < t->ncopies; ++c)
             fprintf(to, "%s %s %s (%u; %u)", c ? "," : "", asset_source_name(t->copy[c].source), t->from[c], t->dbc[c].rows, t->answered[c]);
+        if (t->nmade || t->refused) fprintf(to, "; %d placeholder row%s", t->nmade, t->nmade == 1 ? "" : "s");
+        if (t->refused) fprintf(to, " (%u refused by strict mode)", t->refused);
         fprintf(to, "\n");
     }
     pthread_mutex_unlock(&ts->lock);

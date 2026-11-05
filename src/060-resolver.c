@@ -594,6 +594,22 @@ WErr asset_stand_in(Resolver *r, const char *logical, AssetKind kind, AssetAnswe
 }
 /* }}} */
 
+/* {{{ asset_row_stand_in: a table's missing row, said and counted as a placeholder */
+WErr asset_row_stand_in(Resolver *r, const char *table, uint32_t id, WWhy *why)
+{
+    if (!r) return w_fail(why, W_ERR_NOT_FOUND, "no row %u in %s, and no resolver to stand a placeholder in", id, table ? table : "(no table)");
+    pthread_mutex_lock(&r->lock);
+    ++r->counts.placeholder_answers;
+    pthread_mutex_unlock(&r->lock);
+    if (r->strict) {
+        fprintf(r->log, "assets: ERROR: no place's %s has row %u; strict mode (assetsStrict) refuses a placeholder row\n", table, id);
+        return w_fail(why, W_ERR_NOT_FOUND, "no place's %s has row %u, and strict mode refuses a placeholder row", table, id);
+    }
+    fprintf(r->log, "assets: WARNING: no place's %s has row %u; a placeholder row stands in (its number, every other field 0)\n", table, id);
+    return W_OK;
+}
+/* }}} */
+
 /* {{{ resolver_wc3 */
 const char *resolver_wc3(const Resolver *r) { return r && r->has_wc3 ? r->wc3_folder : NULL; }
 const char *resolver_baseline(const Resolver *r) { return r && r->has_baseline ? r->baseline.folder : NULL; }

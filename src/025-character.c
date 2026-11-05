@@ -6,6 +6,7 @@
 #include "013-errors.h"
 
 #include "016-dbc.h"
+#include "074-tables.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,20 +16,32 @@
 /* {{{ static table, file: every file through the resolver when one is
  * open (a test-map run: packs, the server's folders, the map's own
  * folder, the archives, the baseline set), else the archives alone
- * (1109 step 1m). A table is read whole, the first place's copy: these
- * are scanned by race, sex and choice, not asked by number (074's per-row
- * merge asks by number). Never a placeholder: a character's tables and
- * pictures are its own, and a missing one is said by its reader. */
-static WErr table(Resolver *assets, MpqChain *archives, const char *name, AssetAnswer *a, Dbc *d, WWhy *why)
+ * (1109 step 1m). A table is searched by race, sex and choice, not asked
+ * by number, so it is read as 074's list for a search: the first place's
+ * rows, then each later place's rows of numbers no earlier place has
+ * (1109 step 1q, decision 128: a converted map's rows win a search, and
+ * the archives' others are still found). The tables are read for each
+ * call and let go after it, as the table alone was before. Never a
+ * placeholder: a character's tables and pictures are its own, and a
+ * missing one is said by its reader. */
+typedef struct { Tables *ts; TableScan s; } Scan;
+static WErr table(Resolver *assets, MpqChain *archives, const char *name, Scan *d, WWhy *why)
 {
-    char path[200];
-    snprintf(path, sizeof path, "DBFilesClient\\%s.dbc", name);
+    memset(d, 0, sizeof *d);
+    d->ts = tables_new(assets, archives);
     WWhy inner;
-    WErr rc = asset_read(assets, archives, path, ASSET_TABLE, a, &inner);
-    if (rc) return w_fail(why, rc, "%s: %s", name, rc == W_ERR_NOT_FOUND ? (assets ? "in no place (no install, and not in the map's folder or the baseline set)" : "not in the archives") : inner.text);
-    if (dbc_open(d, a->data, a->len, &inner)) { asset_answer_free(a); return w_fail(why, inner.code, "%s: %s", name, inner.text); }
+    WErr rc = d->ts ? tables_scan(d->ts, name, &d->s, &inner) : w_fail(&inner, W_ERR_FULL, "no memory for the tables");
+    if (rc) {
+        tables_free(d->ts);
+        memset(d, 0, sizeof *d);
+        return w_fail(why, rc, "%s: %s", name, rc == W_ERR_NOT_FOUND ? (assets ? "in no place (no install, and not in the map's folder or the baseline set)" : "not in the archives") : inner.text);
+    }
     return W_OK;
 }
+static void scan_free(Scan *d) { tables_free(d->ts); memset(d, 0, sizeof *d); }
+/* the k-th row's field f (from 1), and its text */
+static uint32_t u32(const Scan *d, uint32_t k, uint32_t f) { return dbc_u32(d->s.at[k].dbc, d->s.at[k].row, f); }
+static const char *text(const Scan *d, uint32_t k, uint32_t f) { return dbc_text(d->s.at[k].dbc, d->s.at[k].row, f); }
 /* }}} */
 
 /* {{{ races: ChrRaces ids and their model folder names */
@@ -101,16 +114,15 @@ static WErr bare_pieces(Resolver *assets, MpqChain *archives, const CharacterLoo
 {
     for (int g = 0; g < 20; ++g) variant[g] = 1;
     variant[7] = 2;
-    AssetAnswer t;
-    Dbc d;
-    if (table(assets, archives, "CharacterFacialHairStyles", &t, &d, why)) return why->code;
+    Scan d;
+    if (table(assets, archives, "CharacterFacialHairStyles", &d, why)) return why->code;
     int found = 0;
     int choice = look->facial_hair;
     for (int pass = 0; pass < 2 && !found; ++pass) {
-        for (uint32_t r = 0; r < d.rows && !found; ++r) {
-            if ((int)dbc_u32(&d, r, 1) != look->race || (int)dbc_u32(&d, r, 2) != look->sex || (int)dbc_u32(&d, r, 3) != choice) continue;
+        for (uint32_t r = 0; r < d.s.n && !found; ++r) {
+            if ((int)u32(&d, r, 1) != look->race || (int)u32(&d, r, 2) != look->sex || (int)u32(&d, r, 3) != choice) continue;
             static const int GROUP[5] = { 1, 3, 2, 16, 17 };
-            for (int i = 0; i < 5; ++i) variant[GROUP[i]] = (int)dbc_u32(&d, r, 4 + (uint32_t)i);
+            for (int i = 0; i < 5; ++i) variant[GROUP[i]] = (int)u32(&d, r, 4 + (uint32_t)i);
             found = 1;
         }
         if (found || !look->npc || choice == 0) break;
@@ -126,7 +138,7 @@ static WErr bare_pieces(Resolver *assets, MpqChain *archives, const CharacterLoo
         }
         choice = 0;
     }
-    asset_answer_free(&t);
+    scan_free(&d);
     if (!found) { w_fail(why, W_ERR_CORRUPT, "no facial-hair choice %d for race %d sex %d in CharacterFacialHairStyles", look->facial_hair, look->race, look->sex); return why->code; }
     return 0;
 }
@@ -190,18 +202,17 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
     int any = 0;
     for (int s = 0; s < SLOT_COUNT; ++s) any |= look->items[s] != 0;
     if (!any) return 0;
-    AssetAnswer t;
-    Dbc d;
+    Scan d;
     WWhy w2;
-    if (table(assets, archives, "ItemDisplayInfo", &t, &d, why)) return why->code;
+    if (table(assets, archives, "ItemDisplayInfo", &d, why)) return why->code;
     int variant[20];
     for (int g = 0; g < 20; ++g) variant[g] = -1;
     for (int s = 0; s < SLOT_COUNT; ++s) {
         if (!look->items[s]) continue;
         int row = -1;
-        for (uint32_t r = 0; r < d.rows; ++r) if ((int)dbc_u32(&d, r, 1) == look->items[s]) { row = (int)r; break; }
+        for (uint32_t r = 0; r < d.s.n; ++r) if ((int)u32(&d, r, 1) == look->items[s]) { row = (int)r; break; }
         if (row < 0) { fprintf(stderr, "character: no item look %d in ItemDisplayInfo; slot %d is left bare\n", look->items[s], s); continue; }
-        int gg[3] = { (int)dbc_u32(&d, (uint32_t)row, 8), (int)dbc_u32(&d, (uint32_t)row, 9), (int)dbc_u32(&d, (uint32_t)row, 10) };
+        int gg[3] = { (int)u32(&d, (uint32_t)row, 8), (int)u32(&d, (uint32_t)row, 9), (int)u32(&d, (uint32_t)row, 10) };
         switch (s) {
             case SLOT_SHIRT: case SLOT_CHEST:
                 variant[8] = 1 + gg[0]; variant[10] = 1 + gg[1];
@@ -221,7 +232,7 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
         }
         /* the region pictures, the wearer's sex first, then either sex */
         for (int r = 0; r < 8; ++r) {
-            const char *name = dbc_text(&d, (uint32_t)row, (uint32_t)ITEM_REGION[r].field);
+            const char *name = text(&d, (uint32_t)row, (uint32_t)ITEM_REGION[r].field);
             if (!name || !name[0]) continue;
             char path[300];
             BlpImage img;
@@ -232,7 +243,7 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
                 got = picture(assets, archives, path, &img, &w2);
             }
             if (got == W_ERR_NOT_FOUND) { fprintf(stderr, "character: item look %d's %s picture %s is in no archive; left unpainted\n", look->items[s], ITEM_REGION[r].folder, name); ++out->items_unpainted; continue; }
-            if (got) { asset_answer_free(&t); w_fail(why, w2.code, "%s", w2.text); return why->code; }
+            if (got) { scan_free(&d); w_fail(why, w2.code, "%s", w2.text); return why->code; }
             paste(out->skin.rgba, out->skin.width, &img, REGION[ITEM_REGION[r].region], k);
             blp_free(&img);
         }
@@ -242,11 +253,11 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
     for (int s = SLOT_HEAD; s < SLOT_COUNT; ++s) {
         if (!look->items[s]) continue;
         int row = -1;
-        for (uint32_t r = 0; r < d.rows; ++r) if ((int)dbc_u32(&d, r, 1) == look->items[s]) { row = (int)r; break; }
+        for (uint32_t r = 0; r < d.s.n; ++r) if ((int)u32(&d, r, 1) == look->items[s]) { row = (int)r; break; }
         if (row < 0) continue;                                /* said above */
         char base[260];
-        const char *m0 = dbc_text(&d, (uint32_t)row, 2), *m1 = dbc_text(&d, (uint32_t)row, 3);
-        const char *p0 = dbc_text(&d, (uint32_t)row, 4), *p1 = dbc_text(&d, (uint32_t)row, 5);
+        const char *m0 = text(&d, (uint32_t)row, 2), *m1 = text(&d, (uint32_t)row, 3);
+        const char *p0 = text(&d, (uint32_t)row, 4), *p1 = text(&d, (uint32_t)row, 5);
         #define STRIP(dst, src) do { snprintf(dst, sizeof dst, "%s", src); char *dot_ = strrchr(dst, '.'); if (dot_) *dot_ = '\0'; } while (0)
         #define HANG(folder, name, pic, pt) do { if ((name)[0] && out->nattached < 6) { \
                 CharacterAttachment *a_ = &out->attached[out->nattached++]; \
@@ -266,24 +277,23 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
             /* what the helm hides (HelmetGeosetVisData: 2 hair, 3-5 facial
              * hair groups 1-3, 6 ears; each a mask of races, bit race - 1),
              * the row named by the look's field 14 (men) or 15 (women) */
-            uint32_t vis = dbc_u32(&d, (uint32_t)row, look->sex == 1 ? 15 : 14);
-            AssetAnswer vt = { 0 };
-            Dbc vd;
+            uint32_t vis = u32(&d, (uint32_t)row, look->sex == 1 ? 15 : 14);
+            Scan vd = { 0 };
             WWhy none;
-            if (vis && !table(assets, archives, "HelmetGeosetVisData", &vt, &vd, &none))
-                for (uint32_t r = 0; r < vd.rows; ++r) {
-                    if (dbc_u32(&vd, r, 1) != vis) continue;
+            if (vis && !table(assets, archives, "HelmetGeosetVisData", &vd, &none))
+                for (uint32_t r = 0; r < vd.s.n; ++r) {
+                    if (u32(&vd, r, 1) != vis) continue;
                     uint32_t bit = 1u << (look->race - 1);
                     static const int GROUP[5] = { 0, 1, 2, 3, 7 };
                     for (int k = 0; k < 5; ++k) {
-                        if (!(dbc_u32(&vd, r, 2 + (uint32_t)k) & bit)) continue;
+                        if (!(u32(&vd, r, 2 + (uint32_t)k) & bit)) continue;
                         for (uint32_t i = 0; i < out->model.npieces; ++i) {
                             uint32_t id = out->model.pieces[i].id;
                             if ((GROUP[k] == 0 && id > 0 && id < 100) || (GROUP[k] > 0 && id / 100 == (uint32_t)GROUP[k])) out->shown[i] = 0;
                         }
                     }
                 }
-            asset_answer_free(&vt);
+            scan_free(&vd);
         }
         if (s == SLOT_SHOULDERS) { HANG("Shoulder", m0, p0, 6); HANG("Shoulder", m1, p1, 5); }
         if (s == SLOT_MAIN_HAND) HANG("Weapon", m0, p0, 1);
@@ -296,12 +306,12 @@ static WErr wear(Resolver *assets, MpqChain *archives, const CharacterLook *look
             snprintf(path, sizeof path, "Item\\ObjectComponents\\Cape\\%.200s.blp", p0);
             int got = picture(assets, archives, path, &out->cape, &w2);
             if (got == W_ERR_NOT_FOUND) fprintf(stderr, "character: the cloak's picture %s is in no archive\n", path);
-            else if (got) { asset_answer_free(&t); w_fail(why, w2.code, "%s", w2.text); return why->code; }
+            else if (got) { scan_free(&d); w_fail(why, w2.code, "%s", w2.text); return why->code; }
         }
         #undef HANG
         #undef STRIP
     }
-    asset_answer_free(&t);
+    scan_free(&d);
     /* the pieces: each chosen group shows its variant alone */
     for (int g = 1; g < 20; ++g) {
         if (variant[g] < 0) continue;
@@ -341,21 +351,20 @@ WErr character_start_outfit(Resolver *assets, MpqChain *archives, int race, int 
     };
     static const int HAS_SLOT[27] = { [1] = 1, [3] = 1, [4] = 1, [5] = 1, [20] = 1, [6] = 1, [7] = 1, [8] = 1, [9] = 1, [10] = 1, [16] = 1, [19] = 1,
                                       [13] = 1, [17] = 1, [21] = 1, [14] = 1, [22] = 1, [23] = 1 };
-    AssetAnswer t;
-    Dbc d;
-    if (table(assets, archives, "CharStartOutfit", &t, &d, why)) return why->code;
+    Scan d;
+    if (table(assets, archives, "CharStartOutfit", &d, why)) return why->code;
     int found = 0;
-    for (uint32_t r = 0; r < d.rows && !found; ++r) {
-        uint32_t packed = dbc_u32(&d, r, 2);              /* race, class, sex, outfit: a byte each, lowest first */
+    for (uint32_t r = 0; r < d.s.n && !found; ++r) {
+        uint32_t packed = u32(&d, r, 2);              /* race, class, sex, outfit: a byte each, lowest first */
         if ((int)(packed & 0xff) != race || (int)(packed >> 8 & 0xff) != class_id || (int)(packed >> 16 & 0xff) != sex) continue;
         found = 1;
         for (uint32_t k = 0; k < 24; ++k) {
-            uint32_t look = dbc_u32(&d, r, 27 + k), kind = dbc_u32(&d, r, 51 + k);
+            uint32_t look = u32(&d, r, 27 + k), kind = u32(&d, r, 51 + k);
             if (look == 0 || look == 0xffffffffu || kind >= 27 || !HAS_SLOT[kind]) continue;
             items[SLOT_OF[kind]] = (int)look;
         }
     }
-    asset_answer_free(&t);
+    scan_free(&d);
     if (!found) { w_fail(why, W_ERR_CORRUPT, "no starting outfit for race %d class %d sex %d in CharStartOutfit", race, class_id, sex); return why->code; }
     return 0;
 }
@@ -392,19 +401,18 @@ int character_wear_text(int items[SLOT_COUNT], const char *text, char *bad, int 
  * (W_ERR_NOT_FOUND too: an item that is only ever worn, never held). */
 WErr character_item_icon(Resolver *assets, MpqChain *archives, int look, char *path, size_t path_len, WWhy *why)
 {
-    AssetAnswer t;
-    Dbc d;
-    if (table(assets, archives, "ItemDisplayInfo", &t, &d, why)) return why->code;
+    Scan d;
+    if (table(assets, archives, "ItemDisplayInfo", &d, why)) return why->code;
     int row = -1;
-    for (uint32_t r = 0; r < d.rows; ++r) if ((int)dbc_u32(&d, r, 1) == look) { row = (int)r; break; }
+    for (uint32_t r = 0; r < d.s.n; ++r) if ((int)u32(&d, r, 1) == look) { row = (int)r; break; }
     /* no row: the look is unknown here; a row: its icon name, which may be empty */
     /* the name lies inside the table's bytes: the answer is settled before they are freed */
-    const char *name = row < 0 ? NULL : dbc_text(&d, (uint32_t)row, 6);
+    const char *name = row < 0 ? NULL : text(&d, (uint32_t)row, 6);
     WErr rc = W_OK;
     if (row < 0) rc = w_fail(why, W_ERR_NOT_FOUND, "no item look %d in ItemDisplayInfo", look);
     else if (!name[0]) rc = w_fail(why, W_ERR_NOT_FOUND, "item look %d names no icon", look);
     else snprintf(path, path_len, "Interface\\Icons\\%s.blp", name);
-    asset_answer_free(&t);
+    scan_free(&d);
     return rc;
 }
 /* }}} */
@@ -446,14 +454,17 @@ static WErr build(Resolver *assets, MpqChain *archives, const CharacterLook *loo
     if (rc) { w_fail(why, w2.code, "%s: %s", base, w2.text); return why->code; }
 
     /* the hair style's piece (CharHairGeosets: ID, race, sex, variation, geoset, ...) */
-    AssetAnswer t;
-    Dbc d;
-    if (table(assets, archives, "CharHairGeosets", &t, &d, why)) return why->code;
+    Scan d;
+    if (table(assets, archives, "CharHairGeosets", &d, why)) return why->code;
     long hair_piece = -1;
-    for (uint32_t r = 0; r < d.rows; ++r)
-        if ((int)dbc_u32(&d, r, 2) == look->race && (int)dbc_u32(&d, r, 3) == look->sex && (int)dbc_u32(&d, r, 4) == look->hair_style)
-            hair_piece = dbc_u32(&d, r, 5);
-    asset_answer_free(&t);
+    int hair_copy = -1;                       /* the last match, as before, but within the first place that has one */
+    for (uint32_t r = 0; r < d.s.n; ++r)
+        if ((int)u32(&d, r, 2) == look->race && (int)u32(&d, r, 3) == look->sex && (int)u32(&d, r, 4) == look->hair_style) {
+            if (hair_copy >= 0 && d.s.at[r].copy != hair_copy) break;
+            hair_piece = u32(&d, r, 5);
+            hair_copy = d.s.at[r].copy;
+        }
+    scan_free(&d);
     if (hair_piece < 0) { w_fail(why, W_ERR_CORRUPT, "no hair style %d for race %d sex %d", look->hair_style, look->race, look->sex); return why->code; }
 
     int variant[20];
@@ -467,12 +478,12 @@ static WErr build(Resolver *assets, MpqChain *archives, const CharacterLook *loo
     /* the pictures: CharSections rows are ID, race, sex, section (0 skin,
      * 1 face, 2 facial hair, 3 hair, 4 underwear), three texture names,
      * flags, variation, colour */
-    if (table(assets, archives, "CharSections", &t, &d, why)) return why->code;
+    if (table(assets, archives, "CharSections", &d, why)) return why->code;
     char sect[5][3][260];
-    int have[5] = { 0 };
-    for (uint32_t r = 0; r < d.rows; ++r) {
-        if ((int)dbc_u32(&d, r, 2) != look->race || (int)dbc_u32(&d, r, 3) != look->sex) continue;
-        int s = (int)dbc_u32(&d, r, 4), variation = (int)dbc_u32(&d, r, 9), colour = (int)dbc_u32(&d, r, 10);
+    int have[5] = { 0 }, have_copy[5] = { 0 };   /* the last match, as before, but within the first place that has one */
+    for (uint32_t r = 0; r < d.s.n; ++r) {
+        if ((int)u32(&d, r, 2) != look->race || (int)u32(&d, r, 3) != look->sex) continue;
+        int s = (int)u32(&d, r, 4), variation = (int)u32(&d, r, 9), colour = (int)u32(&d, r, 10);
         int want_v, want_c;
         switch (s) {                          /* which variation and colour each section wants */
             case 0: want_v = 0;                want_c = look->skin;       break;
@@ -481,12 +492,13 @@ static WErr build(Resolver *assets, MpqChain *archives, const CharacterLook *loo
             case 4: want_v = 0;                want_c = look->skin;       break;
             default: continue;
         }
-        if (variation == want_v && colour == want_c) {
-            for (int k = 0; k < 3; ++k) snprintf(sect[s][k], 260, "%s", dbc_text(&d, r, 5 + k));
+        if (variation == want_v && colour == want_c && !(have[s] && d.s.at[r].copy != have_copy[s])) {
+            for (int k = 0; k < 3; ++k) snprintf(sect[s][k], 260, "%s", text(&d, r, 5 + k));
             have[s] = 1;
+            have_copy[s] = d.s.at[r].copy;
         }
     }
-    asset_answer_free(&t);
+    scan_free(&d);
     if (!have[0]) { w_fail(why, W_ERR_CORRUPT, "no skin colour %d", look->skin); return why->code; }
 
     /* the skin sheet: body, then face, scalp, underwear on top. The body
