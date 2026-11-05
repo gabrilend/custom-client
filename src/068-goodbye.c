@@ -10,6 +10,7 @@
 #include "068-goodbye.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@
 
 /* {{{ the run's state */
 #define PATH_ROOM 600                 /* a receipt's path, and room left for the temporary name's ending */
+typedef struct { char name[GOODBYE_NAME_MAX + 1]; double value; } GoodbyeCount;
 struct Goodbye {
     char            receipt[PATH_ROOM];
     char            folder[PATH_ROOM];      /* the receipt's folder, where the temporary file goes */
@@ -27,6 +29,8 @@ struct Goodbye {
     struct timespec steady;           /* the steady clock, for the seconds */
     uint64_t        frames;
     int             written;
+    GoodbyeCount    counts[GOODBYE_COUNTS_MAX];   /* the run's own counts (a headless run's: 089), in the order first given */
+    int             ncounts;
 };
 
 static const char *const REASONS[GOODBYE_REASON_COUNT] = { "closed", "lost-connection", "error" };
@@ -79,6 +83,26 @@ void goodbye_free(Goodbye *g)
 void goodbye_frame(Goodbye *g)
 {
     if (g) ++g->frames;
+}
+/* }}} */
+
+/* {{{ goodbye_count */
+static const char *const OWN_KEYS[] = { "format", "map", "started", "ended", "seconds", "frames", "reason", "why", NULL };
+WErr goodbye_count(Goodbye *g, const char *name, double value, WWhy *why)
+{
+    if (!g) return W_OK;
+    size_t n = name ? strlen(name) : 0;
+    int good = n > 0 && n <= GOODBYE_NAME_MAX && name[0] >= 'a' && name[0] <= 'z';
+    for (size_t i = 0; good && i < n; ++i) good = (name[i] >= 'a' && name[i] <= 'z') || (name[i] >= '0' && name[i] <= '9') || name[i] == '_';
+    if (!good) return w_fail(why, W_ERR_REFUSED, "a receipt's count is named in small letters, digits and _, a letter first, at most %d characters; \"%.40s\" isn't that", GOODBYE_NAME_MAX, name ? name : "");
+    for (int k = 0; OWN_KEYS[k]; ++k) if (!strcmp(name, OWN_KEYS[k])) return w_fail(why, W_ERR_REFUSED, "\"%s\" is the receipt's own field, not a count", name);
+    if (!isfinite(value)) return w_fail(why, W_ERR_REFUSED, "the receipt's count %s isn't a finite number", name);
+    if (g->written) return w_fail(why, W_ERR_REFUSED, "the goodbye receipt %s was written already", g->receipt);
+    for (int k = 0; k < g->ncounts; ++k) if (!strcmp(g->counts[k].name, name)) { g->counts[k].value = value; return W_OK; }
+    if (g->ncounts == GOODBYE_COUNTS_MAX) return w_fail(why, W_ERR_FULL, "the receipt holds %d counts at most; %s is one more", GOODBYE_COUNTS_MAX, name);
+    snprintf(g->counts[g->ncounts].name, sizeof g->counts[g->ncounts].name, "%s", name);
+    g->counts[g->ncounts++].value = value;
+    return W_OK;
 }
 /* }}} */
 
@@ -137,6 +161,8 @@ WErr goodbye_end(Goodbye *g, GoodbyeReason reason, const char *why_text, WWhy *w
         lua_string(f, why_text && *why_text ? why_text : "the client stopped on an error, with no sentence saying what it was");
         fprintf(f, ",\n");
     }
+    /* the run's own counts, each exactly (17 digits read back as the same double) */
+    for (int k = 0; k < g->ncounts; ++k) fprintf(f, "    %s = %.17g,\n", g->counts[k].name, g->counts[k].value == 0 ? 0.0 : g->counts[k].value);
     fprintf(f, "}\n");
     int bad = fflush(f) || ferror(f) || fsync(fileno(f));
     int e = errno;

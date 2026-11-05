@@ -29,12 +29,18 @@ strings with Lua's escapes, numbers, one table, a comment). Format 1:
       frames  = 9873,                        -- frames drawn
       reason  = "closed",                    -- closed, lost-connection or error
       why     = "...",                       -- only with error: the sentence
+      steps   = 640,                         -- a run's own counts, when it gives any
   }
 
   closed           the player closed the window or pressed Escape
   lost-connection  the server went away (Phase 5's 609; nothing ends so yet)
   error            the client stopped on something it couldn't do, said
                    in `why` (a missing password, a map folder not there ...)
+
+After those, a run may add its own counts, each a name and a number
+(goodbye_count): a headless run (089-headless-run.h) gives how many
+steps it moved, where she ended, which looks it found ... A reader that
+doesn't know a count passes it over, so the format stays 1.
 
 Seconds come from the steady clock, so a change of the machine's
 clock during the run doesn't change them; started and ended are the
@@ -65,5 +71,13 @@ Window-free: in the test program and the executable.
   is removed again; an earlier receipt stays as it was); W_ERR_REFUSED for
   a second call or a reason outside the list. W_OK and nothing written
   with a NULL handle.
+- `WErr goodbye_count(Goodbye *g, const char *name, double value, WWhy *why);`
+  A count of the run's own for the receipt, written after its fields as
+  `name = value` (the value exactly: %.17g). `name`: small letters,
+  digits and _, a letter first, at most GOODBYE_NAME_MAX characters, and
+  not one of the receipt's own fields. A name given again keeps its place
+  and takes the new value. W_OK; W_ERR_REFUSED for a name as above, a
+  value that isn't finite, or a receipt already written; W_ERR_FULL past
+  GOODBYE_COUNTS_MAX names. W_OK and nothing kept with a NULL handle.
 - `void goodbye_utc(time_t t, char out[21]);`
   `t` as the receipt writes it, "2026-11-04T20:31:07Z" (20 characters and the end).

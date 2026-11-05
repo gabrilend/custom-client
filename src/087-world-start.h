@@ -38,6 +38,17 @@
  * the server builds every map by one rule (1109, decision 92). */
 #define WORLD_START_SLOPE 60.0f
 
+/* Her, as every start makes her (shared by 043's window and 089's
+ * headless run, so both start her the same): facing the town's west side
+ * at Astranaar (radians, the game's: 0 north, rising west), 120% of the
+ * base speeds (the owner, 2026-10-04), a night-elf woman (ChrRaces 4,
+ * sex 1) in a fresh hunter's outfit (ChrClasses 3; CharStartOutfit). */
+#define WORLD_START_FACING 3.6
+#define WORLD_START_SPEED  1.2
+#define WORLD_HER_RACE     4
+#define WORLD_HER_SEX      1
+#define WORLD_HER_CLASS    3
+
 /* What the start is given:
  *   client      the original game's Data folder (its archives)
  *   maps        the server's maps folder (mmaps is beside it)

@@ -175,5 +175,18 @@ Crafters' start tiles reads 224 and 29 files with no install, where it
 read one before. A character that fails part way now lets go of what
 it made. Decisions 98 to 101 in 1109.
 
+2026-11-05: 1109's step 1n. A test map can run with no window:
+`--headless MOVES` opens the world as the client does, finds her figure
+and every creature's look, walks her through a fixed list of moves over
+the map's ground and water, and writes the goodbye receipt with what it
+found and where she ended, then exits (0, 1 on an error, 2 on a bad
+option). The project's moves are `tests/090-test-map-moves.lua`. Step
+5's check runs on it in the test program: the same build twice gives
+the same receipt but for its times, on War in the Plaguelands and
+Master Crafters, and other moves give another. The client binary
+itself was not run (no raylib here), nor two separate processes;
+models' floors and walls are left out of the headless world. Decisions
+102 to 110 in 1109.
+
 Created 2026-10-09, when the documentation site's progress chart showed this
 phase's issues with no progress table.

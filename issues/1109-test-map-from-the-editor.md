@@ -900,6 +900,73 @@ archive (before this step, its ground file alone). An ordinary run's
 reads are as before (no resolver: the archives alone); its checks
 against the archives were not run here (no client).
 
+**Step 1n is built** (2026-11-05, the same background work): a test map
+runs with no window, and step 5's check runs on it. Decisions 102 to
+110. The editor's side of F5 (step 2) is not here.
+
+- **The option (067):** `--headless MOVES`, a test-map option like
+  `--camera`: refused outside a test-map run, and with `--shot`
+  (decision 102).
+- **The moves (089, 090):** a Lua data file of format 1, read by 059's
+  data-only reader as `map.lua` is: `format`, an optional `name` and
+  `step` (seconds, 0.01 to 0.1, default 0.05), and `moves`, each
+  `{ hold = "forward left", seconds = 1.5, walking = true }`, holding
+  any of forward, back, left, right, strafe_left, strafe_right, jump
+  and swim_down. A field or key it doesn't have is refused by name and
+  line; at most 1000 moves and an hour of steps (decisions 103, 104).
+  The project's own list is `tests/090-test-map-moves.lua`: 14 moves,
+  24 seconds, 480 steps (a run, curves, jumps, turns, strafes, a walk,
+  standing).
+- **The run (089):** `headless_run` opens the world as 043 does
+  (`world_start_open`), finds her figure (her character from 025,
+  window-free, else the baseline set's stand-in) and each creature
+  look (088, read as 041 would), then steps the mover (029) with the
+  fixed step from the map's start, facing and speed as 043's (now
+  shared in 087: decision 110), over the map's ground and the water of
+  the tiles round her (each tile's ground file read through the
+  resolver for its water; no models' floors or walls: decision 105),
+  choosing her animation from the same keys as 043 (030; decision
+  106). Then the receipt (decision 107).
+- **The receipt (068):** `goodbye_count` adds named numbers after its
+  fields, exactly (`%.17g`), format still 1: moves, steps; her_stand_in,
+  her_vertices, her_bones, her_sequences, her_animation_changes,
+  her_animation; creature_spawns, creature_looks, looks_wc3, looks_game,
+  looks_stand_in, looks_character, looks_missing, looks_unreadable;
+  start_x/y/z, end_x/y/z, end_facing, distance, lowest_z, highest_z,
+  tiles, ground_files, steps_airborne, steps_swimming, steps_sliding,
+  steps_no_ground. `frames` stays 0 (nothing drawn); `reason` is
+  `closed` when the moves end, `error` with `why` when the start fails.
+  The client exits 0, 1 on an error, 2 on a bad option.
+- **043:** after the settings, a headless run hands its start to
+  `headless_run` and ends with its status; no window opens.
+  `scripts/run` passes `--headless` on, and its header says so.
+
+Checked (`tests/044-test-client.c`, in "a test-map start with no
+install"): the project's moves read (14, 480 steps); nine faulty move
+files refused, each naming what is wrong; a move shorter than a step
+takes one; the receipt's counts (exact, a name given again replacing
+its value, bad names and non-finite values refused, none after
+writing) and LuaJIT reading the counted receipt as the editor does;
+the option with and without a test map. With the real builds and no
+install, run twice on the same build (step 5, decision 108):
+
+- **War in the Plaguelands:** 480 steps, the stand-in for her, no
+  creatures (its list is empty), 125.7 yards, ending at (477.46, 72.38,
+  0.89), 47 steps in the air, none with no ground; the two receipts
+  the same but for their times.
+- **Master Crafters:** 480 steps, 316 creatures' 19 looks (1 its own
+  WC3 model, 18 the stand-in), 141.6 yards to (-511.03, -438.39, 4.17),
+  45 in the air; the two receipts the same.
+- Other moves give another receipt (the comparison finds the
+  difference), and a start that fails writes `error` naming what
+  stopped it, with no counts.
+
+Not checked: the client binary itself run headless (043 links raylib,
+which isn't here: its branch compiles under gcc and clang, and the
+test program runs the same `headless_run`), two separate processes
+compared (the test runs both in one), and a windowed run's moves (not
+repeatable: its steps follow the frame time; decision 108).
+
 Not built yet: a WC3
 model posed and animated (it stands in its rest pose; 402 step 4, PR
 #7), with its particles (403) and solid shape, or team-coloured (404:
@@ -1071,13 +1138,19 @@ return {
 1m. ~~Nothing in a test-map run past the resolver.~~ Done (2026-11-05):
    025's character and 034's read-ahead through it (decisions 98 to
    101).
+1n. ~~A headless test-map run.~~ Done (2026-11-05): `--headless MOVES`
+   (067, 089), the project's moves (`tests/090-test-map-moves.lua`),
+   the receipt's counts (068) (decisions 102 to 110).
 2. The editor's side (in world-edit-to-execute): F5 saves, converts,
    starts or reuses the local AzerothCore, launches this client with
    the option, and waits for the goodbye receipt.
 3. WC3 ground on the one mesh (302), then models (after 401 step 2).
 4. The RTS controls from 1101-1104.
 5. Check: the same map test-played twice gives the same receipt counts
-   for the same scripted input.
+   for the same scripted input. The client's side is built (step 1n:
+   a headless run twice on War in the Plaguelands and Master Crafters,
+   in the test program); the check through the editor's F5 waits on
+   step 2.
 
 ## Acceptance
 
@@ -1800,6 +1873,68 @@ return {
     creature list (035) and the settings (014), which are not the
     game's archives.
 
+## Decisions (2026-11-05, step 1n, answered here; the owner may overturn any)
+
+102. **`--headless MOVES` is a test-map option.** The headless run is
+    for checking a test map, so it is read with the test map's options
+    (067) and refused outside a test-map run, as `--camera` is. The
+    password is still required: a test-map run's contract is the
+    editor's, which always gives it, though nothing headless reads it.
+    `--shot` with it is refused (one draws, the other opens no window).
+103. **The moves are a Lua data file, format 1, strict.** The same
+    data-only Lua the client already reads (`map.lua`, manifests, the
+    converter's tables), so the editor can write one as it writes the
+    others. A field or key it doesn't have is refused by name and line
+    rather than passed over, so a misspelt move can't make two runs
+    look alike by doing nothing. The project's list lives in `tests/`,
+    numbered (090), beside the test program that uses it, as the other
+    tests' fixtures do.
+104. **A fixed step, 0.05 seconds by default; seconds rounded to whole
+    steps, at least one.** The `--shot` pictures' 20 steps a second.
+    A step is the same length every time, so the same moves give the
+    same path; at most 1000 moves and 72000 steps (an hour), so a
+    faulty file can't run for ever.
+105. **The headless world is the ground and the water.** Her ground's
+    heights (the server's map files, or the map's own ground files) and
+    the water of the tiles within one tile of her (each tile's ground
+    file read through the resolver for its liquids, as 043's tile load
+    files them). The floors and walls of doodads and buildings are left
+    out: they are built from the models by the drawing parts (042), so
+    a headless path can differ from a windowed one where she meets a
+    model. It needs no window and keeps every count to the map's own
+    ground.
+106. **Her figure and the creatures' looks as the window would find
+    them.** Her character from 025 (window-free), else the baseline
+    set's stand-in, its skeleton read for her animations, chosen each
+    step from the same keys as 043 (030, its own fixed seed); each
+    distinct creature look through 088 and read as 041 reads it (a
+    character look counted, not built: 041 builds those with the
+    window).
+107. **The receipt carries the counts as named numbers after its
+    fields; format stays 1.** The receipt is one flat table (the
+    editor reads it with LuaJIT), so each count is a field of its own,
+    written exactly (`%.17g`: read back as the same double); a reader
+    that doesn't know one passes it over, so no format change.
+    `frames` stays 0, since nothing is drawn; `reason` is `closed`
+    when the moves end (the run ended as asked) and `error` with `why`
+    when it can't start. Exit status 0 for a run whose moves ended, 1
+    for an error, 2 for a bad option, as the windowed client's start
+    already uses 1 and 2.
+108. **Step 5's check, client side: twice in the test program.** For
+    each build the tests are given, the project's moves run twice and
+    the two receipts must hold the same fields and values but for
+    `started`, `ended` and `seconds`; a third run with other moves must
+    differ, so the comparison can't pass by seeing nothing. Both runs
+    are in one process (the client binary needs raylib, not here);
+    each opens its own world, so nothing is shared but the code. A
+    windowed run is not compared: its steps follow the frame time.
+109. **The editor's side is not here.** F5 running the client headless,
+    or comparing its receipts, is world-edit-to-execute's (step 2).
+110. **Her start is shared.** Her facing (3.6 radians), speed (120%)
+    and look (a night-elf woman, a hunter's outfit) move from 043 into
+    087 (`WORLD_START_FACING`, `WORLD_START_SPEED`, `WORLD_HER_*`), so
+    the headless run starts her as the window does.
+
 ## Open questions
 
 1. ~~**Test-play: who runs the rules?**~~ Answered 2026-10-09: always a
@@ -1979,7 +2114,10 @@ return {
   `src/087-world-start.info.md` (the start out of the window),
   `src/088-figure-model.info.md` (which files a figure is made from),
   with 085, 041, 074, 026, 040 and 043. For step 1m:
-  `src/025-character.info.md` and `src/034-prefetch.info.md`.
+  `src/025-character.info.md` and `src/034-prefetch.info.md`. For step
+  1n: `src/089-headless-run.info.md` (the headless run and its moves),
+  `src/068-goodbye.info.md` (the receipt's counts), 067, 087, and
+  `tests/090-test-map-moves.lua`.
 - world-edit-to-execute's W02c (map registration and output forms,
   draft PR #243 there): writes the build folder read here.
 - [1108](./1108-phase-demo.md) (its 1101 camera, 1102 picking, 1103

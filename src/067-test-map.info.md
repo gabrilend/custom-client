@@ -10,7 +10,7 @@ folder, starts a local AzerothCore with it, and opens this client
 straight into that map, with no menus:
 
   w-client --test-map <folder> --receipt <file> [--camera <x>,<y>]
-           [--realm <host>:<port>] [--account <name>]
+           [--realm <host>:<port>] [--account <name>] [--headless <moves>]
 
 (and the client's own --maps and --client, which scripts/run adds).
 This reads those options and checks them before any window opens:
@@ -27,6 +27,10 @@ This reads those options and checks them before any window opens:
   --realm     the local AzerothCore's login server (default
               127.0.0.1:3724, its usual port)
   --account   the account to log in with
+  --headless  no window: the start, the figures' lookups and the
+              scripted moves in the file named (a Lua data file,
+              089-headless-run.h), then the receipt with their counts,
+              and the client ends (1109 step 1n)
 
 The password is never on the command line, where every user of the
 machine can read it: it is read from the environment variable
@@ -74,6 +78,8 @@ Window-free: in the test program and the executable.
 - `int test_map_realm_port(const TestMap *tm);`
 - `const char *test_map_account(const TestMap *tm);`
 - `const char *test_map_password(const TestMap *tm);`
+- `const char *test_map_headless(const TestMap *tm);`
+  --headless's moves file as given, "" when the run has a window.
 - `WErr test_map_place(const TestMap *tm, const Settings *st, const char *assets_dir, MpqChain *chain, ResolverPlace *out, WWhy *why);`
   Where the resolver looks for this run: the settings' place
   (resolver_place_from_settings, with `assets_dir` and `chain`), and the
