@@ -116,6 +116,7 @@ static WErr read_chunk(const unsigned char *s, size_t len, size_t at, int big_al
     c->iy = (int)u32(s, h + 8);
     c->nlayers = (int)u32(s, h + 12);
     c->holes = (uint16_t)u32(s, h + 60);
+    c->area = u32(s, h + 52);
     c->x = f32(s, h + 104);
     c->y = f32(s, h + 108);
     c->z = f32(s, h + 112);
@@ -182,6 +183,32 @@ static WErr read_chunk(const unsigned char *s, size_t len, size_t at, int big_al
     }
     #undef SUB
     return 0;
+}
+/* }}} */
+
+/* {{{ adt_read_areas */
+WErr adt_read_areas(const unsigned char *s, size_t len, AdtArea out[256], WWhy *why)
+{
+    memset(out, 0, sizeof(AdtArea) * 256);
+    unsigned char seen[256] = { 0 };
+    int n = 0;
+    for (size_t at = 0; at + 8 <= len; at += 8 + u32(s, at + 4)) {
+        size_t size = u32(s, at + 4), h = at + 8;
+        if (at + 8 + size > len) return w_fail(why, W_ERR_CORRUPT, "a block at byte %zu says it is %zu bytes, past the file's end (%zu)", at, size, len);
+        if (!is_tag(s, at, "MCNK")) continue;
+        if (size < 128) return w_fail(why, W_ERR_CORRUPT, "MCNK block at byte %zu is %zu bytes, less than its 128-byte header", at, size);
+        uint32_t ix = u32(s, h + 4), iy = u32(s, h + 8);
+        if (ix > 15 || iy > 15) return w_fail(why, W_ERR_CORRUPT, "MCNK at byte %zu: index (%u, %u) out of range", at, ix, iy);
+        int k = (int)(iy * 16 + ix);
+        if (seen[k]) return w_fail(why, W_ERR_CORRUPT, "MCNK at byte %zu: chunk (%u, %u) a second time", at, ix, iy);
+        seen[k] = 1;
+        out[k].x = f32(s, h + 104);
+        out[k].y = f32(s, h + 108);
+        out[k].area = u32(s, h + 52);
+        ++n;
+    }
+    if (n != 256) return w_fail(why, W_ERR_CORRUPT, "%d MCNK blocks, not 256", n);
+    return W_OK;
 }
 /* }}} */
 

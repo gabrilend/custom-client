@@ -118,12 +118,9 @@ Window-free (CORE: the test program and the executable).
   folder of the creature list (creatures-<map>.tsv; NULL or "" for
   none: the run counts no creatures).
 - `type HeadlessResult`
-  the light where she ends, at `hours` (026, through the tables; a
-  test map's own fog over it as the window draws it, 084): the light
-  whose colours weigh most (-1 none: the grey day), whether the light
-  tables are there, the fog's start and end (yards), its colour (the
-  window's clear colour) and the sky overhead, 0-1; the mode the fog
-  follows (026: 0, 1 or 2)
+  the area she stands in (103, 1109 step 1aa): at the start and the
+  end (its AreaTable id, 0 none), whether AreaTable names the end's,
+  and how often it changed on the way
 - `WErr headless_run(const HeadlessIn *in, Goodbye *bye, HeadlessResult *out, WWhy *why);`
   Runs it: the start (world_start_open), her figure (her character from
   025, else the baseline set's stand-in, 088), each creature's look

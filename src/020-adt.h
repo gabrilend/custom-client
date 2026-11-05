@@ -27,6 +27,10 @@
  *                                            size inside MCAL, which can be
  *                                            wrong in packed tiles)
  *   44 offset of MCSH (shadow)            48 MCSH's size
+ *   52 area: the AreaTable row the chunk stands in (1109 step 1aa: the
+ *      converter's writer, world-edit-to-execute's src/wowbuild/adt.lua,
+ *      puts its map's AreaTable id there in every chunk; that the
+ *      original's own files mean the same there is recalled)
  *   60 holes (16 bits: 4 x 4, each bit hiding 2 x 2 cells)
  *  104 position: world x (north), world y (west), base height
  *  116 offset of MCCV (colour tints; present when flags & 0x40)
@@ -81,6 +85,7 @@
  *                and the height the 145 heights are added to
  *   heights[145] float: above z, MCVT order
  *   holes        uint16_t: MCNK's low-resolution hole bits
+ *   area         uint32_t: MCNK's area (an AreaTable id; 0: none said)
  *   nlayers      int, 1-4
  *   tex[4]       int: each layer's picture number (into textures)
  *   alpha[4][4096] uint8_t: each layer's strength, 0-255, row by row
@@ -126,6 +131,7 @@ typedef struct {
     float    x, y, z;
     float    heights[145];
     uint16_t holes;
+    uint32_t area;
     int      nlayers;
     int      tex[4];
     uint8_t  alpha[4][4096];
@@ -181,6 +187,17 @@ void adt_place_read(const unsigned char *e, int doodad, AdtPlace *p);
  * allocate it, don't put it on the stack. */
 WErr adt_read(const unsigned char *s, size_t len, int big_alpha, AdtTile *out, WWhy *why);
 void adt_free(AdtTile *t);
+
+/* Each chunk's area alone, without the rest of the tile (no blend maps,
+ * so no WDT is needed; 103 asks this when she enters a tile). By chunk,
+ * row (index y) * 16 + column (index x), as adt_read files them:
+ *   x, y   the chunk's north-west corner (MCNK offset 104), world yards
+ *   area   its AreaTable id (MCNK offset 52; 0: none said)
+ * W_OK; W_ERR_CORRUPT, with why, when a block runs past the file's end,
+ * a chunk's index is out of range, or there aren't 256 chunks, each
+ * once. */
+typedef struct { float x, y; uint32_t area; } AdtArea;
+WErr adt_read_areas(const unsigned char *s, size_t len, AdtArea out[256], WWhy *why);
 
 /* A placement's turn, size and position as a 4 x 4 matrix, laid out as
  * Raylib's Matrix is (m[0], m[4], m[8], m[12] the first row; a point p

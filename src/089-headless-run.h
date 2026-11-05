@@ -164,6 +164,10 @@ typedef struct {
     double weather_grade, storm;
     double light_hours, fog_start, fog_end, fog_red, fog_green, fog_blue, sky_red, sky_green, sky_blue;
     int    loading_screen, loading_screen_width, loading_screen_height, loading_screen_levels;
+    /* the area she stands in (103, 1109 step 1aa): at the start and the
+     * end (its AreaTable id, 0 none), whether AreaTable names the end's,
+     * and how often it changed on the way */
+    int    area_start, area_end, area_named, area_changes;
 } HeadlessResult;
 
 /* Runs it: the start (world_start_open), her figure (her character from
